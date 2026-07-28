@@ -1,7 +1,10 @@
 //! # thermark
 //!
-//! Talk to pocket thermal label printers (B1, B21, D11, …) over Bluetooth LE or USB
-//! serial without the official app.
+//! Local **sticker printing** for pocket thermal label printers (B1, B21, D11, …)
+//! over Bluetooth LE or USB serial — no vendor app, no cloud.
+//!
+//! Typical jobs: QR + text link stickers, inventory/bin tags, name badges,
+//! calibration patterns, and dithered photo stickers at real millimetre sizes.
 //!
 //! ## Features
 //!

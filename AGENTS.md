@@ -4,7 +4,9 @@ Guidance for coding agents working in this repository.
 
 ## What this project is
 
-**`thermark`** — Rust library + CLI for **local thermal label printing** over **Bluetooth LE** (and USB serial) **without** vendor desktop apps.
+**`thermark`** — local, scriptable **sticker printing** for pocket thermal printers over **Bluetooth LE** (and USB serial), without vendor apps or cloud.
+
+Positioning: **terminal-first labels people actually stick on things** — package QR links, inventory bins, name badges, calibrated full-bleed, photo stickers — exact mm geometry, offline.
 
 - Crate / binary: **`thermark`**
 - Do **not** put vendor brand names in the package or product name
@@ -28,18 +30,21 @@ macOS CoreBluetooth uses **UUID** device ids, not classic MACs.
 cargo build --release
 cargo test
 cargo test --lib --no-default-features
-cargo test --test fixtures_readme   # README preview PNGs in fixtures/
+cargo test --test fixtures_readme   # sticker fixtures + boundary checks
 
 # One-time setup (full BLE advertising name → config.json)
 ./target/release/thermark scan --save
 ./target/release/thermark doctor --use-config
+
+# Realistic stickers (see fixtures/ + README)
+./target/release/thermark qr --url "https://example.com/o/1042" \
+  --text $'ORDER #1042\nShip by Fri\nPriority' --font-name helvetica --label 50x30
+./target/release/thermark print -i fixtures/photo_sticker.jpg \
+  --label 50x30 --no-fill --margin 16 --dither -d 3
 ./target/release/thermark calibrate --label 50x30
-./target/release/thermark qr --url "https://example.com" \
-  --text $'Helvetica\nABC\n123' --font-name helvetica --label 50x30
-./target/release/thermark print -i fixtures/test_label.png --label 50x30
 ```
 
-README shows the same `fixtures/*.png` images; each is locked by `tests/fixtures_readme.rs`.  
+Fixtures: `sticker_link`, `sticker_inventory`, `sticker_name`, `sticker_calibrate`, `photo_sticker` — locked by `tests/fixtures_readme.rs`.  
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
 Experimental print tasks need `--allow-experimental`.
 

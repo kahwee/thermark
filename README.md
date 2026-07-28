@@ -1,21 +1,30 @@
 # thermark
 
-Local thermal label printing over **Bluetooth LE** or **USB serial** — no vendor app.
+**Print real stickers from your terminal** — links, inventory tags, name badges, photos — on a pocket thermal label printer over **Bluetooth LE** (or USB). No vendor app, no cloud, no account.
 
-Print **QR + text**, calibration patterns, and rasters at real millimetres (**8 px/mm**). Built and hardware-tested for **B1-class** printers (50×30 mm → **384×240 px**).
+Built for B1-class 50×30 mm labels (**384×240 px** at 8 px/mm). Hardware-tested on a real B1.
+
+| Why people use it | What you get |
+|-------------------|--------------|
+| Share a URL on a package or laptop | QR + short text, one command |
+| Label bins, cables, samples | Dense multi-line tags that still scan |
+| Desk / event name stickers | Clean QR + identity lines |
+| Photo stickers (1-bit thermal) | Centered fit, margins, dither |
+| Automate / script | Plain CLI + Rust library, offline |
 
 | Model | Task | Status |
 |-------|------|--------|
 | **B1** | `b1` | **Tested** |
-| B21 / B18 | `b21v1` | Experimental — needs `--allow-experimental` |
-| D11 / D110 | `d110` | Experimental — needs `--allow-experimental` |
-| other | `simple` | Experimental — needs `--allow-experimental` |
+| B21 / B18 | `b21v1` | Experimental (`--allow-experimental`) |
+| D11 / D110 | `d110` | Experimental |
+| other | `simple` | Experimental |
 
-## Build
+## Install / build
 
 ```bash
-cargo build --release   # → target/release/thermark
+cargo build --release          # → target/release/thermark
 cargo test
+cargo test --lib --no-default-features
 ```
 
 | Feature | Default | Enables |
@@ -23,121 +32,101 @@ cargo test
 | `ble` | yes | Bluetooth LE |
 | `serial` | yes | USB serial |
 
-```bash
-cargo test --lib --no-default-features   # protocol + mock only
-```
-
 ## Setup (once)
 
 Quit any official label app (one BLE client at a time).
 
 ```bash
-./target/release/thermark scan
-./target/release/thermark scan --save          # full advertising name → config.json
+./target/release/thermark scan --save          # full device name → config
 ./target/release/thermark doctor --use-config  # lid / paper / battery
-./target/release/thermark info
 ```
 
 Config: macOS `~/Library/Application Support/thermark/config.json` · Linux `~/.config/thermark/config.json`  
-Address: **`-a`** → **`THERMARK_ADDR`** → **config**. BLE match is **exact** name/id; use **`--fuzzy`** only if you mean it.
+Address priority: **`-a`** → **`THERMARK_ADDR`** → **config**. Match is **exact** name/id; **`--fuzzy`** only if you mean it.
 
-## What you print
+---
 
-Always pass **`--label 50x30`** (or your media size) so the canvas matches the label. After `scan --save`, omit `-a`.
+## Sticker recipes
 
-### Calibration — find the true print area
+Always pass **`--label 50x30`** (or your media) so the canvas matches the physical sticker. After `scan --save`, omit `-a`.
+
+### Link / package sticker
+
+Scan on a phone → open the URL. Text is what humans read without scanning.
+
+```bash
+./target/release/thermark qr \
+  --url "https://example.com/o/1042" \
+  --text $'ORDER #1042\nShip by Fri\nPriority' \
+  --font-name helvetica \
+  --label 50x30
+```
+
+<img src="fixtures/sticker_link.png" alt="Link / order sticker" width="384" />
+
+### Inventory / bin tag
+
+Dense type for SKU, qty, date — still leaves a quiet margin so the printer edge doesn’t smear text.
+
+```bash
+./target/release/thermark qr \
+  --url "https://example.com/bin/A3" \
+  --text $'BIN A-3\nSKU 88421\nQTY 24\n2026-03' \
+  --font-name helvetica \
+  --font-size 12 \
+  --label 50x30
+```
+
+<img src="fixtures/sticker_inventory.png" alt="Inventory bin tag" width="384" />
+
+### Name / desk badge
+
+```bash
+./target/release/thermark qr \
+  --url "https://example.com/u/ada" \
+  --text $'ADA LOVELACE\nLab · Desk 12' \
+  --font-name times \
+  --label 50x30
+```
+
+<img src="fixtures/sticker_name.png" alt="Name badge sticker" width="384" />
+
+### Calibrate print area
+
+Full-bleed pattern to verify margins and feed before a batch.
 
 ```bash
 ./target/release/thermark calibrate --label 50x30
 ```
 
-<img src="fixtures/calibrate_50x30.png" alt="50×30 calibration pattern" width="384" />
+<img src="fixtures/sticker_calibrate.png" alt="Calibration sticker" width="384" />
 
-*Border + diagonals + cross on a 384×240 canvas (density default 4).*
+### Photo sticker
 
-### QR + side text (Helvetica)
-
-```bash
-./target/release/thermark qr \
-  --url "https://example.com" \
-  --text $'Helvetica\nABC\n123' \
-  --font-name helvetica \
-  --label 50x30
-```
-
-<img src="fixtures/preview_helvetica.png" alt="QR label, Helvetica" width="384" />
-
-### QR + Times
-
-```bash
-./target/release/thermark qr \
-  --url "https://example.com" \
-  --text $'Times\nABC\n123' \
-  --font-name times \
-  --label 50x30
-```
-
-<img src="fixtures/preview_times.png" alt="QR label, Times" width="384" />
-
-### QR + Arial
-
-```bash
-./target/release/thermark qr \
-  --url "https://example.com" \
-  --text $'ABC\nHELLO\n123' \
-  --font-name arial \
-  --label 50x30
-```
-
-<img src="fixtures/qr_arial_label.png" alt="QR label, Arial" width="384" />
-
-### Small type (fixed `--font-size`)
-
-```bash
-./target/release/thermark qr \
-  --url "https://example.com" \
-  --text $'small type\nABCDEFG\nHIJKLMN\n0123456' \
-  --font-name helvetica \
-  --font-size 11 \
-  --label 50x30
-```
-
-<img src="fixtures/qr_small_type.png" alt="QR label, small type" width="384" />
-
-### Print a raster image
-
-```bash
-./target/release/thermark print -i fixtures/test_label.png --label 50x30
-```
-
-<img src="fixtures/test_label.png" alt="Sample raster label" width="384" />
-
-### Print a photograph
-
-Thermal is **1-bit**. For photos, center the image and dither (avoids blotchy black “bleed”):
+Thermal is **1-bit**. Center the photo and dither so midtones don’t turn into black blobs:
 
 ```bash
 ./target/release/thermark print \
-  -i fixtures/photo_unsplash_mountains.jpg \
+  -i fixtures/photo_sticker.jpg \
   --label 50x30 \
-  --no-fill --margin 12 --dither -d 3
+  --no-fill --margin 16 --dither -d 3
 ```
 
 | Flag | Effect |
 |------|--------|
-| `--no-fill` | Fit whole image, centered (no crop) |
-| `--margin N` | White inset (px) so heat doesn’t run to the edge |
-| `--dither` | Floyd–Steinberg instead of hard threshold |
-| `-d 3` | Normal density (4–5 can smear midtones) |
+| `--no-fill` | Whole image, centered (no crop) |
+| `--margin N` | White inset (px) — avoids edge bleed |
+| `--dither` | Floyd–Steinberg (photos) |
+| `-d 3` | Normal density |
 
-*Density default 3 for `print`. QR preview without printing: `--save out.png --no-print`.*
-
-### Fonts & tasks
+Preview QR without printing: `qr ... --save /tmp/out.png --no-print`.
 
 ```bash
 ./target/release/thermark fonts
 ./target/release/thermark tasks
 ```
+
+---
 
 ## Geometry
 
@@ -145,13 +134,11 @@ Thermal is **1-bit**. For photos, center the image and dither (avoids blotchy bl
 |--|--|
 | Resolution | ~**8 px/mm** (203 dpi) |
 | Max width (B1) | **384 px** (~48 mm) |
-| 50×30 mm label | **384×240 px** |
+| 50×30 mm sticker | **384×240 px** |
 
-## Config & doctor
+## Doctor
 
 ```bash
-./target/release/thermark config set -a "B1-YourPrinter" -m b1
-./target/release/thermark config show
 ./target/release/thermark doctor                 # host + scan
 ./target/release/thermark doctor --use-config    # + connect / sensors
 ```
@@ -159,7 +146,7 @@ Thermal is **1-bit**. For photos, center the image and dither (avoids blotchy bl
 | Exit | Meaning |
 |------|---------|
 | **0** | Pass or warnings |
-| **1** | At least one **FAIL** |
+| **1** | FAIL — fix before printing |
 
 ## Library
 
@@ -176,21 +163,27 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Exact name match by default; substring: `BleTransport::connect_with(..., BleMatchMode::Fuzzy)`.
-
 ## Fixtures
 
-PNG previews in [`fixtures/`](fixtures/) are the same images the README shows. They are checked by `tests/fixtures_readme.rs` (dimensions, ink, encode).
+[`fixtures/`](fixtures/) holds the same stickers as this README. Locked by tests (size, ink distribution, encode, photo margins):
 
 ```bash
 cargo test --test fixtures_readme
 ```
 
+| File | Use |
+|------|-----|
+| `sticker_link.png` | Package / share URL |
+| `sticker_inventory.png` | Bin / SKU tag |
+| `sticker_name.png` | Name badge |
+| `sticker_calibrate.png` | Geometry / bleed check |
+| `photo_sticker.jpg` | Photo print source |
+
 ## Logging
 
 ```bash
 ./target/release/thermark -v info
-RUST_LOG=thermark=debug,btleplug=info ./target/release/thermark scan
+RUST_LOG=thermark=debug ./target/release/thermark scan
 ```
 
 ## Protocol

@@ -98,7 +98,7 @@ fn experimental_task_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            "fixtures/test_label.png",
+            "fixtures/sticker_link.png",
             "--task",
             "simple",
         ])
@@ -116,7 +116,7 @@ fn experimental_model_default_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            "fixtures/test_label.png",
+            "fixtures/sticker_link.png",
             "--model",
             "b21",
         ])

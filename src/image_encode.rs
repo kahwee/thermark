@@ -367,8 +367,8 @@ mod tests {
     #[test]
     #[ignore = "writes /tmp/thermark_photo_preview.png"]
     fn generate_photo_print_preview() {
-        let path = std::path::Path::new("fixtures/photo_unsplash_mountains.jpg");
-        let img = image::open(path).expect("open photo fixture");
+        let path = std::path::Path::new("fixtures/photo_sticker.jpg");
+        let img = image::open(path).expect("open photo_sticker.jpg");
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
         let placed = contain_label(img, lp, 16);
         let bw = gray_to_print_bits(&placed.to_luma8(), 127, true);
