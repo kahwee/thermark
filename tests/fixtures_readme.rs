@@ -80,11 +80,6 @@ fn curated() -> &'static [Fixture] {
             purpose: "Geometry: full-bleed border/diagonals/cross (print area check)",
             kind: Kind::Calibrate,
         },
-        Fixture {
-            name: "photo_sticker.jpg",
-            purpose: "Photo sticker source; use --no-fill --margin --dither",
-            kind: Kind::Photo,
-        },
     ]
 }
 
@@ -260,26 +255,20 @@ fn all_fixtures_open_and_encode() {
 }
 
 #[test]
-fn photo_print_pipeline_centers_with_margin() {
-    let path = fixtures_dir().join("photo_sticker.jpg");
-    let img = image::open(&path).expect("photo_sticker.jpg");
+fn contain_pipeline_centers_source_art_with_margin() {
+    // Use turtle source (larger than label) to exercise contain + margin + encode.
+    let path = fixtures_dir().join("sticker_turtle_src.jpg");
+    let img = image::open(&path).expect("sticker_turtle_src.jpg");
     let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W);
     let placed = image_encode::contain_label(img, lp, 16);
     assert_eq!(placed.dimensions(), (W, H));
     let gray = placed.to_luma8();
-    // Outer margin ring must stay white (no edge bleed from content).
     for x in 0..W {
         assert_eq!(gray.get_pixel(x, 0)[0], 255, "top margin");
         assert_eq!(gray.get_pixel(x, 8)[0], 255, "inner top margin band");
     }
-    let bw = image_encode::gray_to_print_bits(&gray, 127, true);
-    let dark = bw.pixels().filter(|p| p[0] > 127).count();
-    assert!(
-        dark > 500,
-        "dithered photo should have printable dots ({dark})"
-    );
     let (ew, eh, packets) =
-        image_encode::encode_image_opts(placed, MAX_W, 0, 127, true).expect("encode photo");
+        image_encode::encode_image_opts(placed, MAX_W, 0, 127, false).expect("encode");
     assert_eq!((ew, eh), (W, H));
     assert_eq!(packets.len() as u32, H);
 }

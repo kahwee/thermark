@@ -101,27 +101,9 @@ Full-bleed pattern to verify margins and feed before a batch.
 
 <img src="fixtures/sticker_calibrate.png" alt="Calibration sticker" width="384" />
 
-### Photo sticker
-
-Thermal is **1-bit**. Center the photo and dither so midtones don’t turn into black blobs:
-
-```bash
-./target/release/thermark print \
-  -i fixtures/photo_sticker.jpg \
-  --label 50x30 \
-  --no-fill --margin 16 --dither -d 3
-```
-
-| Flag | Effect |
-|------|--------|
-| `--no-fill` | Whole image, centered (no crop) |
-| `--margin N` | White inset (px) — avoids edge bleed |
-| `--dither` | Floyd–Steinberg (photos) |
-| `-d 3` | Normal density |
-
 ### Line-art sticker (turtle)
 
-Bold B/W line art prints cleaner **without** dither. Margin is already baked into `sticker_turtle.png` (384×240):
+Bold B/W line art is the best look on thermal (hard edges, no dither). Margin is baked into `sticker_turtle.png` (384×240):
 
 ```bash
 ./target/release/thermark print \
@@ -131,6 +113,22 @@ Bold B/W line art prints cleaner **without** dither. Margin is already baked int
 ```
 
 <img src="fixtures/sticker_turtle.png" alt="Cute turtle line-art sticker" width="384" />
+
+### Your own photo or PNG
+
+Thermal is **1-bit**. For photos, center + dither so midtones don’t blotch:
+
+```bash
+./target/release/thermark print -i your-photo.jpg \
+  --label 50x30 --no-fill --margin 16 --dither -d 3
+```
+
+| Flag | Effect |
+|------|--------|
+| `--no-fill` | Whole image, centered (no crop) |
+| `--margin N` | White inset (px) — avoids edge bleed |
+| `--dither` | Floyd–Steinberg (photos; skip for line art) |
+| `-d 3`…`4` | Density (line art often wants 4) |
 
 Preview QR without printing: `qr ... --save /tmp/out.png --no-print`.
 
@@ -190,7 +188,6 @@ async fn main() -> anyhow::Result<()> {
 | `sticker_inventory.png` | Bin / SKU tag |
 | `sticker_name.png` | Name badge |
 | `sticker_calibrate.png` | Geometry / bleed check |
-| `photo_sticker.jpg` | Photo print source |
 
 ## Logging
 

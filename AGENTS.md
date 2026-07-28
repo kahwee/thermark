@@ -41,8 +41,6 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
   --label 50x30 --no-fill --margin 0 -d 4
 ./target/release/thermark qr --url "https://example.com/o/1042" \
   --text $'ORDER #1042\nShip by Fri\nPriority' --font-name helvetica --label 50x30
-./target/release/thermark print -i fixtures/photo_sticker.jpg \
-  --label 50x30 --no-fill --margin 16 --dither -d 3
 ./target/release/thermark calibrate --label 50x30
 ```
 

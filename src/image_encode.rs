@@ -362,26 +362,26 @@ mod tests {
         assert!(dit_black < 32 * 32 - 50, "dither not solid");
     }
 
-    /// One-shot: `cargo test --lib generate_photo_print_preview -- --ignored --nocapture`
-    /// Writes `/tmp/thermark_photo_preview.png` (contain + margin 16 + dither, display-inverted).
+    /// One-shot: `cargo test --lib generate_turtle_print_preview -- --ignored --nocapture`
+    /// Writes `/tmp/thermark_turtle_preview.png` (contain + margin 16, display-inverted).
     #[test]
-    #[ignore = "writes /tmp/thermark_photo_preview.png"]
-    fn generate_photo_print_preview() {
-        let path = std::path::Path::new("fixtures/photo_sticker.jpg");
-        let img = image::open(path).expect("open photo_sticker.jpg");
+    #[ignore = "writes /tmp/thermark_turtle_preview.png"]
+    fn generate_turtle_print_preview() {
+        let path = std::path::Path::new("fixtures/sticker_turtle_src.jpg");
+        let img = image::open(path).expect("open sticker_turtle_src.jpg");
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
         let placed = contain_label(img, lp, 16);
-        let bw = gray_to_print_bits(&placed.to_luma8(), 127, true);
+        let bw = gray_to_print_bits(&placed.to_luma8(), 127, false);
         // Print bits: 255 = burn/black → invert for on-screen paper-like preview.
         let mut preview = GrayImage::new(bw.width(), bw.height());
         for (x, y, p) in bw.enumerate_pixels() {
             let v = if p[0] > 127 { 0 } else { 255 };
             preview.put_pixel(x, y, Luma([v]));
         }
-        let out = "/tmp/thermark_photo_preview.png";
+        let out = "/tmp/thermark_turtle_preview.png";
         preview.save(out).expect("save preview");
         eprintln!(
-            "wrote {out} ({}x{}) contain+margin16+dither",
+            "wrote {out} ({}x{}) contain+margin16",
             preview.width(),
             preview.height()
         );
