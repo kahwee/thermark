@@ -6,7 +6,9 @@ Guidance for coding agents working in this repository.
 
 **`thermark`** — local, scriptable **sticker printing** for pocket thermal printers over **Bluetooth LE** (and USB serial), without vendor apps or cloud.
 
-Positioning: **terminal-first stickers** — especially **guest Wi‑Fi join QR** (SSID on label, password in QR) and package URL QRs — plus inventory, badges, line-art. Offline, exact mm geometry.
+**Problem:** pocket thermals are stuck behind vendor apps; you can’t easily print guest Wi‑Fi / URL stickers offline with exact mm size from a CLI.
+
+**Positioning:** local tool for stickers on real objects — **scan to join (Wi‑Fi)** and **scan to open (URL)** first; inventory, badges, line-art second. Offline, scriptable, no cloud.
 
 - Crate / binary: **`thermark`**
 - Do **not** put vendor brand names in the package or product name

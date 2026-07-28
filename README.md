@@ -1,21 +1,37 @@
 # thermark
 
-**Print real stickers from your terminal** on a pocket thermal label printer over **Bluetooth LE** (or USB). No vendor app, no cloud, no account.
+Local, scriptable stickers for pocket thermal printers over **Bluetooth LE** or **USB**. No vendor app, no cloud, no account.
 
-Built for B1-class 50×30 mm labels (**384×240 px** at 8 px/mm). Hardware-tested on a real B1.
+Hardware-tested on a real **B1-class** 50×30 mm printer (**384×240 px** at 8 px/mm).
 
-### Why this exists
+---
 
-The job that justifies the tool: **guest Wi‑Fi and QR-link stickers** without opening a proprietary app every time.
+## The problem
 
-You want a label where the **network name is obvious**, and a **QR people scan to join** (phones already understand the standard `WIFI:T:WPA;S:…;P:…;;` payload). Same pattern for “scan this URL” on packages or gear. Vendor apps make that a GUI chore (and often a cloud login). **thermark** is offline, exact millimetres, and scriptable.
+You own a pocket thermal sticker printer, but the official path is a **closed vendor app**. That makes simple physical labels harder than they should be:
 
-| Job | Command |
-|-----|---------|
-| **Guest Wi‑Fi** — SSID on sticker, password in QR | `thermark wifi --ssid "…" --password "…"` |
-| Package / share a URL | `thermark qr --url "https://…"` |
-| Inventory / name badges | `thermark qr` with side text |
-| Line-art / crew badges | `thermark print -i …` |
+- A **guest Wi‑Fi sticker** with the **network name visible** and a **QR people scan to join** becomes a multi-tap GUI flow (often behind an account or template).
+- A **“scan this URL”** label for a package, sample, or laptop is the same friction.
+- Doing it from a **terminal, script, or small program**, **offline**, with **exact label size**, is basically unsupported.
+
+Printing isn’t impossible — the pain is **control**:
+
+> **Turn a pocket thermal printer into a local tool for stickers that live on real objects — especially “scan to join” and “scan to open” — without cloud or vendor software.**
+
+---
+
+## What thermark is for
+
+| People need | Friction today | With thermark |
+|-------------|----------------|---------------|
+| **Guest Wi‑Fi** — SSID clear, password in QR | Vendor app / typing passwords aloud | `thermark wifi --ssid "…" --password "…"` |
+| **Share a URL** on a package or sample | App templates or phone screenshots | `thermark qr --url "https://…"` |
+| **Label bins / cables / samples** | Clunky GUI templates | `thermark qr` with dense side text |
+| **Automate / script** | No real CLI | CLI + Rust library, offline |
+
+**One line:** Make pocket thermal printers useful for everyday **physical QR stickers** (starting with guest Wi‑Fi and links) without vendor apps or the cloud.
+
+Also works for name badges, line-art stickers, calibration, and batch jobs — same offline stack.
 
 | Model | Task | Status |
 |-------|------|--------|
