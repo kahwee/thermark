@@ -25,12 +25,15 @@ required-features = ["ble", "serial"]
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
+directories = "6"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 qrcode = "0.14"
 ab_glyph = "0.2"
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
@@ -44,6 +47,7 @@ uuid = { version = "1", features = ["v4"], optional = true }
 assert_cmd = "2"
 predicates = "3"
 proptest = "1"
+tempfile = "3"
 
 [profile.release]
 lto = true

@@ -31,6 +31,8 @@ cargo test
 cargo test --lib --no-default-features
 ./target/release/thermark scan
 # structured logs: -v or RUST_LOG=thermark=debug
+./target/release/thermark config set -a "B1-YourPrinter"
+./target/release/thermark info              # uses saved addr
 ./target/release/thermark info -a "B1-YourPrinter"
 ./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30
 ./target/release/thermark qr -a "B1-YourPrinter" --font-name helvetica --label 50x30 \
@@ -50,6 +52,7 @@ Quit vendor apps before BLE connect (one client only).
 
 | File | Role |
 |------|------|
+| `config.rs` | User `config.toml` (default BLE addr) |
 | `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
 | `errors.rs` | Print error 0xDB reason codes |

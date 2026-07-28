@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use thermark::config::Config;
 use thermark::doctor::{self, DoctorConn};
 use thermark::font;
 use thermark::geometry::{LabelMm, DEFAULT_B1_LABEL};
@@ -145,19 +146,27 @@ enum Commands {
     Fonts,
     /// Show print-task / hardware support matrix
     Tasks,
+    /// Show / set saved default printer (config.toml)
+    Config {
+        #[command(subcommand)]
+        action: ConfigCmd,
+    },
     /// Diagnose host + printer readiness (Bluetooth, scan, sensors)
     Doctor {
-        /// BLE name / id, or serial path (optional — host-only checks if omitted)
+        /// BLE name / id, or serial path (default: saved config / THERMARK_ADDR; omit for host-only)
         #[arg(short, long)]
         addr: Option<String>,
-        /// Connection type when -a is set
-        #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
-        conn: ConnKind,
+        /// Connection type when connecting
+        #[arg(short = 'c', long, value_enum)]
+        conn: Option<ConnKind>,
         #[arg(short, long, value_enum, default_value_t = Model::B1)]
         model: Model,
         /// BLE scan seconds
         #[arg(short, long, default_value_t = 5)]
         seconds: u64,
+        /// Use saved default printer even without -a (connect + sensors)
+        #[arg(long, default_value_t = false)]
+        use_config: bool,
     },
     /// Encode a packet to hex (debug)
     Encode {
@@ -169,17 +178,69 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum ConfigCmd {
+    /// Print path + current saved values
+    Show,
+    /// Print config file path only
+    Path,
+    /// Save default printer (merge into existing config)
+    Set {
+        /// BLE name / UUID or serial path (required)
+        #[arg(short, long)]
+        addr: String,
+        /// Connection type
+        #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
+        conn: ConnKind,
+        /// Default model
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
+        /// Default BLE scan seconds before connect
+        #[arg(long)]
+        scan_secs: Option<u64>,
+    },
+    /// Remove the config file
+    Clear,
+}
+
 #[derive(Debug, Clone, clap::Args)]
 struct ConnArgs {
-    /// Connection type
-    #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
-    conn: ConnKind,
-    /// BLE name substring / peripheral id, or serial device path
+    /// Connection type (default: config or ble)
+    #[arg(short = 'c', long, value_enum)]
+    conn: Option<ConnKind>,
+    /// BLE name / peripheral id, or serial path (default: config / THERMARK_ADDR)
     #[arg(short, long)]
+    addr: Option<String>,
+    /// BLE scan time before connect (seconds; default: config or 4)
+    #[arg(long)]
+    scan_secs: Option<u64>,
+}
+
+/// Resolved connection after applying config / env defaults.
+struct ResolvedConn {
+    conn: ConnKind,
     addr: String,
-    /// BLE scan time before connect (seconds)
-    #[arg(long, default_value_t = 4)]
     scan_secs: u64,
+}
+
+impl ConnArgs {
+    fn resolve(&self, cfg: &Config) -> Result<ResolvedConn> {
+        let addr = cfg.resolve_addr(self.addr.as_deref())?;
+        let conn_str = cfg.resolve_connection(self.conn.map(|c| match c {
+            ConnKind::Ble => "ble",
+            ConnKind::Usb => "usb",
+        }));
+        let conn = match conn_str.as_str() {
+            "usb" | "serial" => ConnKind::Usb,
+            _ => ConnKind::Ble,
+        };
+        let scan_secs = cfg.resolve_scan_secs(self.scan_secs);
+        Ok(ResolvedConn {
+            conn,
+            addr,
+            scan_secs,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -197,7 +258,7 @@ enum Session {
 
 impl Session {
     async fn connect(
-        conn: &ConnArgs,
+        conn: &ResolvedConn,
         model: Model,
         simple_start: bool,
         task: Option<PrintTask>,
@@ -276,11 +337,13 @@ fn init_tracing(verbose: bool) {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
+    let cfg = Config::load().unwrap_or_default();
 
     match cli.command {
         Commands::Scan { seconds } => cmd_scan(seconds).await?,
         Commands::Ports => cmd_ports()?,
         Commands::Info { conn, model } => {
+            let conn = conn.resolve(&cfg)?;
             let mut session = Session::connect(&conn, model, false, None).await?;
             let result = session.fetch_summary().await;
             session.finish().await;
@@ -317,6 +380,7 @@ async fn main() -> Result<()> {
                 label: label_mm,
                 fill: fill || label_mm.is_some(),
             };
+            let conn = conn.resolve(&cfg)?;
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
             let result = session.print_image_file_opts(&image, opts).await;
             session.finish().await;
@@ -351,6 +415,7 @@ async fn main() -> Result<()> {
                 label: Some(label_mm),
                 fill: true,
             };
+            let conn = conn.resolve(&cfg)?;
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
             let result = session.print_image_file_opts(&tmp, opts).await;
             session.finish().await;
@@ -371,13 +436,28 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Tasks => print_tasks_matrix(),
+        Commands::Config { action } => cmd_config(action)?,
         Commands::Doctor {
             addr,
             conn,
             model,
             seconds,
+            use_config,
         } => {
-            let kind = match conn {
+            let cfg = Config::load().unwrap_or_default();
+            // Host-only unless -a, THERMARK_ADDR, --use-config, or (implicit) saved addr with -a omitted
+            // Default doctor without flags stays host-only for quick BT checks.
+            let addr = if let Some(a) = addr {
+                Some(a)
+            } else if use_config {
+                Some(cfg.resolve_addr(None)?)
+            } else {
+                None
+            };
+            let kind = match conn.unwrap_or_else(|| match cfg.resolve_connection(None).as_str() {
+                "usb" | "serial" => ConnKind::Usb,
+                _ => ConnKind::Ble,
+            }) {
                 ConnKind::Ble => DoctorConn::Ble,
                 ConnKind::Usb => DoctorConn::Usb,
             };
@@ -449,6 +529,7 @@ async fn main() -> Result<()> {
                 label: Some(label_mm),
                 fill: false,
             };
+            let conn = conn.resolve(&cfg)?;
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
             let result = session.print_image_file_opts(&png_path, opts).await;
             session.finish().await;
@@ -471,6 +552,72 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn cmd_config(action: ConfigCmd) -> Result<()> {
+    match action {
+        ConfigCmd::Path => {
+            println!("{}", Config::default_path()?.display());
+        }
+        ConfigCmd::Show => {
+            let path = Config::default_path()?;
+            println!("path: {}", path.display());
+            let cfg = Config::load()?;
+            if cfg == Config::default() && !path.exists() {
+                println!("(no config file yet)");
+                println!("Save a printer: thermark config set -a \"B1-YourPrinter\"");
+                return Ok(());
+            }
+            println!("addr:        {}", cfg.addr.as_deref().unwrap_or("(unset)"));
+            println!(
+                "connection:  {}",
+                cfg.connection.as_deref().unwrap_or("(default ble)")
+            );
+            println!(
+                "model:       {}",
+                cfg.model.as_deref().unwrap_or("(default b1)")
+            );
+            println!(
+                "scan_secs:   {}",
+                cfg.scan_secs
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "(default 4)".into())
+            );
+        }
+        ConfigCmd::Set {
+            addr,
+            conn,
+            model,
+            scan_secs,
+        } => {
+            let mut cfg = Config::load().unwrap_or_default();
+            cfg.addr = Some(addr.clone());
+            cfg.connection = Some(match conn {
+                ConnKind::Ble => "ble".into(),
+                ConnKind::Usb => "usb".into(),
+            });
+            if let Some(m) = model {
+                cfg.model = Some(m.to_string());
+            }
+            if let Some(s) = scan_secs {
+                cfg.scan_secs = Some(s);
+            }
+            let path = cfg.save()?;
+            println!("saved default printer → {addr}");
+            println!("  connection: {conn:?}");
+            println!("  file: {}", path.display());
+            println!("Now you can run: thermark info   (no -a needed)");
+        }
+        ConfigCmd::Clear => {
+            let path = Config::default_path()?;
+            if Config::clear()? {
+                println!("removed {}", path.display());
+            } else {
+                println!("no config file at {}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn cmd_scan(seconds: u64) -> Result<()> {
     info!(seconds, "scanning BLE");
     let devices = BleTransport::scan(Duration::from_secs(seconds)).await?;
@@ -484,7 +631,8 @@ async fn cmd_scan(seconds: u64) -> Result<()> {
         let rssi = d.rssi.map(|r| r.to_string()).unwrap_or_else(|| "-".into());
         println!("{:<40} {:<24} {}", d.id, d.name, rssi);
     }
-    println!("\nConnect with: thermark info -a \"<name or id>\"");
+    println!("\nSave default:  thermark config set -a \"<name or id>\"");
+    println!("Then connect:  thermark info");
     Ok(())
 }
 

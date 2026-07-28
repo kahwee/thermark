@@ -2,9 +2,18 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::path::PathBuf;
 
 fn thermark() -> Command {
     Command::cargo_bin("thermark").expect("binary thermark")
+}
+
+fn thermark_with_config(path: &std::path::Path) -> Command {
+    let mut c = thermark();
+    c.env("THERMARK_CONFIG", path);
+    // Isolate from developer machine env
+    c.env_remove("THERMARK_ADDR");
+    c
 }
 
 #[test]
@@ -75,4 +84,50 @@ fn doctor_host_only_runs() {
         "status {:?}",
         output.status
     );
+}
+
+#[test]
+fn config_set_show_clear() {
+    let dir = tempfile::tempdir().unwrap();
+    let path: PathBuf = dir.path().join("config.toml");
+
+    thermark_with_config(&path)
+        .args(["config", "set", "-a", "B1-TestPrinter", "--scan-secs", "7"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("B1-TestPrinter"));
+
+    assert!(path.exists());
+
+    thermark_with_config(&path)
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("B1-TestPrinter"))
+        .stdout(predicate::str::contains("7"));
+
+    thermark_with_config(&path)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config.toml"));
+
+    thermark_with_config(&path)
+        .args(["config", "clear"])
+        .assert()
+        .success();
+
+    assert!(!path.exists());
+}
+
+#[test]
+fn info_without_addr_errors_helpfully() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("empty.toml");
+    // file does not exist → empty config
+    thermark_with_config(&path)
+        .arg("info")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("config set"));
 }

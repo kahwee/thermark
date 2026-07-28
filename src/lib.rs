@@ -14,6 +14,7 @@
 //!
 //! Protocol reference: the protocol notes in src/protocol.rs
 
+pub mod config;
 pub mod doctor;
 pub mod errors;
 pub mod font;
@@ -27,6 +28,7 @@ pub mod printer;
 pub mod protocol;
 pub mod transport;
 
+pub use config::Config;
 pub use errors::{Error, PrinterErrorCode, Result};
 pub use geometry::{LabelMm, LabelPx, DEFAULT_B1_LABEL, PX_PER_MM};
 pub use mock::MockTransport;

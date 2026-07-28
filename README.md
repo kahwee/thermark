@@ -50,8 +50,14 @@ The CLI binary requires both `ble` and `serial` (the default feature set).
 # Scan for printers
 ./target/release/thermark scan
 
+# Save default BLE device (macOS: ~/Library/Application Support/thermark/config.toml)
+./target/release/thermark config set -a "B1-YourPrinter"
+./target/release/thermark config show
+
 # Prefer the full BLE name from scan (macOS uses UUIDs, not MACs)
-./target/release/thermark info -a "B1-YourPrinter"
+# After config set, -a is optional:
+./target/release/thermark info
+./target/release/thermark info -a "B1-YourPrinter"   # still works; overrides config
 
 # Calibration — full label canvas
 ./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30 -d 4
@@ -86,7 +92,20 @@ Use `doctor` when something fails — offline printer, lid open, no paper, Bluet
 # Full path: also connect + heartbeat (cover / paper / RFID / battery-ish)
 ./target/release/thermark doctor -a "B1-YourPrinter"
 ./target/release/thermark doctor -a "B1-YourPrinter" -s 8   # longer scan
+./target/release/thermark doctor --use-config             # connect using saved addr
 ```
+
+### Saved printer config
+
+| | |
+|--|--|
+| File | macOS `~/Library/Application Support/thermark/config.toml` · Linux `~/.config/thermark/config.toml` |
+| Set | `thermark config set -a "B1-YourPrinter"` |
+| Show | `thermark config show` / `thermark config path` |
+| Clear | `thermark config clear` |
+| Env overrides | `THERMARK_ADDR` (addr only) · `THERMARK_CONFIG` (file path) |
+
+Priority for address: **`-a` flag** → **`THERMARK_ADDR`** → **config file**.
 
 | Exit code | Meaning |
 |-----------|---------|
