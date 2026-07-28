@@ -13,15 +13,21 @@
 //! 3. `addr` in this config file
 
 use crate::errors::{Error, Result};
+use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Preferred link type stored in config / resolved for the CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Hash, clap::ValueEnum, Serialize, Deserialize,
+)]
+#[value(rename_all = "lower")]
+#[serde(rename_all = "lowercase")]
 pub enum ConnPref {
     #[default]
     Ble,
+    #[serde(alias = "serial")]
     Usb,
 }
 
@@ -54,12 +60,12 @@ pub struct Config {
     /// Default BLE name / UUID or serial device path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addr: Option<String>,
-    /// `"ble"` or `"usb"` (also accepts `"serial"` when reading).
+    /// Link type (`ble` / `usb`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connection: Option<String>,
-    /// Default model string, e.g. `"b1"`.
+    pub connection: Option<ConnPref>,
+    /// Default model (`b1`, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub model: Option<Model>,
     /// Default BLE scan seconds before connect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan_secs: Option<u64>,
@@ -164,16 +170,13 @@ impl Config {
         &mut self,
         addr: impl Into<String>,
         connection: ConnPref,
-        model: Option<String>,
+        model: Option<Model>,
         scan_secs: Option<u64>,
     ) {
         self.addr = Some(addr.into().trim().to_string());
-        self.connection = Some(connection.as_str().into());
+        self.connection = Some(connection);
         if let Some(m) = model {
-            let m = m.trim();
-            if !m.is_empty() {
-                self.model = Some(m.to_string());
-            }
+            self.model = Some(m);
         }
         if let Some(s) = scan_secs {
             self.scan_secs = Some(s);
@@ -204,14 +207,13 @@ impl Config {
     }
 
     /// Prefer CLI connection when provided; else config; else BLE.
-    pub fn resolve_connection(&self, cli: Option<&str>) -> ConnPref {
-        if let Some(c) = Self::nonempty(cli) {
-            return ConnPref::parse(c);
-        }
-        self.connection
-            .as_deref()
-            .map(ConnPref::parse)
-            .unwrap_or_default()
+    pub fn resolve_connection(&self, cli: Option<ConnPref>) -> ConnPref {
+        cli.or(self.connection).unwrap_or_default()
+    }
+
+    /// Prefer CLI model when provided; else config; else [`Model::B1`].
+    pub fn resolve_model(&self, cli: Option<Model>) -> Model {
+        cli.or(self.model).unwrap_or_default()
     }
 
     /// Prefer CLI scan seconds when provided; else config; else 4.
@@ -243,8 +245,8 @@ mod tests {
         let path = dir.path().join("config.json");
         let cfg = Config {
             addr: Some("B1-YourPrinter".into()),
-            connection: Some("ble".into()),
-            model: Some("b1".into()),
+            connection: Some(ConnPref::Ble),
+            model: Some(Model::B1),
             scan_secs: Some(6),
         };
         cfg.save_to(&path).unwrap();
@@ -276,14 +278,14 @@ mod tests {
     fn apply_set_merges_without_clobbering_unspecified() {
         let mut cfg = Config {
             addr: Some("old".into()),
-            connection: Some("usb".into()),
-            model: Some("b21".into()),
+            connection: Some(ConnPref::Usb),
+            model: Some(Model::B21),
             scan_secs: Some(9),
         };
         cfg.apply_set("B1-New", ConnPref::Ble, None, None);
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
-        assert_eq!(cfg.connection.as_deref(), Some("ble"));
-        assert_eq!(cfg.model.as_deref(), Some("b21"));
+        assert_eq!(cfg.connection, Some(ConnPref::Ble));
+        assert_eq!(cfg.model, Some(Model::B21));
         assert_eq!(cfg.scan_secs, Some(9));
     }
 
@@ -327,12 +329,15 @@ mod tests {
     #[test]
     fn resolve_connection_and_scan() {
         let cfg = Config {
-            connection: Some("USB".into()),
+            connection: Some(ConnPref::Usb),
             scan_secs: Some(8),
+            model: Some(Model::B21),
             ..Default::default()
         };
         assert_eq!(cfg.resolve_connection(None), ConnPref::Usb);
-        assert_eq!(cfg.resolve_connection(Some("serial")), ConnPref::Usb);
+        assert_eq!(cfg.resolve_connection(Some(ConnPref::Ble)), ConnPref::Ble);
+        assert_eq!(cfg.resolve_model(None), Model::B21);
+        assert_eq!(cfg.resolve_model(Some(Model::B1)), Model::B1);
         assert_eq!(cfg.resolve_scan_secs(None), 8);
         assert_eq!(cfg.resolve_scan_secs(Some(0)), 1);
     }
@@ -369,9 +374,13 @@ mod tests {
 
     #[test]
     fn parse_json_object() {
-        let cfg = Config::parse_json(r#"{"addr":"B1-Y","connection":"usb"}"#).unwrap();
+        let cfg = Config::parse_json(r#"{"addr":"B1-Y","connection":"usb","model":"b1"}"#).unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-Y"));
-        assert_eq!(cfg.resolve_connection(None), ConnPref::Usb);
+        assert_eq!(cfg.connection, Some(ConnPref::Usb));
+        assert_eq!(cfg.model, Some(Model::B1));
+        // alias
+        let cfg = Config::parse_json(r#"{"connection":"serial"}"#).unwrap();
+        assert_eq!(cfg.connection, Some(ConnPref::Usb));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! CLI for pocket thermal label printers over BLE or USB serial.
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thermark::config::{Config, ConnPref};
@@ -14,6 +14,7 @@ use thermark::print_task::{PrintTask, hardware_matrix};
 use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
 use thermark::transport::{BleTransport, SerialTransport};
+use thermark::types::{Density, Rotation, Threshold};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -59,14 +60,14 @@ enum Commands {
         #[arg(short, long, value_enum, default_value_t = Model::B1)]
         model: Model,
         /// Print density 1..=5
-        #[arg(short, long, default_value_t = 3)]
-        density: u8,
+        #[arg(short, long, default_value = "3", value_parser = parse_density)]
+        density: Density,
         /// Rotate clockwise: 0, 90, 180, 270
-        #[arg(short, long, default_value_t = 0)]
-        rotate: u32,
+        #[arg(short, long, default_value = "0", value_parser = parse_rotation)]
+        rotate: Rotation,
         /// Black/white threshold after invert (0–255)
-        #[arg(long, default_value_t = 127)]
-        threshold: u8,
+        #[arg(long, default_value = "127", value_parser = parse_threshold)]
+        threshold: Threshold,
         /// Scale image down to fit printhead width only
         #[arg(long, default_value_t = false)]
         fit: bool,
@@ -92,8 +93,8 @@ enum Commands {
         /// Label size mm, e.g. 50x30
         #[arg(long, default_value = "50x30")]
         label: String,
-        #[arg(short, long, default_value_t = 4)]
-        density: u8,
+        #[arg(short, long, default_value = "4", value_parser = parse_density)]
+        density: Density,
         #[arg(long, default_value_t = false)]
         simple_start: bool,
         #[arg(long, value_enum)]
@@ -129,8 +130,8 @@ enum Commands {
         /// Draw a 1px outer border (usually unnecessary)
         #[arg(long, default_value_t = false)]
         border: bool,
-        #[arg(short, long, default_value_t = 4)]
-        density: u8,
+        #[arg(short, long, default_value = "4", value_parser = parse_density)]
+        density: Density,
         /// Also save PNG to this path
         #[arg(long)]
         save: Option<PathBuf>,
@@ -158,7 +159,7 @@ enum Commands {
         addr: Option<String>,
         /// Connection type when connecting
         #[arg(short = 'c', long, value_enum)]
-        conn: Option<ConnKind>,
+        conn: Option<ConnPref>,
         #[arg(short, long, value_enum, default_value_t = Model::B1)]
         model: Model,
         /// BLE scan seconds
@@ -194,8 +195,8 @@ enum ConfigCmd {
         #[arg(short, long)]
         addr: String,
         /// Connection type
-        #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
-        conn: ConnKind,
+        #[arg(short = 'c', long, value_enum, default_value_t = ConnPref::Ble)]
+        conn: ConnPref,
         /// Default model
         #[arg(short, long, value_enum)]
         model: Option<Model>,
@@ -211,7 +212,7 @@ enum ConfigCmd {
 struct ConnArgs {
     /// Connection type (default: config or ble)
     #[arg(short = 'c', long, value_enum)]
-    conn: Option<ConnKind>,
+    conn: Option<ConnPref>,
     /// BLE name / peripheral id, or serial path (default: config / THERMARK_ADDR)
     #[arg(short, long)]
     addr: Option<String>,
@@ -222,57 +223,31 @@ struct ConnArgs {
 
 /// Resolved connection after applying config / env defaults.
 struct ResolvedConn {
-    conn: ConnKind,
+    conn: ConnPref,
     addr: String,
     scan_secs: u64,
 }
 
 impl ConnArgs {
     fn resolve(&self, cfg: &Config) -> Result<ResolvedConn> {
-        let addr = cfg.resolve_addr(self.addr.as_deref())?;
-        let pref = cfg.resolve_connection(self.conn.map(ConnKind::as_pref_str));
         Ok(ResolvedConn {
-            conn: ConnKind::from_pref(pref),
-            addr,
+            conn: cfg.resolve_connection(self.conn),
+            addr: cfg.resolve_addr(self.addr.as_deref())?,
             scan_secs: cfg.resolve_scan_secs(self.scan_secs),
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-#[value(rename_all = "lower")]
-enum ConnKind {
-    Ble,
-    Usb,
+fn parse_density(s: &str) -> std::result::Result<Density, String> {
+    s.parse::<Density>().map_err(|e| e.to_string())
 }
 
-impl ConnKind {
-    fn as_pref_str(self) -> &'static str {
-        match self {
-            Self::Ble => "ble",
-            Self::Usb => "usb",
-        }
-    }
-
-    fn from_pref(p: ConnPref) -> Self {
-        match p {
-            ConnPref::Ble => Self::Ble,
-            ConnPref::Usb => Self::Usb,
-        }
-    }
-
-    fn to_pref(self) -> ConnPref {
-        match self {
-            Self::Ble => ConnPref::Ble,
-            Self::Usb => ConnPref::Usb,
-        }
-    }
+fn parse_rotation(s: &str) -> std::result::Result<Rotation, String> {
+    s.parse::<Rotation>().map_err(|e| e.to_string())
 }
 
-impl std::fmt::Display for ConnKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_pref_str())
-    }
+fn parse_threshold(s: &str) -> std::result::Result<Threshold, String> {
+    s.parse::<Threshold>().map_err(|e| e.to_string())
 }
 
 /// Open BLE or USB session with a resolved print task.
@@ -290,7 +265,7 @@ impl Session {
     ) -> Result<Self> {
         let task = resolve_task(model, simple_start, task);
         match conn.conn {
-            ConnKind::Ble => {
+            ConnPref::Ble => {
                 let ble = BleTransport::connect(&conn.addr, Duration::from_secs(conn.scan_secs))
                     .await
                     .context("BLE connect")?;
@@ -298,7 +273,7 @@ impl Session {
                     PrinterClient::new(ble, model).with_print_task(task),
                 ))
             }
-            ConnKind::Usb => {
+            ConnPref::Usb => {
                 let ser = SerialTransport::open(&conn.addr)
                     .with_context(|| format!("open serial {}", conn.addr))?;
                 Ok(Self::Usb(
@@ -387,9 +362,6 @@ async fn main() -> Result<()> {
             simple_start,
             task,
         } => {
-            if !(1..=5).contains(&density) {
-                bail!("density must be 1..=5");
-            }
             if !image.exists() {
                 bail!("image not found: {}", image.display());
             }
@@ -434,8 +406,8 @@ async fn main() -> Result<()> {
             gray.save(&tmp)?;
             let opts = PrintOptions {
                 density,
-                rotate: 0,
-                threshold: 127,
+                rotate: Rotation::Deg0,
+                threshold: Threshold::DEFAULT,
                 fit: false,
                 label: Some(label_mm),
                 fill: true,
@@ -476,10 +448,7 @@ async fn main() -> Result<()> {
             } else {
                 None
             };
-            let kind = match conn
-                .map(ConnKind::to_pref)
-                .unwrap_or_else(|| cfg.resolve_connection(None))
-            {
+            let kind = match cfg.resolve_connection(conn) {
                 ConnPref::Ble => DoctorConn::Ble,
                 ConnPref::Usb => DoctorConn::Usb,
             };
@@ -545,8 +514,8 @@ async fn main() -> Result<()> {
 
             let opts = PrintOptions {
                 density,
-                rotate: 0,
-                threshold: 127,
+                rotate: Rotation::Deg0,
+                threshold: Threshold::DEFAULT,
                 fit: false,
                 label: Some(label_mm),
                 fill: false,
@@ -595,11 +564,15 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
             println!("addr:        {}", cfg.addr.as_deref().unwrap_or("(unset)"));
             println!(
                 "connection:  {}",
-                cfg.connection.as_deref().unwrap_or("(default ble)")
+                cfg.connection
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "(default ble)".into())
             );
             println!(
                 "model:       {}",
-                cfg.model.as_deref().unwrap_or("(default b1)")
+                cfg.model
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| "(default b1)".into())
             );
             println!(
                 "scan_secs:   {}",
@@ -615,12 +588,7 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
             scan_secs,
         } => {
             let mut cfg = Config::load().unwrap_or_default();
-            cfg.apply_set(
-                &addr,
-                conn.to_pref(),
-                model.map(|m| m.to_string()),
-                scan_secs,
-            );
+            cfg.apply_set(&addr, conn, model, scan_secs);
             let path = cfg.save()?;
             println!("saved default printer → {addr}");
             println!("  connection: {conn}");

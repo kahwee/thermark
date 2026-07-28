@@ -27,6 +27,7 @@ pub mod print_task;
 pub mod printer;
 pub mod protocol;
 pub mod transport;
+pub mod types;
 
 pub use config::{Config, ConnPref};
 pub use errors::{Error, PrinterErrorCode, Result};
@@ -37,6 +38,7 @@ pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
 pub use printer::{PrintOptions, PrinterClient};
 pub use protocol::Model;
 pub use transport::Transport;
+pub use types::{Density, Rotation, Threshold};
 
 #[cfg(feature = "ble")]
 pub use transport::{BleTransport, PRINTER_CHAR, PRINTER_SERVICE};

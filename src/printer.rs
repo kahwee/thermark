@@ -7,6 +7,7 @@ use crate::packet::Packet;
 use crate::print_task::PrintTask;
 use crate::protocol::{self, Cmd, InfoKey, Model};
 use crate::transport::Transport;
+use crate::types::{Density, Rotation, Threshold};
 use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -22,9 +23,9 @@ pub struct PrinterClient<T: Transport> {
 /// Options for a raster print job.
 #[derive(Debug, Clone)]
 pub struct PrintOptions {
-    pub density: u8,
-    pub rotate: u32,
-    pub threshold: u8,
+    pub density: Density,
+    pub rotate: Rotation,
+    pub threshold: Threshold,
     /// Scale down only if wider than printhead.
     pub fit: bool,
     /// Physical label size (mm). Image is scaled/padded to this.
@@ -36,9 +37,9 @@ pub struct PrintOptions {
 impl Default for PrintOptions {
     fn default() -> Self {
         Self {
-            density: 3,
-            rotate: 0,
-            threshold: 127,
+            density: Density::NORMAL,
+            rotate: Rotation::Deg0,
+            threshold: Threshold::DEFAULT,
             fit: false,
             label: None,
             fill: true,
@@ -194,12 +195,9 @@ impl<T: Transport> PrinterClient<T> {
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
 
-    pub async fn set_density(&mut self, level: u8) -> Result<bool> {
-        if !(1..=5).contains(&level) {
-            return Err(Error::InvalidDensity(level));
-        }
+    pub async fn set_density(&mut self, level: Density) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::SetDensity as u8, vec![level], 0x10)
+            .transceive_offset(Cmd::SetDensity as u8, vec![level.get()], 0x10)
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
@@ -257,13 +255,13 @@ impl<T: Transport> PrinterClient<T> {
         width: u32,
         height: u32,
         rows: Vec<Packet>,
-        density: u8,
+        density: Density,
     ) -> Result<()> {
         info!(
             width,
             height,
             task = %self.task,
-            density,
+            density = density.get(),
             rows = rows.len(),
             "print job"
         );
@@ -333,9 +331,9 @@ impl<T: Transport> PrinterClient<T> {
     pub async fn print_image_file(
         &mut self,
         path: &Path,
-        density: u8,
-        rotate: u32,
-        threshold: u8,
+        density: Density,
+        rotate: Rotation,
+        threshold: Threshold,
         fit: bool,
     ) -> Result<()> {
         self.print_image_file_opts(
@@ -356,12 +354,12 @@ impl<T: Transport> PrinterClient<T> {
         let max_w = self.model.max_width_px();
         let mut img = image::open(path)?;
 
-        if !opts.rotate.is_multiple_of(360) {
-            img = match opts.rotate % 360 {
-                90 => img.rotate90(),
-                180 => img.rotate180(),
-                270 => img.rotate270(),
-                other => return Err(Error::InvalidRotation(other)),
+        if !opts.rotate.is_identity() {
+            img = match opts.rotate {
+                Rotation::Deg0 => img,
+                Rotation::Deg90 => img.rotate90(),
+                Rotation::Deg180 => img.rotate180(),
+                Rotation::Deg270 => img.rotate270(),
             };
         }
 
@@ -387,7 +385,8 @@ impl<T: Transport> PrinterClient<T> {
 
         // Always pad width up to a multiple of 8; if still under printhead and
         // no explicit label, leave as-is (the simple print-task form behaviour).
-        let (width, height, rows) = image_encode::encode_image(img, max_w, 0, opts.threshold)?;
+        let (width, height, rows) =
+            image_encode::encode_image(img, max_w, 0, opts.threshold.get())?;
 
         // Preflight (best-effort)
         if let Ok(rfid) = self.rfid_info().await {
@@ -413,10 +412,15 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Print an in-memory grayscale image (dark pixels print).
-    pub async fn print_gray_image(&mut self, gray: &image::GrayImage, density: u8) -> Result<()> {
+    pub async fn print_gray_image(
+        &mut self,
+        gray: &image::GrayImage,
+        density: Density,
+    ) -> Result<()> {
         let max_w = self.model.max_width_px().min(self.task.max_width_px());
         let img = image::DynamicImage::ImageLuma8(gray.clone());
-        let (width, height, rows) = image_encode::encode_image(img, max_w, 0, 127)?;
+        let (width, height, rows) =
+            image_encode::encode_image(img, max_w, 0, Threshold::DEFAULT.get())?;
         self.print_rows(width, height, rows, density).await
     }
 
@@ -535,6 +539,9 @@ impl std::fmt::Display for RfidInfo {
 pub enum InfoValue {
     Int(u64),
     Float(f64),
+    /// Printable ASCII (device serial strings, etc.).
+    Text(String),
+    /// Opaque bytes as hex.
     Hex(String),
     Raw(Vec<u8>),
 }
@@ -543,9 +550,9 @@ impl InfoValue {
     fn parse(key: InfoKey, data: &[u8]) -> Self {
         match key {
             InfoKey::DeviceSerial => {
-                // Often ASCII (e.g. "DEVICE_SERIAL"); fall back to hex.
-                if data.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
-                    Self::Hex(String::from_utf8_lossy(data).into_owned())
+                // Often ASCII; fall back to hex for binary payloads.
+                if !data.is_empty() && data.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
+                    Self::Text(String::from_utf8_lossy(data).into_owned())
                 } else {
                     Self::Hex(hex::encode(data))
                 }
@@ -564,7 +571,7 @@ impl std::fmt::Display for InfoValue {
         match self {
             Self::Int(v) => write!(f, "{v}"),
             Self::Float(v) => write!(f, "{v:.2}"),
-            Self::Hex(s) => write!(f, "{s}"),
+            Self::Text(s) | Self::Hex(s) => write!(f, "{s}"),
             Self::Raw(b) => write!(f, "{}", hex::encode(b)),
         }
     }
@@ -686,6 +693,7 @@ mod tests {
     use super::*;
     use crate::mock::MockTransport;
     use crate::print_task::PrintTask;
+    use crate::types::Density;
     use image::{GrayImage, Luma};
 
     fn client_b1() -> PrinterClient<MockTransport> {
@@ -699,7 +707,9 @@ mod tests {
 
         // 16x2 black image → two bitmap rows after invert of dark source
         let gray = GrayImage::from_pixel(16, 2, Luma([0]));
-        c.print_gray_image(&gray, 4).await.expect("print");
+        c.print_gray_image(&gray, Density::DARK)
+            .await
+            .expect("print");
 
         let cmds = c.transport().tx_cmds();
         // density, label type, print start, page start, page size, row*, page end, status, print end
@@ -733,7 +743,10 @@ mod tests {
         mock.fail_cmd(0x01, 0x02); // LackPaper
         let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
-        let err = c.print_gray_image(&gray, 3).await.unwrap_err();
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
         match err {
             Error::Printer(PrinterErrorCode::LackPaper) => {}
             other => panic!("expected LackPaper, got {other:?}"),
@@ -746,7 +759,10 @@ mod tests {
         mock.fail_cmd(0x01, 0x01);
         let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
-        let err = c.print_gray_image(&gray, 3).await.unwrap_err();
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
         match err {
             Error::Printer(PrinterErrorCode::CoverOpen) => {}
             other => panic!("expected CoverOpen, got {other:?}"),
@@ -759,7 +775,7 @@ mod tests {
             .with_print_task(PrintTask::Simple)
             .with_pace(false);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
-        c.print_gray_image(&gray, 3).await.unwrap();
+        c.print_gray_image(&gray, Density::NORMAL).await.unwrap();
         let st = c.transport().first_tx(0x01).unwrap();
         assert_eq!(st.data, vec![0x01]);
         let ps = c.transport().first_tx(0x13).unwrap();
@@ -779,8 +795,9 @@ mod tests {
 
     #[tokio::test]
     async fn density_out_of_range_errors() {
+        assert!(Density::new(0).is_err());
+        assert!(Density::new(6).is_err());
         let mut c = client_b1();
-        assert!(c.set_density(0).await.is_err());
-        assert!(c.set_density(6).await.is_err());
+        assert!(c.set_density(Density::NORMAL).await.is_ok());
     }
 }
