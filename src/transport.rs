@@ -7,7 +7,7 @@
 use crate::errors::{Error, Result};
 use crate::packet::Packet;
 use async_trait::async_trait;
-use log::debug;
+use tracing::debug;
 use std::time::Duration;
 
 /// Common packet transport used by [`crate::printer::PrinterClient`].
@@ -18,7 +18,7 @@ pub trait Transport: Send {
 
     async fn send_packet(&mut self, packet: &Packet) -> Result<()> {
         let bytes = packet.encode();
-        debug!("TX {}", hex::encode(&bytes));
+        debug!(bytes = %hex::encode(&bytes), "TX");
         self.send_raw(&bytes).await
     }
 }
@@ -33,7 +33,7 @@ mod ble {
     };
     use btleplug::platform::{Adapter, Manager, Peripheral};
     use futures::stream::StreamExt;
-    use log::info;
+    use tracing::{debug, info};
     use std::collections::HashMap;
     use tokio::sync::mpsc;
     use tokio::time::{sleep, timeout};
@@ -190,13 +190,9 @@ mod ble {
             })?;
 
             info!(
-                "connecting to {} ({})",
-                if name.is_empty() {
-                    "(unknown)"
-                } else {
-                    name.as_str()
-                },
-                peripheral.id()
+                name = %if name.is_empty() { "(unknown)" } else { name.as_str() },
+                id = %peripheral.id(),
+                "connecting"
             );
 
             peripheral
@@ -261,13 +257,17 @@ mod ble {
             let deadline = tokio::time::Instant::now() + wait;
             loop {
                 while let Ok(chunk) = self.rx.try_recv() {
-                    debug!("RX chunk {}", hex::encode(&chunk));
+                    debug!(bytes = %hex::encode(&chunk), "RX chunk");
                     self.rx_buf.extend_from_slice(&chunk);
                 }
                 let packets = Packet::drain_buffer(&mut self.rx_buf);
                 if !packets.is_empty() {
                     for p in &packets {
-                        debug!("RX pkt cmd={:#04x} data={}", p.cmd, hex::encode(&p.data));
+                        debug!(
+                            cmd = format_args!("{:#04x}", p.cmd),
+                            data = %hex::encode(&p.data),
+                            "RX pkt"
+                        );
                     }
                     return Ok(packets);
                 }
@@ -277,7 +277,7 @@ mod ble {
                 }
                 match timeout(remaining, self.rx.recv()).await {
                     Ok(Some(chunk)) => {
-                        debug!("RX chunk {}", hex::encode(&chunk));
+                        debug!(bytes = %hex::encode(&chunk), "RX chunk");
                         self.rx_buf.extend_from_slice(&chunk);
                     }
                     Ok(None) => {
@@ -385,7 +385,7 @@ mod serial {
                 let mut tmp = [0u8; 1024];
                 match self.port.read(&mut tmp) {
                     Ok(n) if n > 0 => {
-                        debug!("RX serial {}", hex::encode(&tmp[..n]));
+                        debug!(bytes = %hex::encode(&tmp[..n]), "RX serial");
                         self.rx_buf.extend_from_slice(&tmp[..n]);
                         let packets = Packet::drain_buffer(&mut self.rx_buf);
                         if !packets.is_empty() {

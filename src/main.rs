@@ -2,7 +2,6 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use log::info;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thermark::doctor::{self, DoctorConn};
@@ -14,6 +13,8 @@ use thermark::print_task::{hardware_matrix, PrintTask};
 use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
 use thermark::transport::{BleTransport, SerialTransport};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,7 +23,7 @@ use thermark::transport::{BleTransport, SerialTransport};
     about = "Local thermal label printing over BLE/USB — QR, text, calibration (no vendor app)"
 )]
 struct Cli {
-    /// Verbose logging
+    /// Verbose logging (`RUST_LOG` still overrides when set)
     #[arg(short, long, global = true)]
     verbose: bool,
 
@@ -44,8 +45,8 @@ enum Commands {
     Info {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, default_value = "b1")]
-        model: String,
+        #[arg(short, long, value_enum, default_value_t = Model::B1)]
+        model: Model,
     },
     /// Print an image (PNG/JPEG/…)
     Print {
@@ -54,8 +55,8 @@ enum Commands {
         /// Image path
         #[arg(short, long)]
         image: PathBuf,
-        #[arg(short, long, default_value = "b1")]
-        model: String,
+        #[arg(short, long, value_enum, default_value_t = Model::B1)]
+        model: Model,
         /// Print density 1..=5
         #[arg(short, long, default_value_t = 3)]
         density: u8,
@@ -78,15 +79,15 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         simple_start: bool,
         /// Print task: b1 (tested), b21v1, d110, simple (experimental)
-        #[arg(long)]
-        task: Option<String>,
+        #[arg(long, value_enum)]
+        task: Option<PrintTask>,
     },
     /// Print a full-bleed calibration pattern for a label size (find true print area)
     Calibrate {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, default_value = "b1")]
-        model: String,
+        #[arg(short, long, value_enum, default_value_t = Model::B1)]
+        model: Model,
         /// Label size mm, e.g. 50x30
         #[arg(long, default_value = "50x30")]
         label: String,
@@ -94,15 +95,15 @@ enum Commands {
         density: u8,
         #[arg(long, default_value_t = false)]
         simple_start: bool,
-        #[arg(long)]
-        task: Option<String>,
+        #[arg(long, value_enum)]
+        task: Option<PrintTask>,
     },
     /// Design + print a square QR with side text (fills the label)
     Qr {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, default_value = "b1")]
-        model: String,
+        #[arg(short, long, value_enum, default_value_t = Model::B1)]
+        model: Model,
         /// URL or text encoded in the QR
         #[arg(long, default_value = "https://www.youtube.com")]
         url: String,
@@ -110,8 +111,8 @@ enum Commands {
         #[arg(long, default_value = "ABC\nYOUTUBE\n123")]
         text: String,
         /// Put text on left or right of the square QR
-        #[arg(long, default_value = "right")]
-        text_side: String,
+        #[arg(long, value_enum, default_value_t = TextSide::Right)]
+        text_side: TextSide,
         /// Label size mm, e.g. 50x30
         #[arg(long, default_value = "50x30")]
         label: String,
@@ -134,8 +135,8 @@ enum Commands {
         save: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         simple_start: bool,
-        #[arg(long)]
-        task: Option<String>,
+        #[arg(long, value_enum)]
+        task: Option<PrintTask>,
         /// Only generate PNG, do not print
         #[arg(long, default_value_t = false)]
         no_print: bool,
@@ -150,10 +151,10 @@ enum Commands {
         #[arg(short, long)]
         addr: Option<String>,
         /// Connection type when -a is set
-        #[arg(short = 'c', long, default_value = "ble")]
+        #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
         conn: ConnKind,
-        #[arg(short, long, default_value = "b1")]
-        model: String,
+        #[arg(short, long, value_enum, default_value_t = Model::B1)]
+        model: Model,
         /// BLE scan seconds
         #[arg(short, long, default_value_t = 5)]
         seconds: u64,
@@ -171,7 +172,7 @@ enum Commands {
 #[derive(Debug, Clone, clap::Args)]
 struct ConnArgs {
     /// Connection type
-    #[arg(short = 'c', long, default_value = "ble")]
+    #[arg(short = 'c', long, value_enum, default_value_t = ConnKind::Ble)]
     conn: ConnKind,
     /// BLE name substring / peripheral id, or serial device path
     #[arg(short, long)]
@@ -182,6 +183,7 @@ struct ConnArgs {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "lower")]
 enum ConnKind {
     Ble,
     Usb,
@@ -198,9 +200,9 @@ impl Session {
         conn: &ConnArgs,
         model: Model,
         simple_start: bool,
-        task: Option<String>,
+        task: Option<PrintTask>,
     ) -> Result<Self> {
-        let task = resolve_task(model, simple_start, task)?;
+        let task = resolve_task(model, simple_start, task);
         match conn.conn {
             ConnKind::Ble => {
                 let ble = BleTransport::connect(&conn.addr, Duration::from_secs(conn.scan_secs))
@@ -242,14 +244,9 @@ impl Session {
 }
 
 /// Resolve print task once: `--task` wins, else `--simple-start`, else model default.
-fn resolve_task(
-    model: Model,
-    simple_start: bool,
-    task: Option<String>,
-) -> Result<PrintTask> {
-    let t = if let Some(name) = task {
-        name.parse::<PrintTask>()
-            .map_err(|e| anyhow::anyhow!(e))?
+fn resolve_task(model: Model, simple_start: bool, task: Option<PrintTask>) -> PrintTask {
+    let t = if let Some(task) = task {
+        task
     } else if simple_start {
         PrintTask::Simple
     } else {
@@ -260,25 +257,28 @@ fn resolve_task(
             "warning: print task '{t}' is experimental (not hardware-tested in this project)"
         );
     }
-    Ok(t)
+    t
+}
+
+fn init_tracing(verbose: bool) {
+    let default = if verbose { "debug" } else { "info" };
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(if cli.verbose {
-        "debug"
-    } else {
-        "info"
-    }))
-    .format_timestamp_millis()
-    .init();
+    init_tracing(cli.verbose);
 
     match cli.command {
         Commands::Scan { seconds } => cmd_scan(seconds).await?,
         Commands::Ports => cmd_ports()?,
         Commands::Info { conn, model } => {
-            let model: Model = model.parse()?;
             let mut session = Session::connect(&conn, model, false, None).await?;
             print!("{}", session.fetch_summary().await?);
             session.finish().await;
@@ -296,7 +296,6 @@ async fn main() -> Result<()> {
             simple_start,
             task,
         } => {
-            let model: Model = model.parse()?;
             if !(1..=5).contains(&density) {
                 bail!("density must be 1..=5");
             }
@@ -328,12 +327,14 @@ async fn main() -> Result<()> {
             simple_start,
             task,
         } => {
-            let model: Model = model.parse()?;
             let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
             info!(
-                "calibration pattern {}x{} px ({:.1}x{:.1} mm)",
-                lp.width_px, lp.height_px, label_mm.width_mm, label_mm.height_mm
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = label_mm.width_mm,
+                height_mm = label_mm.height_mm,
+                "calibration pattern"
             );
             let gray = image_encode::calibration_pattern(lp);
             let tmp = std::env::temp_dir().join("thermark_calibrate.png");
@@ -371,7 +372,6 @@ async fn main() -> Result<()> {
             model,
             seconds,
         } => {
-            let model: Model = model.parse()?;
             let kind = match conn {
                 ConnKind::Ble => DoctorConn::Ble,
                 ConnKind::Usb => DoctorConn::Usb,
@@ -401,20 +401,14 @@ async fn main() -> Result<()> {
             task,
             no_print,
         } => {
-            let model: Model = model.parse()?;
             let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
-            let side = match text_side.to_ascii_lowercase().as_str() {
-                "left" | "l" => TextSide::Left,
-                "right" | "r" => TextSide::Right,
-                other => bail!("text-side must be left|right, got {other}"),
-            };
             let text = text.replace("\\n", "\n");
             let gray = label::make_qr_label_opts(&QrLabelOptions {
                 url: url.clone(),
                 side_text: text,
                 label: lp,
-                text_side: side,
+                text_side,
                 border,
                 font_path,
                 font_name,
@@ -422,15 +416,14 @@ async fn main() -> Result<()> {
             })?;
             let qr_side = label::max_qr_side(lp);
             info!(
-                "label {}x{} px ({:.0}x{:.0} mm), square QR {}x{} px, text on {:?}, font_size={:?}",
-                lp.width_px,
-                lp.height_px,
-                label_mm.width_mm,
-                label_mm.height_mm,
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = label_mm.width_mm,
+                height_mm = label_mm.height_mm,
                 qr_side,
-                qr_side,
-                side,
-                font_size
+                ?text_side,
+                ?font_size,
+                "qr label"
             );
 
             let png_path =
@@ -473,7 +466,7 @@ async fn main() -> Result<()> {
 }
 
 async fn cmd_scan(seconds: u64) -> Result<()> {
-    info!("scanning BLE for {seconds}s…");
+    info!(seconds, "scanning BLE");
     let devices = BleTransport::scan(Duration::from_secs(seconds)).await?;
     if devices.is_empty() {
         println!("No label-printer-like devices found.");

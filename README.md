@@ -102,6 +102,15 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+## Logging
+
+Uses [`tracing`](https://docs.rs/tracing). Defaults to `info`; `-v` → `debug`. Override with `RUST_LOG`:
+
+```bash
+RUST_LOG=thermark=debug,btleplug=info ./target/release/thermark scan
+./target/release/thermark -v info -a "B1-YourPrinter"
+```
+
 ## Tests
 
 ```bash

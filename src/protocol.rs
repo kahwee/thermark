@@ -43,7 +43,8 @@ pub enum InfoKey {
 }
 
 /// Supported printer models (printhead width and print-start variants).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[value(rename_all = "lower")]
 pub enum Model {
     #[default]
     B1,

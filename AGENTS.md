@@ -30,6 +30,7 @@ cargo test
 # library without BLE/serial sysdeps:
 cargo test --lib --no-default-features
 ./target/release/thermark scan
+# structured logs: -v or RUST_LOG=thermark=debug
 ./target/release/thermark info -a "B1-YourPrinter"
 ./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30
 ./target/release/thermark qr -a "B1-YourPrinter" --font-name helvetica --label 50x30 \

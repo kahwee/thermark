@@ -3,7 +3,7 @@
 use crate::errors::{Error, Result};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{GrayImage, Luma};
-use log::info;
+use tracing::{debug, info};
 use std::path::{Path, PathBuf};
 
 /// Glyph metrics for the built-in 5×7 fallback (used only if no TTF loads).
@@ -160,11 +160,11 @@ impl LabelFont {
             if p.exists() {
                 match Self::load_index(p, *idx) {
                     Ok(f) => {
-                        info!("using font {} (face {idx})", p.display());
+                        info!(path = %p.display(), face = idx, "using font");
                         return Ok(f);
                     }
                     Err(e) => {
-                        log::debug!("skip font {} idx {idx}: {e}", p.display());
+                        debug!(path = %p.display(), face = idx, error = %e, "skip font");
                     }
                 }
             }
@@ -172,7 +172,7 @@ impl LabelFont {
 
         // Fall back to path / substring search among candidates
         if let Some(path) = find_system_font(Some(&key)) {
-            info!("using font {}", path.display());
+            info!(path = %path.display(), "using font");
             return Self::load(&path);
         }
 
@@ -186,7 +186,7 @@ impl LabelFont {
                     "no system font found — pass --font /path/to.ttf or --font-name helvetica",
                 )
             })?;
-            info!("using font {}", path.display());
+            info!(path = %path.display(), "using font");
             Self::load(&path)
         })
     }

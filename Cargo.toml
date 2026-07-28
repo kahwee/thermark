@@ -25,14 +25,14 @@ required-features = ["ble", "serial"]
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
-log = "0.4"
 qrcode = "0.14"
 ab_glyph = "0.2"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Optional transports (enable via features)
 btleplug = { version = "0.11", optional = true }

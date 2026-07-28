@@ -11,20 +11,24 @@ use crate::packet::Packet;
 use crate::protocol::{self, Model};
 
 /// Which on-wire print sequence to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum PrintTask {
     /// B1 / many 2024+ printers: 7-byte PrintStart, 6-byte SetPageSize, status poll.
     /// **Hardware-tested** (B1) in this project.
     #[default]
+    #[value(name = "b1")]
     B1,
     /// Older B21-style: 1-byte PrintStart, 4-byte SetPageSize.
     /// Experimental — not hardware-verified here.
+    #[value(name = "b21v1", alias = "b21", alias = "b21_v1")]
     B21V1,
     /// D110 / D11-style (203 dpi): simple start, 4-byte page size, quantity-ish flow simplified.
     /// Experimental — not hardware-verified here.
+    #[value(name = "d110", alias = "d11")]
     D110,
     /// plain 1-byte PrintStart + 4-byte page size (works on some firmwares).
     /// Experimental as a generic fallback.
+    #[value(name = "simple", alias = "niimprint")]
     Simple,
 }
 

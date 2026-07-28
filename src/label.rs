@@ -6,9 +6,14 @@ use crate::geometry::LabelPx;
 use image::{GrayImage, Luma};
 use qrcode::QrCode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "lower")]
 pub enum TextSide {
+    /// Text column on the left of the QR.
+    #[value(alias = "l")]
     Left,
+    /// Text column on the right of the QR.
+    #[value(alias = "r")]
     Right,
 }
 

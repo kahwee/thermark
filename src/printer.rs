@@ -7,7 +7,7 @@ use crate::packet::Packet;
 use crate::print_task::PrintTask;
 use crate::protocol::{self, Cmd, InfoKey, Model};
 use crate::transport::Transport;
-use log::{debug, info, warn};
+use tracing::{debug, info, warn};
 use std::path::Path;
 use std::time::Duration;
 
@@ -131,12 +131,13 @@ impl<T: Transport> PrinterClient<T> {
                     return Ok(p);
                 }
                 debug!(
-                    "ignoring pkt cmd={:#04x} while waiting for {response_cmd:#04x}",
-                    p.cmd
+                    cmd = format_args!("{:#04x}", p.cmd),
+                    expected = format_args!("{response_cmd:#04x}"),
+                    "ignoring pkt while waiting for response"
                 );
             }
             if i + 1 < attempts {
-                debug!("retry wait for response {response_cmd:#04x}");
+                debug!(expected = format_args!("{response_cmd:#04x}"), "retry wait for response");
             }
         }
         Err(Error::Timeout {
@@ -251,9 +252,12 @@ impl<T: Transport> PrinterClient<T> {
         density: u8,
     ) -> Result<()> {
         info!(
-            "print job {width}x{height}px task={} density={density} rows={}",
-            self.task,
-            rows.len()
+            width,
+            height,
+            task = %self.task,
+            density,
+            rows = rows.len(),
+            "print job"
         );
 
         if self.task.uses_print_clear() {
@@ -357,12 +361,12 @@ impl<T: Transport> PrinterClient<T> {
         let label_px: Option<LabelPx> = opts.label.map(|l| l.to_pixels(max_w));
         if let Some(lp) = label_px {
             info!(
-                "label canvas {}x{} px ({:.1}x{:.1} mm), printhead max {} px",
-                lp.width_px,
-                lp.height_px,
-                lp.mm().width_mm,
-                lp.mm().height_mm,
-                max_w
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = lp.mm().width_mm,
+                height_mm = lp.mm().height_mm,
+                max_w,
+                "label canvas"
             );
             img = if opts.fill {
                 image_encode::fill_label(img, lp)
@@ -380,12 +384,15 @@ impl<T: Transport> PrinterClient<T> {
 
         // Preflight (best-effort)
         if let Ok(rfid) = self.rfid_info().await {
-            info!("RFID: {rfid}");
+            info!(%rfid, "RFID");
         }
         if let Ok(hb) = self.heartbeat().await {
             info!(
-                "preflight: power={:?} lid={:?} paper={:?} rfid={:?}",
-                hb.power_level, hb.closing_state, hb.paper_state, hb.rfid_read_state
+                power = ?hb.power_level,
+                lid = ?hb.closing_state,
+                paper = ?hb.paper_state,
+                rfid = ?hb.rfid_read_state,
+                "preflight heartbeat"
             );
             if hb.paper_state == Some(1) {
                 warn!(
