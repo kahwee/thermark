@@ -76,6 +76,11 @@ fn curated() -> &'static [Fixture] {
             kind: Kind::Art,
         },
         Fixture {
+            name: "sticker_wifi.png",
+            purpose: "Guest Wi‑Fi demo (fake SSID/password only — never real secrets)",
+            kind: Kind::QrSticker,
+        },
+        Fixture {
             name: "sticker_link.png",
             purpose: "Package / share link: QR + order-style text",
             kind: Kind::QrSticker,

@@ -159,6 +159,42 @@ fn turtle_fixture_exists_for_print_smoke() {
 }
 
 #[test]
+fn wifi_help_mentions_ssid() {
+    thermark()
+        .args(["wifi", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ssid"))
+        .stdout(predicate::str::contains("password"));
+}
+
+#[test]
+fn wifi_demo_renders_without_print() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("wifi.png");
+    let (_cfg_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args([
+            "wifi",
+            "--ssid",
+            "Demo-Guest",
+            "--password",
+            "demo-not-real",
+            "--label",
+            "50x30",
+            "--font-name",
+            "helvetica",
+            "--save",
+            out.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Demo-Guest"));
+    assert!(out.is_file(), "wifi PNG not written");
+}
+
+#[test]
 fn print_help_mentions_fuzzy_ble_match() {
     thermark()
         .args(["print", "--help"])

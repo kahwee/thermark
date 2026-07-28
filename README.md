@@ -1,30 +1,21 @@
 # thermark
 
-**Print real stickers from your terminal** — links, inventory tags, name badges, photos — on a pocket thermal label printer over **Bluetooth LE** (or USB). No vendor app, no cloud, no account.
+**Print real stickers from your terminal** on a pocket thermal label printer over **Bluetooth LE** (or USB). No vendor app, no cloud, no account.
 
 Built for B1-class 50×30 mm labels (**384×240 px** at 8 px/mm). Hardware-tested on a real B1.
 
-### What problem does this solve?
+### Why this exists
 
-Vendor apps lock you into a GUI, cloud accounts, and opaque templates. **thermark** is terminal-first: exact millimetre geometry, offline, scriptable.
+The job that justifies the tool: **guest Wi‑Fi and QR-link stickers** without opening a proprietary app every time.
 
-**Use cases**
+You want a label where the **network name is obvious**, and a **QR people scan to join** (phones already understand the standard `WIFI:T:WPA;S:…;P:…;;` payload). Same pattern for “scan this URL” on packages or gear. Vendor apps make that a GUI chore (and often a cloud login). **thermark** is offline, exact millimetres, and scriptable.
 
-- Package / order stickers with a scannable QR and human-readable ship notes
-- Inventory bin tags (SKU, qty, date) that still leave a quiet edge for the print head
-- Desk and event name badges with identity lines beside a QR
-- Workshop / site crew badges: cute line art + bold status text on one 50×30
-- Photo or mascot stickers (1-bit thermal) for makers, kids, or product samples
-- Batch / CI automation via CLI or the Rust library — no cloud round-trip
-
-| Why people use it | What you get |
-|-------------------|--------------|
-| Share a URL on a package or laptop | QR + short text, one command |
-| Label bins, cables, samples | Dense multi-line tags that still scan |
-| Desk / event name stickers | Clean QR + identity lines |
-| Art + text crew / site badges | Hybrid layout, pure B/W thermal |
-| Photo stickers (1-bit thermal) | Centered fit, margins, dither |
-| Automate / script | Plain CLI + Rust library, offline |
+| Job | Command |
+|-----|---------|
+| **Guest Wi‑Fi** — SSID on sticker, password in QR | `thermark wifi --ssid "…" --password "…"` |
+| Package / share a URL | `thermark qr --url "https://…"` |
+| Inventory / name badges | `thermark qr` with side text |
+| Line-art / crew badges | `thermark print -i …` |
 
 | Model | Task | Status |
 |-------|------|--------|
@@ -63,6 +54,34 @@ Address priority: **`-a`** → **`THERMARK_ADDR`** → **config**. Match is **ex
 ## Sticker recipes
 
 Always pass **`--label 50x30`** (or your media) so the canvas matches the physical sticker. After `scan --save`, omit `-a`.
+
+### Guest Wi‑Fi (primary recipe)
+
+QR = one-tap join. Side text = **network name** (password stays in the QR unless you pass `--show-password`).
+
+**Demo only** (fake credentials, safe to commit):
+
+```bash
+./target/release/thermark wifi \
+  --ssid "Demo-Guest" \
+  --password "demo-not-real" \
+  --font-name helvetica \
+  --label 50x30 \
+  --save fixtures/sticker_wifi.png \
+  --no-print
+```
+
+<img src="fixtures/sticker_wifi.png" alt="Guest Wi‑Fi sticker demo" width="384" />
+
+**Your real network** (do **not** commit the PNG or put it under `fixtures/`):
+
+```bash
+./target/release/thermark wifi \
+  --ssid "YourNetworkName" \
+  --password 'your-password' \
+  --label 50x30
+# or: --save /tmp/my-wifi.png --no-print   # keep outside the repo
+```
 
 ### Link / package sticker
 

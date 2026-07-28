@@ -15,6 +15,7 @@ use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
 use thermark::transport::{BleDeviceInfo, BleMatchMode, BleTransport, SerialTransport};
 use thermark::types::{Density, Rotation, Threshold};
+use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -22,7 +23,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "thermark",
     version,
-    about = "Local thermal label printing over BLE/USB — QR, text, calibration (no vendor app)"
+    about = "Local sticker printing over BLE/USB — guest Wi‑Fi, QR, inventory (no vendor app)"
 )]
 struct Cli {
     /// Verbose logging (`RUST_LOG` still overrides when set)
@@ -170,6 +171,58 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         allow_experimental: bool,
         /// Only generate PNG, do not print
+        #[arg(long, default_value_t = false)]
+        no_print: bool,
+    },
+    /// Guest Wi‑Fi sticker: scan-to-join QR + clear network name
+    ///
+    /// QR uses the standard WIFI: payload (phones join on scan). Side text shows
+    /// the SSID large; password stays in the QR unless --show-password.
+    /// Do not commit real credentials — print locally or --save outside the repo.
+    Wifi {
+        #[command(flatten)]
+        conn: ConnArgs,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
+        /// Network name (SSID) — shown on the sticker
+        #[arg(long)]
+        ssid: String,
+        /// Wi‑Fi password (encoded in QR only by default)
+        #[arg(long, default_value = "")]
+        password: String,
+        /// Security: wpa (default), wep, nopass
+        #[arg(long, value_enum, default_value_t = WifiSecurity::Wpa)]
+        security: WifiSecurity,
+        /// Hidden SSID
+        #[arg(long, default_value_t = false)]
+        hidden: bool,
+        /// Also print password in cleartext under the SSID (less secure)
+        #[arg(long, default_value_t = false)]
+        show_password: bool,
+        #[arg(long, value_enum, default_value_t = TextSide::Right)]
+        text_side: TextSide,
+        #[arg(long, default_value = "50x30")]
+        label: String,
+        #[arg(long)]
+        font: Option<PathBuf>,
+        #[arg(long)]
+        font_name: Option<String>,
+        #[arg(long)]
+        font_size: Option<f32>,
+        #[arg(long, default_value_t = false)]
+        border: bool,
+        #[arg(short, long, default_value = "4", value_parser = parse_density)]
+        density: Density,
+        /// Save PNG (use a path outside the git repo for real credentials)
+        #[arg(long)]
+        save: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        simple_start: bool,
+        #[arg(long, value_enum)]
+        task: Option<PrintTask>,
+        #[arg(long, default_value_t = false)]
+        allow_experimental: bool,
         #[arg(long, default_value_t = false)]
         no_print: bool,
     },
@@ -626,6 +679,82 @@ async fn main() -> Result<()> {
             session.finish().await;
             result?;
             println!("OK — QR label printed");
+        }
+        Commands::Wifi {
+            conn,
+            model,
+            ssid,
+            password,
+            security,
+            hidden,
+            show_password,
+            text_side,
+            label,
+            font: font_path,
+            font_name,
+            font_size,
+            border,
+            density,
+            save,
+            simple_start,
+            task,
+            allow_experimental,
+            no_print,
+        } => {
+            let model = cfg.resolve_model(model);
+            let label_mm = LabelMm::parse(&label)?;
+            let lp = label_mm.to_pixels(model.max_width_px());
+            // Never log the password (only SSID + security).
+            info!(%ssid, ?security, hidden, show_password, "wifi sticker");
+            let gray = make_wifi_label(&WifiLabelOptions {
+                ssid: ssid.clone(),
+                password,
+                security,
+                hidden,
+                show_password,
+                label: lp,
+                text_side,
+                font_path,
+                font_name,
+                font_size,
+                border,
+            })?;
+
+            let png_path =
+                save.unwrap_or_else(|| std::env::temp_dir().join("thermark_wifi_label.png"));
+            // Refuse to write demo path into repo accidentally if user passes fixtures/
+            // with real secrets — we still allow fixtures only for intentional demos.
+            gray.save(&png_path)
+                .with_context(|| format!("save {}", png_path.display()))?;
+            println!("saved {}", png_path.display());
+            println!("SSID on sticker: {ssid}");
+            if show_password {
+                eprintln!("warning: password is printed in cleartext on the label");
+            } else {
+                println!("password: in QR only (not printed as text)");
+            }
+
+            if no_print {
+                return Ok(());
+            }
+
+            let opts = PrintOptions {
+                density,
+                rotate: Rotation::Deg0,
+                threshold: Threshold::DEFAULT,
+                fit: false,
+                label: Some(label_mm),
+                fill: false,
+                margin_px: 0,
+                dither: false,
+            };
+            let conn = conn.resolve(&cfg)?;
+            let mut session =
+                Session::connect(&conn, model, simple_start, task, allow_experimental).await?;
+            let result = session.print_image_file_opts(&png_path, opts).await;
+            session.finish().await;
+            result?;
+            println!("OK — Wi‑Fi sticker printed");
         }
         Commands::Encode { cmd, data } => {
             let cmd = u8::from_str_radix(cmd.trim_start_matches("0x"), 16)
