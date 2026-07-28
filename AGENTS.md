@@ -30,9 +30,10 @@ cargo test
 # library without BLE/serial sysdeps:
 cargo test --lib --no-default-features
 ./target/release/thermark scan
+./target/release/thermark scan --save       # write best B1-like device to config.json
 # structured logs: -v or RUST_LOG=thermark=debug
-./target/release/thermark config set -a "B1-YourPrinter"
-./target/release/thermark info              # uses saved addr
+./target/release/thermark config set -a "B1-YourPrinter" -m b1
+./target/release/thermark info              # uses saved addr + model
 ./target/release/thermark info -a "B1-YourPrinter"
 ./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30
 ./target/release/thermark qr -a "B1-YourPrinter" --font-name helvetica --label 50x30 \

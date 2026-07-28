@@ -13,7 +13,7 @@ use thermark::label::{self, QrLabelOptions, TextSide};
 use thermark::print_task::{PrintTask, hardware_matrix};
 use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
-use thermark::transport::{BleTransport, SerialTransport};
+use thermark::transport::{BleDeviceInfo, BleTransport, SerialTransport};
 use thermark::types::{Density, Rotation, Threshold};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -40,6 +40,12 @@ enum Commands {
         /// How long to scan (seconds)
         #[arg(short, long, default_value_t = 5)]
         seconds: u64,
+        /// Save the best match into config.json as the default printer
+        #[arg(long, default_value_t = false)]
+        save: bool,
+        /// When saving, prefer a device whose name contains this (case-insensitive)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// List USB serial ports
     Ports,
@@ -47,8 +53,9 @@ enum Commands {
     Info {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, value_enum, default_value_t = Model::B1)]
-        model: Model,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
     },
     /// Print an image (PNG/JPEG/…)
     Print {
@@ -57,9 +64,10 @@ enum Commands {
         /// Image path
         #[arg(short, long)]
         image: PathBuf,
-        #[arg(short, long, value_enum, default_value_t = Model::B1)]
-        model: Model,
-        /// Print density 1..=5
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
+        /// Print density 1..=5 (default 3 = normal; use 4 for denser/darker)
         #[arg(short, long, default_value = "3", value_parser = parse_density)]
         density: Density,
         /// Rotate clockwise: 0, 90, 180, 270
@@ -88,11 +96,13 @@ enum Commands {
     Calibrate {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, value_enum, default_value_t = Model::B1)]
-        model: Model,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
         /// Label size mm, e.g. 50x30
         #[arg(long, default_value = "50x30")]
         label: String,
+        /// Density 1..=5 (default 4 = darker for full-bleed calibration)
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
         density: Density,
         #[arg(long, default_value_t = false)]
@@ -104,8 +114,9 @@ enum Commands {
     Qr {
         #[command(flatten)]
         conn: ConnArgs,
-        #[arg(short, long, value_enum, default_value_t = Model::B1)]
-        model: Model,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
         /// URL or text encoded in the QR
         #[arg(long, default_value = "https://www.youtube.com")]
         url: String,
@@ -130,6 +141,7 @@ enum Commands {
         /// Draw a 1px outer border (usually unnecessary)
         #[arg(long, default_value_t = false)]
         border: bool,
+        /// Density 1..=5 (default 4 = darker for small QR/text)
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
         density: Density,
         /// Also save PNG to this path
@@ -160,8 +172,9 @@ enum Commands {
         /// Connection type when connecting
         #[arg(short = 'c', long, value_enum)]
         conn: Option<ConnPref>,
-        #[arg(short, long, value_enum, default_value_t = Model::B1)]
-        model: Model,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
         /// BLE scan seconds
         #[arg(short, long, default_value_t = 5)]
         seconds: u64,
@@ -340,9 +353,14 @@ async fn main() -> Result<()> {
     let cfg = Config::load().unwrap_or_default();
 
     match cli.command {
-        Commands::Scan { seconds } => cmd_scan(seconds).await?,
+        Commands::Scan {
+            seconds,
+            save,
+            name,
+        } => cmd_scan(seconds, save, name.as_deref()).await?,
         Commands::Ports => cmd_ports()?,
         Commands::Info { conn, model } => {
+            let model = cfg.resolve_model(model);
             let conn = conn.resolve(&cfg)?;
             let mut session = Session::connect(&conn, model, false, None).await?;
             let result = session.fetch_summary().await;
@@ -365,6 +383,7 @@ async fn main() -> Result<()> {
             if !image.exists() {
                 bail!("image not found: {}", image.display());
             }
+            let model = cfg.resolve_model(model);
             let label_mm = match label {
                 Some(s) => Some(LabelMm::parse(&s)?),
                 None => None,
@@ -392,6 +411,7 @@ async fn main() -> Result<()> {
             simple_start,
             task,
         } => {
+            let model = cfg.resolve_model(model);
             let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
             info!(
@@ -441,6 +461,7 @@ async fn main() -> Result<()> {
             use_config,
         } => {
             // Host-only by default; -a or --use-config enables connect + sensors.
+            let model = cfg.resolve_model(model);
             let addr = if let Some(a) = addr {
                 Some(a)
             } else if use_config {
@@ -477,6 +498,7 @@ async fn main() -> Result<()> {
             task,
             no_print,
         } => {
+            let model = cfg.resolve_model(model);
             let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
             let text = text.replace("\\n", "\n");
@@ -608,8 +630,8 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_scan(seconds: u64) -> Result<()> {
-    info!(seconds, "scanning BLE");
+async fn cmd_scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result<()> {
+    info!(seconds, save, "scanning BLE");
     let devices = BleTransport::scan(Duration::from_secs(seconds)).await?;
     if devices.is_empty() {
         println!("No label-printer-like devices found.");
@@ -617,13 +639,73 @@ async fn cmd_scan(seconds: u64) -> Result<()> {
         return Ok(());
     }
     println!("{:<40} {:<24} RSSI", "ID", "NAME");
-    for d in devices {
+    for d in &devices {
         let rssi = d.rssi.map(|r| r.to_string()).unwrap_or_else(|| "-".into());
         println!("{:<40} {:<24} {}", d.id, d.name, rssi);
     }
-    println!("\nSave default:  thermark config set -a \"<name or id>\"");
-    println!("Then connect:  thermark info");
+
+    if save {
+        let pick = pick_scan_device(&devices, prefer_name)
+            .ok_or_else(|| anyhow::anyhow!("no device matched for --save"))?;
+        // Prefer BLE advertising name; fall back to peripheral id (macOS UUID).
+        let addr = if pick.name.is_empty() || pick.name == "(no name)" {
+            pick.id.clone()
+        } else {
+            pick.name.clone()
+        };
+        let mut cfg = Config::load().unwrap_or_default();
+        let model = cfg.model;
+        cfg.apply_set(&addr, ConnPref::Ble, model, None);
+        let path = cfg.save()?;
+        println!("\nsaved default printer → {addr}");
+        println!("  file: {}", path.display());
+        println!("Then: thermark info   /   thermark doctor --use-config");
+    } else {
+        println!("\nSave default:  thermark scan --save");
+        println!("  or:           thermark scan --save --name B1");
+        println!("  or:           thermark config set -a \"<name or id>\"");
+        println!("Then connect:  thermark info");
+    }
     Ok(())
+}
+
+/// Choose a device for `--save`: optional name substring, else B1-like name, else strongest RSSI.
+fn pick_scan_device<'a>(
+    devices: &'a [BleDeviceInfo],
+    prefer_name: Option<&str>,
+) -> Option<&'a BleDeviceInfo> {
+    if devices.is_empty() {
+        return None;
+    }
+    if let Some(want) = prefer_name.map(|s| s.to_ascii_lowercase()) {
+        if let Some(d) = devices.iter().find(|d| {
+            d.name.to_ascii_lowercase().contains(&want) || d.id.to_ascii_lowercase().contains(&want)
+        }) {
+            return Some(d);
+        }
+    }
+    // Prefer names that look like real pocket printers (not bare UUIDs).
+    let mut scored: Vec<(i32, &BleDeviceInfo)> = devices
+        .iter()
+        .map(|d| {
+            let name = d.name.to_ascii_lowercase();
+            let mut score = i32::from(d.rssi.unwrap_or(-100));
+            if name.starts_with("b1") || name.contains("b1-") {
+                score += 1000;
+            } else if name.starts_with("b21")
+                || name.starts_with("d11")
+                || name.contains("niim")
+                || name.starts_with("jc-")
+            {
+                score += 500;
+            } else if name == "(no name)" || name.is_empty() {
+                score -= 200;
+            }
+            (score, d)
+        })
+        .collect();
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    scored.first().map(|(_, d)| *d)
 }
 
 fn cmd_ports() -> Result<()> {
@@ -648,4 +730,31 @@ fn print_tasks_matrix() {
     }
     println!();
     println!("Override with: thermark print|qr|calibrate --task b1|b21v1|d110|simple");
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+
+    fn dev(name: &str, rssi: i16) -> BleDeviceInfo {
+        BleDeviceInfo {
+            id: format!("id-{name}"),
+            name: name.into(),
+            rssi: Some(rssi),
+        }
+    }
+
+    #[test]
+    fn prefers_b1_name_over_stronger_rssi() {
+        let devices = vec![dev("random-watch", -40), dev("B1-ABC", -80)];
+        let p = pick_scan_device(&devices, None).unwrap();
+        assert_eq!(p.name, "B1-ABC");
+    }
+
+    #[test]
+    fn name_filter_wins() {
+        let devices = vec![dev("B1-One", -50), dev("B1-Two", -40)];
+        let p = pick_scan_device(&devices, Some("two")).unwrap();
+        assert_eq!(p.name, "B1-Two");
+    }
 }

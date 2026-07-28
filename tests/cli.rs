@@ -43,6 +43,16 @@ fn config_help_lists_subcommands() {
 }
 
 #[test]
+fn scan_help_mentions_save() {
+    thermark()
+        .args(["scan", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("save"))
+        .stdout(predicate::str::contains("name"));
+}
+
+#[test]
 fn tasks_prints_matrix() {
     thermark()
         .arg("tasks")

@@ -47,32 +47,33 @@ The CLI binary requires both `ble` and `serial` (the default feature set).
 ## Usage
 
 ```bash
-# Scan for printers
+# Scan for printers; optionally save best B1-like device to config.json
 ./target/release/thermark scan
+./target/release/thermark scan --save
+./target/release/thermark scan --save --name B1
 
-# Save default BLE device (macOS: ~/Library/Application Support/thermark/config.json)
-./target/release/thermark config set -a "B1-YourPrinter"
+# Or set default manually (macOS: ~/Library/Application Support/thermark/config.json)
+./target/release/thermark config set -a "B1-YourPrinter" -m b1
 ./target/release/thermark config show
 ./target/release/thermark config show --json
 
-# Prefer the full BLE name from scan (macOS uses UUIDs, not MACs)
-# After config set, -a is optional:
+# After save, -a / -m are optional (config supplies defaults):
 ./target/release/thermark info
 ./target/release/thermark info -a "B1-YourPrinter"   # still works; overrides config
 
-# Calibration — full label canvas
-./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30 -d 4
+# Calibration — full label canvas (density default 4 = darker)
+./target/release/thermark calibrate --label 50x30
 
-# QR + text (Helvetica, small type)
-./target/release/thermark qr -a "B1-YourPrinter" \
+# QR + text (Helvetica, small type; density default 4)
+./target/release/thermark qr \
   --url "https://www.youtube.com" \
   --text $'ABC\nYOUTUBE' \
   --font-name helvetica \
   --font-size 14 \
-  --label 50x30 -d 4
+  --label 50x30
 
-# Print an image
-./target/release/thermark print -a "B1-YourPrinter" -i label.png --label 50x30 --fill
+# Print an image (density default 3 = normal)
+./target/release/thermark print -i label.png --label 50x30 --fill
 
 # List usable system fonts
 ./target/release/thermark fonts
@@ -106,7 +107,17 @@ Use `doctor` when something fails — offline printer, lid open, no paper, Bluet
 | Clear | `thermark config clear` |
 | Env overrides | `THERMARK_ADDR` (addr only) · `THERMARK_CONFIG` (file path) |
 
-Priority for address: **`-a` flag** → **`THERMARK_ADDR`** → **config file**.
+Priority for address: **`-a` flag** → **`THERMARK_ADDR`** → **config file**.  
+Priority for model: **`-m` flag** → **config `model`** → **`b1`**.
+
+### Print density
+
+| Command | Default density | Meaning |
+|---------|-----------------|--------|
+| `print` | **3** (`Density::NORMAL`) | Everyday raster print |
+| `qr` / `calibrate` | **4** (`Density::DARK`) | Darker ink for fine type / full-bleed patterns |
+
+Override with `-d 1`…`-d 5` anytime.
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -151,6 +162,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+## Fixtures
+
+Sample label PNGs used during development live in `fixtures/` (not Cargo `examples/`).
 
 ## Logging
 
