@@ -31,8 +31,13 @@ pub struct PrintOptions {
     pub fit: bool,
     /// Physical label size (mm). Image is scaled/padded to this.
     pub label: Option<LabelMm>,
-    /// If true with `label`, scale image to **cover** the label (max size).
+    /// If true with `label`, scale image to **cover** the label (may crop).
+    /// If false, **contain** + center with white margins (better for photos).
     pub fill: bool,
+    /// White inset margin in pixels (each side) when placing on a label canvas.
+    pub margin_px: u32,
+    /// Floyd–Steinberg dither instead of hard B/W threshold (photos).
+    pub dither: bool,
 }
 
 impl Default for PrintOptions {
@@ -44,6 +49,8 @@ impl Default for PrintOptions {
             fit: false,
             label: None,
             fill: true,
+            margin_px: 0,
+            dither: false,
         }
     }
 }
@@ -415,6 +422,8 @@ impl<T: Transport> PrinterClient<T> {
                 fit,
                 label: None,
                 fill: false,
+                margin_px: 0,
+                dither: false,
             },
         )
         .await
@@ -441,19 +450,23 @@ impl<T: Transport> PrinterClient<T> {
                 width_mm = lp.mm().width_mm,
                 height_mm = lp.mm().height_mm,
                 max_w,
+                fill = opts.fill,
+                margin_px = opts.margin_px,
+                dither = opts.dither,
                 "label canvas"
             );
             img = if opts.fill {
-                image_encode::fill_label(img, lp)
+                image_encode::fill_label_with_margin(img, lp, opts.margin_px)
             } else {
-                image_encode::pad_to_label(image_encode::fit_width(img, lp.width_px), lp)
+                // Contain + center: whole photo visible, white margins, no crop.
+                image_encode::contain_label(img, lp, opts.margin_px)
             };
         } else if opts.fit {
             img = image_encode::fit_width(img, max_w);
         }
 
         let (width, height, rows) =
-            image_encode::encode_image(img, max_w, 0, opts.threshold.get())?;
+            image_encode::encode_image_opts(img, max_w, 0, opts.threshold.get(), opts.dither)?;
 
         if let Ok(rfid) = self.rfid_info().await {
             info!(%rfid, "RFID");

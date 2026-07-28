@@ -112,7 +112,25 @@ Always pass **`--label 50x30`** (or your media size) so the canvas matches the l
 
 <img src="fixtures/test_label.png" alt="Sample raster label" width="384" />
 
-*Density default 3. Preview without printing: add `--save out.png --no-print` to `qr`.*
+### Print a photograph
+
+Thermal is **1-bit**. For photos, center the image and dither (avoids blotchy black “bleed”):
+
+```bash
+./target/release/thermark print \
+  -i fixtures/photo_unsplash_mountains.jpg \
+  --label 50x30 \
+  --no-fill --margin 12 --dither -d 3
+```
+
+| Flag | Effect |
+|------|--------|
+| `--no-fill` | Fit whole image, centered (no crop) |
+| `--margin N` | White inset (px) so heat doesn’t run to the edge |
+| `--dither` | Floyd–Steinberg instead of hard threshold |
+| `-d 3` | Normal density (4–5 can smear midtones) |
+
+*Density default 3 for `print`. QR preview without printing: `--save out.png --no-print`.*
 
 ### Fonts & tasks
 

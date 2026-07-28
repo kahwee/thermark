@@ -82,9 +82,18 @@ enum Commands {
         /// Physical label size in mm, e.g. 50x30 (width x height). Scales content to this canvas.
         #[arg(long)]
         label: Option<String>,
-        /// With --label, scale image to cover the whole label (default true when --label set)
+        /// Cover the label (may crop). Default on. Use --no-fill to fit the whole image centered.
         #[arg(long, default_value_t = true)]
         fill: bool,
+        /// Fit the whole image on the label with white margins (no crop). Best for photos.
+        #[arg(long, default_value_t = false)]
+        no_fill: bool,
+        /// White margin inset in pixels (each side). Avoids edge bleed; good with photos.
+        #[arg(long, default_value_t = 0)]
+        margin: u32,
+        /// Floyd–Steinberg dither instead of hard B/W (recommended for photographs)
+        #[arg(long, default_value_t = false)]
+        dither: bool,
         /// Force simple 1-byte PrintStart (plain-form; experimental)
         #[arg(long, default_value_t = false)]
         simple_start: bool,
@@ -416,6 +425,9 @@ async fn main() -> Result<()> {
             fit,
             label,
             fill,
+            no_fill,
+            margin,
+            dither,
             simple_start,
             task,
             allow_experimental,
@@ -428,13 +440,23 @@ async fn main() -> Result<()> {
                 Some(s) => Some(LabelMm::parse(&s)?),
                 None => None,
             };
+            // --no-fill wins over --fill; with a label, default is cover unless no_fill.
+            let use_fill = if no_fill {
+                false
+            } else if label_mm.is_some() {
+                fill
+            } else {
+                false
+            };
             let opts = PrintOptions {
                 density,
                 rotate,
                 threshold,
                 fit,
                 label: label_mm,
-                fill: fill || label_mm.is_some(),
+                fill: use_fill,
+                margin_px: margin,
+                dither,
             };
             let conn = conn.resolve(&cfg)?;
             let mut session =
@@ -473,6 +495,8 @@ async fn main() -> Result<()> {
                 fit: false,
                 label: Some(label_mm),
                 fill: true,
+                margin_px: 0,
+                dither: false,
             };
             let conn = conn.resolve(&cfg)?;
             let mut session =
@@ -592,6 +616,8 @@ async fn main() -> Result<()> {
                 fit: false,
                 label: Some(label_mm),
                 fill: false,
+                margin_px: 0,
+                dither: false,
             };
             let conn = conn.resolve(&cfg)?;
             let mut session =
