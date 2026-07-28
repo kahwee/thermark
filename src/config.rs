@@ -353,8 +353,11 @@ mod tests {
 
     fn with_clean_env<T>(f: impl FnOnce() -> T) -> T {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("THERMARK_ADDR");
-        std::env::remove_var("THERMARK_CONFIG");
+        // SAFETY: tests hold ENV_LOCK so no concurrent env mutation.
+        unsafe {
+            std::env::remove_var("THERMARK_ADDR");
+            std::env::remove_var("THERMARK_CONFIG");
+        }
         f()
     }
 
@@ -476,10 +479,15 @@ mod tests {
             assert_eq!(cfg.resolve_addr(Some("")).unwrap(), "from-config");
             assert_eq!(cfg.resolve_addr(Some("   ")).unwrap(), "from-config");
 
-            std::env::set_var("THERMARK_ADDR", "from-env");
+            // SAFETY: ENV_LOCK held by with_clean_env.
+            unsafe {
+                std::env::set_var("THERMARK_ADDR", "from-env");
+            }
             assert_eq!(cfg.resolve_addr(None).unwrap(), "from-env");
             assert_eq!(cfg.resolve_addr(Some("from-cli")).unwrap(), "from-cli");
-            std::env::remove_var("THERMARK_ADDR");
+            unsafe {
+                std::env::remove_var("THERMARK_ADDR");
+            }
         });
     }
 
@@ -543,9 +551,14 @@ mod tests {
         with_clean_env(|| {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("custom.toml");
-            std::env::set_var("THERMARK_CONFIG", path.as_os_str());
+            // SAFETY: ENV_LOCK held by with_clean_env.
+            unsafe {
+                std::env::set_var("THERMARK_CONFIG", path.as_os_str());
+            }
             assert_eq!(Config::default_path().unwrap(), path);
-            std::env::remove_var("THERMARK_CONFIG");
+            unsafe {
+                std::env::remove_var("THERMARK_CONFIG");
+            }
         });
     }
 

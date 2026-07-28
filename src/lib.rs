@@ -30,10 +30,10 @@ pub mod transport;
 
 pub use config::{Config, ConfigFormat, ConnPref};
 pub use errors::{Error, PrinterErrorCode, Result};
-pub use geometry::{LabelMm, LabelPx, DEFAULT_B1_LABEL, PX_PER_MM};
+pub use geometry::{DEFAULT_B1_LABEL, LabelMm, LabelPx, PX_PER_MM};
 pub use mock::MockTransport;
 pub use packet::Packet;
-pub use print_task::{hardware_matrix, PrintTask, SupportStatus};
+pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
 pub use printer::{PrintOptions, PrinterClient};
 pub use protocol::Model;
 pub use transport::Transport;

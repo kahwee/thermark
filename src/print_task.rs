@@ -224,8 +224,9 @@ mod tests {
     #[test]
     fn matrix_has_tested_b1() {
         let m = hardware_matrix();
-        assert!(m
-            .iter()
-            .any(|h| h.model == "B1" && h.status == SupportStatus::Tested));
+        assert!(
+            m.iter()
+                .any(|h| h.model == "B1" && h.status == SupportStatus::Tested)
+        );
     }
 }

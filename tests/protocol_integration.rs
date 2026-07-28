@@ -2,7 +2,7 @@
 
 use thermark::errors::PrinterErrorCode;
 use thermark::geometry::{LabelMm, PX_PER_MM};
-use thermark::label::{make_qr_label, max_qr_side, render_qr_square, TextSide};
+use thermark::label::{TextSide, make_qr_label, max_qr_side, render_qr_square};
 use thermark::packet::Packet;
 use thermark::protocol::{self, Model};
 

@@ -1,7 +1,8 @@
 [package]
 name = "thermark"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.87"
 description = "Local BLE/USB thermal label printing (QR, text, calibration) without vendor apps"
 license = "MIT"
 readme = "README.md"
@@ -34,12 +35,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
-toml = "0.8"
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Optional transports (enable via features)
-btleplug = { version = "0.11", optional = true }
+btleplug = { version = "0.12", optional = true }
 futures = { version = "0.3", optional = true }
 serialport = { version = "4", optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }

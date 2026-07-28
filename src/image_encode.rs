@@ -4,7 +4,7 @@ use crate::errors::{Error, Result};
 use crate::geometry::LabelPx;
 use crate::packet::Packet;
 use crate::protocol;
-use image::{imageops, DynamicImage, GenericImageView, GrayImage, Luma, RgbaImage};
+use image::{DynamicImage, GenericImageView, GrayImage, Luma, RgbaImage, imageops};
 
 /// Load, optionally rotate, threshold to 1-bit, and emit print row packets.
 ///

@@ -1,7 +1,7 @@
 //! Environment + printer readiness checks (`thermark doctor`).
 
 use crate::errors::Result;
-use crate::print_task::{hardware_matrix, PrintTask, SupportStatus};
+use crate::print_task::{PrintTask, SupportStatus, hardware_matrix};
 use crate::printer::{Heartbeat, PrinterClient, RfidInfo};
 use crate::protocol::Model;
 use std::fmt;
@@ -563,9 +563,11 @@ mod tests {
             raw_len: 13,
         };
         let checks = evaluate_heartbeat(&hb);
-        assert!(checks
-            .iter()
-            .any(|c| c.name == "paper" && c.status == CheckStatus::Fail));
+        assert!(
+            checks
+                .iter()
+                .any(|c| c.name == "paper" && c.status == CheckStatus::Fail)
+        );
     }
 
     #[test]

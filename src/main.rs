@@ -1,6 +1,6 @@
 //! CLI for pocket thermal label printers over BLE or USB serial.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -10,7 +10,7 @@ use thermark::font;
 use thermark::geometry::LabelMm;
 use thermark::image_encode;
 use thermark::label::{self, QrLabelOptions, TextSide};
-use thermark::print_task::{hardware_matrix, PrintTask};
+use thermark::print_task::{PrintTask, hardware_matrix};
 use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
 use thermark::transport::{BleTransport, SerialTransport};

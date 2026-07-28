@@ -376,8 +376,8 @@ mod ble {
 
 #[cfg(feature = "ble")]
 pub use ble::{
-    bluetooth_available, BleDeviceInfo, BleTransport, NIIMBOT_CHAR, NIIMBOT_SERVICE, PRINTER_CHAR,
-    PRINTER_SERVICE,
+    BleDeviceInfo, BleTransport, NIIMBOT_CHAR, NIIMBOT_SERVICE, PRINTER_CHAR, PRINTER_SERVICE,
+    bluetooth_available,
 };
 
 // ─── USB serial ─────────────────────────────────────────────────────────────
