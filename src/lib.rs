@@ -37,7 +37,7 @@ pub use packet::Packet;
 pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
 pub use printer::{Heartbeat, InfoValue, PrintOptions, PrinterClient, PrinterSummary, RfidInfo};
 pub use protocol::Model;
-pub use transport::Transport;
+pub use transport::{BleMatchMode, Transport, score_ble_candidate, select_ble_candidate};
 pub use types::{Density, Rotation, Threshold};
 
 #[cfg(feature = "ble")]

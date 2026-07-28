@@ -7,6 +7,7 @@ use crate::protocol::Model;
 use std::fmt;
 use std::time::Duration;
 
+use crate::transport::BleMatchMode;
 #[cfg(feature = "serial")]
 use crate::transport::SerialTransport;
 #[cfg(feature = "ble")]
@@ -247,6 +248,7 @@ pub async fn run_doctor(
     model: Model,
     scan_secs: u64,
     conn_kind: DoctorConn,
+    match_mode: BleMatchMode,
 ) -> Result<DoctorReport> {
     let mut checks = Vec::new();
 
@@ -304,7 +306,7 @@ pub async fn run_doctor(
 
     match conn_kind {
         DoctorConn::Ble => {
-            doctor_ble(&mut checks, addr, model, scan_secs).await?;
+            doctor_ble(&mut checks, addr, model, scan_secs, match_mode).await?;
         }
         DoctorConn::Usb => {
             doctor_usb(&mut checks, addr, model).await?;
@@ -335,6 +337,7 @@ async fn doctor_ble(
     addr: Option<&str>,
     model: Model,
     scan_secs: u64,
+    match_mode: BleMatchMode,
 ) -> Result<()> {
     match transport::bluetooth_available().await {
         Ok(info) => checks.push(Check {
@@ -388,12 +391,12 @@ async fn doctor_ble(
     }
 
     if let Some(selector) = addr {
-        match BleTransport::connect(selector, scan_for).await {
+        match BleTransport::connect_with(selector, scan_for, match_mode).await {
             Ok(ble) => {
                 checks.push(Check {
                     name: "ble_connect".into(),
                     status: CheckStatus::Pass,
-                    detail: format!("connected via '{selector}'"),
+                    detail: format!("connected via '{selector}' ({match_mode:?})"),
                 });
                 let mut client = PrinterClient::new(ble, model);
                 match client.heartbeat().await {
@@ -453,6 +456,7 @@ async fn doctor_ble(
     _addr: Option<&str>,
     _model: Model,
     _scan_secs: u64,
+    _match_mode: BleMatchMode,
 ) -> Result<()> {
     checks.push(Check {
         name: "bluetooth".into(),

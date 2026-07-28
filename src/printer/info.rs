@@ -173,6 +173,47 @@ impl Heartbeat {
         }
         hb
     }
+
+    /// Hard preflight conditions that should abort a print job.
+    ///
+    /// Matches [`crate::doctor::evaluate_heartbeat`] FAIL cases for cover, paper,
+    /// and empty battery. Missing fields are not blockers (firmware-dependent).
+    pub fn print_blocker(&self) -> Option<crate::errors::PrinterErrorCode> {
+        use crate::errors::PrinterErrorCode;
+        if self.closing_state == Some(1) {
+            return Some(PrinterErrorCode::CoverOpen);
+        }
+        if self.paper_state == Some(1) {
+            return Some(PrinterErrorCode::LackPaper);
+        }
+        if self.power_level == Some(0) {
+            return Some(PrinterErrorCode::LowBattery);
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod heartbeat_blocker_tests {
+    use super::*;
+    use crate::errors::PrinterErrorCode;
+
+    #[test]
+    fn print_blocker_cover_paper_battery() {
+        let mut hb = Heartbeat::default();
+        assert!(hb.print_blocker().is_none());
+
+        hb.closing_state = Some(1);
+        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::CoverOpen));
+
+        hb.closing_state = Some(0);
+        hb.paper_state = Some(1);
+        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::LackPaper));
+
+        hb.paper_state = Some(0);
+        hb.power_level = Some(0);
+        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::LowBattery));
+    }
 }
 
 #[derive(Debug, Clone)]

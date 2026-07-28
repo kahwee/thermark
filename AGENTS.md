@@ -27,25 +27,21 @@ macOS CoreBluetooth uses **UUID** device ids, not classic MACs.
 ```bash
 cargo build --release
 cargo test
-# library without BLE/serial sysdeps:
 cargo test --lib --no-default-features
-./target/release/thermark scan
-./target/release/thermark scan --save       # write best B1-like device to config.json
-# structured logs: -v or RUST_LOG=thermark=debug
-./target/release/thermark config set -a "B1-YourPrinter" -m b1
-./target/release/thermark info              # uses saved addr + model
-./target/release/thermark info -a "B1-YourPrinter"
-./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30
-./target/release/thermark qr -a "B1-YourPrinter" --font-name helvetica --label 50x30 \
-  --url "https://example.com" --text $'ABC\nHELLO'
+cargo test --test fixtures_readme   # README preview PNGs in fixtures/
 
-# Readiness: adapter, scan, connect, lid/paper/RFID/battery
-./target/release/thermark doctor              # host + scan only
-./target/release/thermark doctor -a "B1-…"    # + connect/sensors
-# exit 1 if any FAIL (printer offline → ble_scan / ble_connect fail)
+# One-time setup (full BLE advertising name → config.json)
+./target/release/thermark scan --save
+./target/release/thermark doctor --use-config
+./target/release/thermark calibrate --label 50x30
+./target/release/thermark qr --url "https://example.com" \
+  --text $'Helvetica\nABC\n123' --font-name helvetica --label 50x30
+./target/release/thermark print -i fixtures/test_label.png --label 50x30
 ```
 
-Quit vendor apps before BLE connect (one client only).
+README shows the same `fixtures/*.png` images; each is locked by `tests/fixtures_readme.rs`.  
+Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
+Experimental print tasks need `--allow-experimental`.
 
 ---
 
@@ -93,7 +89,7 @@ Wiki: the protocol notes in src/protocol.rs
 
 ## Pitfalls
 
-1. Short BLE selector can match wrong devices — use full name  
+1. BLE address match is **exact** by default (full advertising name or id). Short selectors no longer substring-match; use full name from `scan`, or pass `--fuzzy` only if intentional  
 2. Require real printer GATT UUID; no random characteristic fallback  
 3. Stuck CLI holds BLE lock  
 4. Tiny prints = missing `--label` / wrong canvas, not “broken printer”  
@@ -111,6 +107,8 @@ Wiki: the protocol notes in src/protocol.rs
 | `B21V1`, `D110`, `Simple` | No (experimental) |
 
 `PrinterClient` defaults via `PrintTask::for_model`. Override: `--task` / `.with_print_task()`.
+
+CLI: experimental tasks (`b21v1`, `d110`, `simple`, or models that map to them) require `--allow-experimental` on `print` / `qr` / `calibrate`. Library API is unrestricted.
 
 ## Tests
 

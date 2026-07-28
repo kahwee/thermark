@@ -43,6 +43,15 @@ pub enum Error {
     )]
     PrintNotConfirmed,
 
+    /// Printer replied to a setup command but did not accept it (ACK payload was 0).
+    #[error("printer rejected {step} (cmd {cmd:#04x})")]
+    CommandRejected {
+        /// Human-readable step name (`set_density`, `start_print`, …).
+        step: &'static str,
+        /// Request command byte that was rejected.
+        cmd: u8,
+    },
+
     /// Bad `--label` / size string (e.g. not `50x30`).
     #[error("invalid label size: {0}")]
     InvalidLabel(String),

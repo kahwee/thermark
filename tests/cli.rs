@@ -90,6 +90,69 @@ fn bad_task_rejected() {
 }
 
 #[test]
+fn experimental_task_requires_allow_flag() {
+    let (_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "-a",
+            "B1-Fake",
+            "-i",
+            "fixtures/test_label.png",
+            "--task",
+            "simple",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("allow-experimental"));
+}
+
+#[test]
+fn experimental_model_default_requires_allow_flag() {
+    let (_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "-a",
+            "B1-Fake",
+            "-i",
+            "fixtures/test_label.png",
+            "--model",
+            "b21",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("allow-experimental"));
+}
+
+#[test]
+fn print_help_mentions_allow_experimental() {
+    thermark()
+        .args(["print", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("allow-experimental"));
+}
+
+#[test]
+fn print_help_mentions_fuzzy_ble_match() {
+    thermark()
+        .args(["print", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fuzzy"));
+}
+
+#[test]
+fn doctor_help_mentions_fuzzy() {
+    thermark()
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fuzzy"));
+}
+
+#[test]
 fn fonts_runs() {
     thermark().arg("fonts").assert().success();
 }

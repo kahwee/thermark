@@ -9,8 +9,10 @@ use std::time::Duration;
 /// Records every TX packet and synthesizes RX replies.
 ///
 /// By default responds with success to common commands. Use
-/// [`MockTransport::fail_cmd`] to inject `0xDB` printer errors, or
-/// [`MockTransport::mute_cmd`] to skip auto-replies (e.g. PrintEnd).
+/// [`MockTransport::fail_cmd`] to inject `0xDB` printer errors,
+/// [`MockTransport::reject_cmd`] for ACK-with-failure (`0x00` payload),
+/// [`MockTransport::mute_cmd`] to skip auto-replies (e.g. PrintEnd),
+/// or [`MockTransport::set_heartbeat`] to control preflight sensors.
 pub struct MockTransport {
     /// Encoded packets sent by the client (full frames).
     pub tx: Vec<Vec<u8>>,
@@ -19,10 +21,14 @@ pub struct MockTransport {
     rx_queue: Vec<Packet>,
     /// cmd → error code for In_PrintError (0xDB)
     fail_on: HashMap<u8, u8>,
+    /// Commands that auto-reply with success payload `0x00` (rejected).
+    reject: HashSet<u8>,
     /// Commands that get no auto-reply (timeouts).
     mute: HashSet<u8>,
     /// If true, auto-generate success replies (default).
     auto_reply: bool,
+    /// Override 13-byte heartbeat payload (closing, power, paper, rfid at 9..=12).
+    heartbeat: Option<[u8; 13]>,
 }
 
 impl Default for MockTransport {
@@ -38,8 +44,10 @@ impl MockTransport {
             tx_packets: Vec::new(),
             rx_queue: Vec::new(),
             fail_on: HashMap::new(),
+            reject: HashSet::new(),
             mute: HashSet::new(),
             auto_reply: true,
+            heartbeat: None,
         }
     }
 
@@ -49,10 +57,43 @@ impl MockTransport {
         self
     }
 
+    /// Auto-reply to `cmd` with a normal response command but payload `0x00` (NACK).
+    pub fn reject_cmd(&mut self, cmd: u8) -> &mut Self {
+        self.reject.insert(cmd);
+        self
+    }
+
     /// Do not auto-reply to `cmd` (simulates missing ACK / timeout).
     pub fn mute_cmd(&mut self, cmd: u8) -> &mut Self {
         self.mute.insert(cmd);
         self
+    }
+
+    /// Set 13-byte heartbeat body: indices 9=cover, 10=power, 11=paper, 12=rfid.
+    ///
+    /// Defaults when unset: cover closed (0), power 3, paper ok (0), rfid ok (1).
+    pub fn set_heartbeat(&mut self, payload: [u8; 13]) -> &mut Self {
+        self.heartbeat = Some(payload);
+        self
+    }
+
+    /// Convenience: cover open, paper missing, or battery empty for preflight tests.
+    pub fn heartbeat_not_ready_cover_open(&mut self) -> &mut Self {
+        let mut d = [0u8; 13];
+        d[9] = 1; // cover open
+        d[10] = 3;
+        d[11] = 0;
+        d[12] = 1;
+        self.set_heartbeat(d)
+    }
+
+    pub fn heartbeat_not_ready_no_paper(&mut self) -> &mut Self {
+        let mut d = [0u8; 13];
+        d[9] = 0;
+        d[10] = 3;
+        d[11] = 1; // no paper
+        d[12] = 1;
+        self.set_heartbeat(d)
     }
 
     pub fn push_rx(&mut self, packet: Packet) {
@@ -74,7 +115,7 @@ impl MockTransport {
         self.tx_packets.iter().find(|p| p.cmd == cmd)
     }
 
-    fn synthesize_reply(cmd: u8, data: &[u8]) -> Option<Packet> {
+    fn synthesize_reply(&self, cmd: u8, data: &[u8]) -> Option<Packet> {
         match cmd {
             0x83..=0x85 => None,
             0x21 => Some(Packet::new(0x31, vec![0x01])),
@@ -92,10 +133,14 @@ impl MockTransport {
             )),
             0xdc => {
                 let mut d = vec![0u8; 13];
-                d[9] = 0;
-                d[10] = 3;
-                d[11] = 0;
-                d[12] = 1;
+                if let Some(hb) = self.heartbeat {
+                    d.copy_from_slice(&hb);
+                } else {
+                    d[9] = 0;
+                    d[10] = 3;
+                    d[11] = 0;
+                    d[12] = 1;
+                }
                 Some(Packet::new(0xdd, d))
             }
             0x1a => Some(Packet::new(0x1b, vec![0x00])),
@@ -138,7 +183,10 @@ impl Transport for MockTransport {
         }
 
         if self.auto_reply {
-            if let Some(reply) = Self::synthesize_reply(cmd, &pdata) {
+            if let Some(mut reply) = self.synthesize_reply(cmd, &pdata) {
+                if self.reject.contains(&cmd) {
+                    reply.data = vec![0x00];
+                }
                 self.rx_queue.push(reply);
             }
         }

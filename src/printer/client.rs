@@ -98,9 +98,44 @@ impl<T: Transport> PrinterClient<T> {
         self.task
     }
 
+    /// Map a protocol ACK bool into a hard error when the printer rejected the step.
+    fn require_ack(ok: bool, step: &'static str, cmd: u8) -> Result<()> {
+        if ok {
+            Ok(())
+        } else {
+            Err(Error::CommandRejected { step, cmd })
+        }
+    }
+
     async fn maybe_sleep(&self, d: Duration) {
         if self.pace && !d.is_zero() {
             tokio::time::sleep(d).await;
+        }
+    }
+
+    /// Heartbeat preflight: abort on open cover, missing paper, or empty battery.
+    ///
+    /// If heartbeat cannot be read, printing continues (firmware-dependent; doctor is
+    /// the place for full diagnostics).
+    pub async fn preflight_ready(&mut self) -> Result<()> {
+        match self.heartbeat().await {
+            Ok(hb) => {
+                info!(
+                    power = ?hb.power_level,
+                    lid = ?hb.closing_state,
+                    paper = ?hb.paper_state,
+                    rfid = ?hb.rfid_read_state,
+                    "preflight heartbeat"
+                );
+                if let Some(code) = hb.print_blocker() {
+                    return Err(Error::Printer(code));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                warn!(error = %e, "preflight heartbeat unavailable; continuing");
+                Ok(())
+            }
         }
     }
 
@@ -283,11 +318,28 @@ impl<T: Transport> PrinterClient<T> {
                 .await;
         }
 
-        self.set_density(density).await?;
-        self.set_label_type(1).await?;
-        self.start_print().await?;
-        self.start_page().await?;
-        self.set_page_size(rows_u16, cols_u16).await?;
+        // Soft NACKs (Ok(false)) are hard failures — do not stream rows after a reject.
+        Self::require_ack(
+            self.set_density(density).await?,
+            "set_density",
+            Cmd::SetDensity as u8,
+        )?;
+        Self::require_ack(
+            self.set_label_type(1).await?,
+            "set_label_type",
+            Cmd::SetLabelType as u8,
+        )?;
+        Self::require_ack(
+            self.start_print().await?,
+            "start_print",
+            Cmd::PrintStart as u8,
+        )?;
+        Self::require_ack(self.start_page().await?, "start_page", Cmd::PageStart as u8)?;
+        Self::require_ack(
+            self.set_page_size(rows_u16, cols_u16).await?,
+            "set_page_size",
+            Cmd::SetPageSize as u8,
+        )?;
 
         for (i, pkt) in rows.into_iter().enumerate() {
             self.send_raw_packet(pkt).await?;
@@ -296,7 +348,7 @@ impl<T: Transport> PrinterClient<T> {
             }
         }
 
-        self.end_page().await?;
+        Self::require_ack(self.end_page().await?, "end_page", Cmd::PageEnd as u8)?;
         self.maybe_sleep(Duration::from_millis(200)).await;
 
         let polls = if self.pace {
@@ -406,21 +458,7 @@ impl<T: Transport> PrinterClient<T> {
         if let Ok(rfid) = self.rfid_info().await {
             info!(%rfid, "RFID");
         }
-        if let Ok(hb) = self.heartbeat().await {
-            info!(
-                power = ?hb.power_level,
-                lid = ?hb.closing_state,
-                paper = ?hb.paper_state,
-                rfid = ?hb.rfid_read_state,
-                "preflight heartbeat"
-            );
-            if hb.paper_state == Some(1) {
-                warn!(
-                    "printer reports paper_state=1 (often means no label detected). \
-                     Load labels with 2–5mm protruding and close the cover."
-                );
-            }
-        }
+        self.preflight_ready().await?;
 
         self.print_rows(width, height, rows, opts.density).await
     }
@@ -587,6 +625,105 @@ mod tests {
         assert!(
             matches!(err, Error::PrintNotConfirmed),
             "expected PrintNotConfirmed, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn density_nack_is_hard_error() {
+        let mut mock = MockTransport::new();
+        mock.reject_cmd(0x21);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        match err {
+            Error::CommandRejected { step, cmd } => {
+                assert_eq!(step, "set_density");
+                assert_eq!(cmd, 0x21);
+            }
+            other => panic!("expected CommandRejected, got {other:?}"),
+        }
+        // Must not have started streaming rows after density NACK.
+        let cmds = c.transport().tx_cmds();
+        assert!(!cmds.iter().any(|c| *c == 0x85 || *c == 0x84));
+    }
+
+    #[tokio::test]
+    async fn start_print_nack_is_hard_error() {
+        let mut mock = MockTransport::new();
+        mock.reject_cmd(0x01);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::CommandRejected {
+                    step: "start_print",
+                    cmd: 0x01
+                }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_blocks_open_cover() {
+        let mut mock = MockTransport::new();
+        mock.heartbeat_not_ready_cover_open();
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let err = c.preflight_ready().await.unwrap_err();
+        assert!(
+            matches!(err, Error::Printer(PrinterErrorCode::CoverOpen)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_blocks_no_paper() {
+        let mut mock = MockTransport::new();
+        mock.heartbeat_not_ready_no_paper();
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let err = c.preflight_ready().await.unwrap_err();
+        assert!(
+            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn print_image_file_opts_aborts_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dot.png");
+        GrayImage::from_pixel(8, 8, Luma([0])).save(&path).unwrap();
+
+        let mut mock = MockTransport::new();
+        mock.heartbeat_not_ready_no_paper();
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let err = c
+            .print_image_file_opts(
+                &path,
+                PrintOptions {
+                    density: Density::NORMAL,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            "got {err:?}"
+        );
+        // Must not have entered the print sequence.
+        let cmds = c.transport().tx_cmds();
+        assert!(
+            !cmds.contains(&0x01),
+            "print start should not run: {cmds:?}"
         );
     }
 

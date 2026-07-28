@@ -13,7 +13,7 @@ use thermark::label::{self, QrLabelOptions, TextSide};
 use thermark::print_task::{PrintTask, hardware_matrix};
 use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
-use thermark::transport::{BleDeviceInfo, BleTransport, SerialTransport};
+use thermark::transport::{BleDeviceInfo, BleMatchMode, BleTransport, SerialTransport};
 use thermark::types::{Density, Rotation, Threshold};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -85,12 +85,15 @@ enum Commands {
         /// With --label, scale image to cover the whole label (default true when --label set)
         #[arg(long, default_value_t = true)]
         fill: bool,
-        /// Force simple 1-byte PrintStart (plain-form)
+        /// Force simple 1-byte PrintStart (plain-form; experimental)
         #[arg(long, default_value_t = false)]
         simple_start: bool,
         /// Print task: b1 (tested), b21v1, d110, simple (experimental)
         #[arg(long, value_enum)]
         task: Option<PrintTask>,
+        /// Allow experimental print tasks (non-B1); required for b21v1/d110/simple
+        #[arg(long, default_value_t = false)]
+        allow_experimental: bool,
     },
     /// Print a full-bleed calibration pattern for a label size (find true print area)
     Calibrate {
@@ -109,6 +112,9 @@ enum Commands {
         simple_start: bool,
         #[arg(long, value_enum)]
         task: Option<PrintTask>,
+        /// Allow experimental print tasks (non-B1)
+        #[arg(long, default_value_t = false)]
+        allow_experimental: bool,
     },
     /// Design + print a square QR with side text (fills the label)
     Qr {
@@ -118,10 +124,10 @@ enum Commands {
         #[arg(short, long, value_enum)]
         model: Option<Model>,
         /// URL or text encoded in the QR
-        #[arg(long, default_value = "https://www.youtube.com")]
+        #[arg(long, default_value = "https://example.com")]
         url: String,
         /// Text drawn beside the QR (use \\n for new lines)
-        #[arg(long, default_value = "ABC\nYOUTUBE\n123")]
+        #[arg(long, default_value = "ABC\nHELLO")]
         text: String,
         /// Put text on left or right of the square QR
         #[arg(long, value_enum, default_value_t = TextSide::Right)]
@@ -151,6 +157,9 @@ enum Commands {
         simple_start: bool,
         #[arg(long, value_enum)]
         task: Option<PrintTask>,
+        /// Allow experimental print tasks (non-B1)
+        #[arg(long, default_value_t = false)]
+        allow_experimental: bool,
         /// Only generate PNG, do not print
         #[arg(long, default_value_t = false)]
         no_print: bool,
@@ -181,6 +190,9 @@ enum Commands {
         /// Use saved default printer even without -a (connect + sensors)
         #[arg(long, default_value_t = false)]
         use_config: bool,
+        /// Allow substring BLE name matching when connecting (default: exact only)
+        #[arg(long, default_value_t = false)]
+        fuzzy: bool,
     },
     /// Encode a packet to hex (debug)
     Encode {
@@ -226,12 +238,16 @@ struct ConnArgs {
     /// Connection type (default: config or ble)
     #[arg(short = 'c', long, value_enum)]
     conn: Option<ConnPref>,
-    /// BLE name / peripheral id, or serial path (default: config / THERMARK_ADDR)
+    /// BLE advertising name or peripheral id (exact match), or serial path
+    /// (default: config / THERMARK_ADDR). Use the full name from `thermark scan`.
     #[arg(short, long)]
     addr: Option<String>,
     /// BLE scan time before connect (seconds; default: config or 4)
     #[arg(long)]
     scan_secs: Option<u64>,
+    /// Allow substring BLE name matching (default: exact name or id only)
+    #[arg(long, default_value_t = false)]
+    fuzzy: bool,
 }
 
 /// Resolved connection after applying config / env defaults.
@@ -239,6 +255,7 @@ struct ResolvedConn {
     conn: ConnPref,
     addr: String,
     scan_secs: u64,
+    match_mode: BleMatchMode,
 }
 
 impl ConnArgs {
@@ -247,6 +264,7 @@ impl ConnArgs {
             conn: cfg.resolve_connection(self.conn),
             addr: cfg.resolve_addr(self.addr.as_deref())?,
             scan_secs: cfg.resolve_scan_secs(self.scan_secs),
+            match_mode: BleMatchMode::from_fuzzy(self.fuzzy),
         })
     }
 }
@@ -275,13 +293,18 @@ impl Session {
         model: Model,
         simple_start: bool,
         task: Option<PrintTask>,
+        allow_experimental: bool,
     ) -> Result<Self> {
-        let task = resolve_task(model, simple_start, task);
+        let task = resolve_task(model, simple_start, task, allow_experimental)?;
         match conn.conn {
             ConnPref::Ble => {
-                let ble = BleTransport::connect(&conn.addr, Duration::from_secs(conn.scan_secs))
-                    .await
-                    .context("BLE connect")?;
+                let ble = BleTransport::connect_with(
+                    &conn.addr,
+                    Duration::from_secs(conn.scan_secs),
+                    conn.match_mode,
+                )
+                .await
+                .context("BLE connect")?;
                 Ok(Self::Ble(
                     PrinterClient::new(ble, model).with_print_task(task),
                 ))
@@ -320,7 +343,15 @@ impl Session {
 }
 
 /// Resolve print task once: `--task` wins, else `--simple-start`, else model default.
-fn resolve_task(model: Model, simple_start: bool, task: Option<PrintTask>) -> PrintTask {
+///
+/// Non-B1 tasks require `--allow-experimental` so experimental sequences are not
+/// used by accident when the model default maps to an untested path.
+fn resolve_task(
+    model: Model,
+    simple_start: bool,
+    task: Option<PrintTask>,
+    allow_experimental: bool,
+) -> Result<PrintTask> {
     let t = if let Some(task) = task {
         task
     } else if simple_start {
@@ -329,11 +360,18 @@ fn resolve_task(model: Model, simple_start: bool, task: Option<PrintTask>) -> Pr
         PrintTask::for_model(model)
     };
     if !t.hardware_tested() {
+        if !allow_experimental {
+            bail!(
+                "print task '{t}' is experimental (not hardware-tested in this project). \
+                 Re-run with --allow-experimental if you accept the risk, \
+                 or use --task b1 / --model b1. See: thermark tasks"
+            );
+        }
         eprintln!(
             "warning: print task '{t}' is experimental (not hardware-tested in this project)"
         );
     }
-    t
+    Ok(t)
 }
 
 fn init_tracing(verbose: bool) {
@@ -362,7 +400,8 @@ async fn main() -> Result<()> {
         Commands::Info { conn, model } => {
             let model = cfg.resolve_model(model);
             let conn = conn.resolve(&cfg)?;
-            let mut session = Session::connect(&conn, model, false, None).await?;
+            // Info never runs a print task sequence; experimental gate does not apply.
+            let mut session = Session::connect(&conn, model, false, None, true).await?;
             let result = session.fetch_summary().await;
             session.finish().await;
             print!("{}", result?);
@@ -379,6 +418,7 @@ async fn main() -> Result<()> {
             fill,
             simple_start,
             task,
+            allow_experimental,
         } => {
             if !image.exists() {
                 bail!("image not found: {}", image.display());
@@ -397,7 +437,8 @@ async fn main() -> Result<()> {
                 fill: fill || label_mm.is_some(),
             };
             let conn = conn.resolve(&cfg)?;
-            let mut session = Session::connect(&conn, model, simple_start, task).await?;
+            let mut session =
+                Session::connect(&conn, model, simple_start, task, allow_experimental).await?;
             let result = session.print_image_file_opts(&image, opts).await;
             session.finish().await;
             result?;
@@ -410,6 +451,7 @@ async fn main() -> Result<()> {
             density,
             simple_start,
             task,
+            allow_experimental,
         } => {
             let model = cfg.resolve_model(model);
             let label_mm = LabelMm::parse(&label)?;
@@ -433,7 +475,8 @@ async fn main() -> Result<()> {
                 fill: true,
             };
             let conn = conn.resolve(&cfg)?;
-            let mut session = Session::connect(&conn, model, simple_start, task).await?;
+            let mut session =
+                Session::connect(&conn, model, simple_start, task, allow_experimental).await?;
             let result = session.print_image_file_opts(&tmp, opts).await;
             session.finish().await;
             result?;
@@ -459,6 +502,7 @@ async fn main() -> Result<()> {
             model,
             seconds,
             use_config,
+            fuzzy,
         } => {
             // Host-only by default; -a or --use-config enables connect + sensors.
             let model = cfg.resolve_model(model);
@@ -473,9 +517,15 @@ async fn main() -> Result<()> {
                 ConnPref::Ble => DoctorConn::Ble,
                 ConnPref::Usb => DoctorConn::Usb,
             };
-            let report = doctor::run_doctor(addr.as_deref(), model, seconds, kind)
-                .await
-                .context("doctor")?;
+            let report = doctor::run_doctor(
+                addr.as_deref(),
+                model,
+                seconds,
+                kind,
+                BleMatchMode::from_fuzzy(fuzzy),
+            )
+            .await
+            .context("doctor")?;
             print!("{report}");
             if report.exit_code() != 0 {
                 std::process::exit(report.exit_code());
@@ -496,6 +546,7 @@ async fn main() -> Result<()> {
             save,
             simple_start,
             task,
+            allow_experimental,
             no_print,
         } => {
             let model = cfg.resolve_model(model);
@@ -543,7 +594,8 @@ async fn main() -> Result<()> {
                 fill: false,
             };
             let conn = conn.resolve(&cfg)?;
-            let mut session = Session::connect(&conn, model, simple_start, task).await?;
+            let mut session =
+                Session::connect(&conn, model, simple_start, task, allow_experimental).await?;
             let result = session.print_image_file_opts(&png_path, opts).await;
             session.finish().await;
             result?;
@@ -580,7 +632,8 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
             println!("path: {}", path.display());
             if cfg.is_empty() && !path.exists() {
                 println!("(no config file yet)");
-                println!("Save a printer: thermark config set -a \"B1-YourPrinter\"");
+                println!("Save a printer: thermark scan --save");
+                println!("  or:            thermark config set -a \"B1-YourPrinter\" -m b1");
                 return Ok(());
             }
             println!("addr:        {}", cfg.addr.as_deref().unwrap_or("(unset)"));
@@ -659,12 +712,13 @@ async fn cmd_scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
         let path = cfg.save()?;
         println!("\nsaved default printer → {addr}");
         println!("  file: {}", path.display());
-        println!("Then: thermark info   /   thermark doctor --use-config");
+        println!("Next: thermark doctor --use-config");
+        println!("      thermark info");
+        println!("      thermark calibrate --label 50x30");
     } else {
         println!("\nSave default:  thermark scan --save");
-        println!("  or:           thermark scan --save --name B1");
-        println!("  or:           thermark config set -a \"<name or id>\"");
-        println!("Then connect:  thermark info");
+        println!("  or:           thermark config set -a \"<full advertising name>\"");
+        println!("Then:          thermark info   (exact name; add --fuzzy only if needed)");
     }
     Ok(())
 }
@@ -729,7 +783,8 @@ fn print_tasks_matrix() {
         );
     }
     println!();
-    println!("Override with: thermark print|qr|calibrate --task b1|b21v1|d110|simple");
+    println!("Default: b1 (hardware-tested). Override: --task b1|b21v1|d110|simple");
+    println!("Non-b1 tasks require: --allow-experimental");
 }
 
 #[cfg(test)]

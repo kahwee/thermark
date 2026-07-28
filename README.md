@@ -1,152 +1,147 @@
 # thermark
 
-Local **thermal label printing** over **Bluetooth LE** or **USB serial** — no vendor desktop app required.
+Local thermal label printing over **Bluetooth LE** or **USB serial** — no vendor app.
 
-Print calibration patterns, PNG/JPEG rasters, and **QR + text** labels with system fonts (Helvetica, Times, Arial, …). Sized in real millimetres (8 px/mm).
+Print **QR + text**, calibration patterns, and rasters at real millimetres (**8 px/mm**). Built and hardware-tested for **B1-class** printers (50×30 mm → **384×240 px**).
 
-Works with common pocket label printers that speak the reverse-engineered “B1-class” BLE protocol.
-
-### Hardware support (honest)
-
-| Model | Print task | Status in this repo |
-|-------|------------|---------------------|
-| **B1** | `b1` | **Tested** on real hardware (BLE print, QR, calibrate, info) |
-| B21 / B18 | `b21v1` | Experimental (protocol docs only) |
-| D11 / D110 | `d110` | Experimental (narrow head; not verified here) |
-| other | `simple` | Experimental fallback |
-
-```bash
-./target/release/thermark tasks
-# force sequence:
-./target/release/thermark print ... --task b1
-```
+| Model | Task | Status |
+|-------|------|--------|
+| **B1** | `b1` | **Tested** |
+| B21 / B18 | `b21v1` | Experimental — needs `--allow-experimental` |
+| D11 / D110 | `d110` | Experimental — needs `--allow-experimental` |
+| other | `simple` | Experimental — needs `--allow-experimental` |
 
 ## Build
 
 ```bash
-cargo build --release
-# binary: target/release/thermark
+cargo build --release   # → target/release/thermark
+cargo test
 ```
 
-### Cargo features
-
-| Feature | Default | What it enables |
-|---------|---------|-----------------|
-| `ble` | yes | Bluetooth LE (`btleplug`; Linux needs `libdbus-1-dev`) |
-| `serial` | yes | USB serial (`serialport`; Linux needs `libudev-dev`) |
-
-Library-only (protocol + mock, no hardware deps):
+| Feature | Default | Enables |
+|---------|---------|---------|
+| `ble` | yes | Bluetooth LE |
+| `serial` | yes | USB serial |
 
 ```bash
-cargo build --lib --no-default-features
-cargo test --lib --no-default-features
+cargo test --lib --no-default-features   # protocol + mock only
 ```
 
-The CLI binary requires both `ble` and `serial` (the default feature set).
+## Setup (once)
 
-## Usage
+Quit any official label app (one BLE client at a time).
 
 ```bash
-# Scan for printers; optionally save best B1-like device to config.json
 ./target/release/thermark scan
-./target/release/thermark scan --save
-./target/release/thermark scan --save --name B1
-
-# Or set default manually (macOS: ~/Library/Application Support/thermark/config.json)
-./target/release/thermark config set -a "B1-YourPrinter" -m b1
-./target/release/thermark config show
-./target/release/thermark config show --json
-
-# After save, -a / -m are optional (config supplies defaults):
+./target/release/thermark scan --save          # full advertising name → config.json
+./target/release/thermark doctor --use-config  # lid / paper / battery
 ./target/release/thermark info
-./target/release/thermark info -a "B1-YourPrinter"   # still works; overrides config
-
-# Calibration — full label canvas (density default 4 = darker)
-./target/release/thermark calibrate --label 50x30
-
-# QR + text (Helvetica, small type; density default 4)
-./target/release/thermark qr \
-  --url "https://www.youtube.com" \
-  --text $'ABC\nYOUTUBE' \
-  --font-name helvetica \
-  --font-size 14 \
-  --label 50x30
-
-# Print an image (density default 3 = normal)
-./target/release/thermark print -i label.png --label 50x30 --fill
-
-# List usable system fonts
-./target/release/thermark fonts
-
-# Diagnose host + printer (Bluetooth, scan, lid/paper/RFID)
-./target/release/thermark doctor
-./target/release/thermark doctor -a "B1-YourPrinter"
 ```
 
-### Doctor (readiness checks)
+Config: macOS `~/Library/Application Support/thermark/config.json` · Linux `~/.config/thermark/config.json`  
+Address: **`-a`** → **`THERMARK_ADDR`** → **config**. BLE match is **exact** name/id; use **`--fuzzy`** only if you mean it.
 
-Use `doctor` when something fails — offline printer, lid open, no paper, Bluetooth off.
+## What you print
+
+Always pass **`--label 50x30`** (or your media size) so the canvas matches the label. After `scan --save`, omit `-a`.
+
+### Calibration — find the true print area
 
 ```bash
-# Host only (no -a): crate version, fonts, serial ports, Bluetooth adapter, BLE scan
-./target/release/thermark doctor
-
-# Full path: also connect + heartbeat (cover / paper / RFID / battery-ish)
-./target/release/thermark doctor -a "B1-YourPrinter"
-./target/release/thermark doctor -a "B1-YourPrinter" -s 8   # longer scan
-./target/release/thermark doctor --use-config             # connect using saved addr
+./target/release/thermark calibrate --label 50x30
 ```
 
-### Saved printer config
+<img src="fixtures/calibrate_50x30.png" alt="50×30 calibration pattern" width="384" />
 
-| | |
-|--|--|
-| File | macOS `~/Library/Application Support/thermark/config.json` · Linux `~/.config/thermark/config.json` |
-| Set | `thermark config set -a "B1-YourPrinter"` |
-| Show | `thermark config show` · `thermark config show --json` · `thermark config path` |
-| Clear | `thermark config clear` |
-| Env overrides | `THERMARK_ADDR` (addr only) · `THERMARK_CONFIG` (file path) |
+*Border + diagonals + cross on a 384×240 canvas (density default 4).*
 
-Priority for address: **`-a` flag** → **`THERMARK_ADDR`** → **config file**.  
-Priority for model: **`-m` flag** → **config `model`** → **`b1`**.
+### QR + side text (Helvetica)
 
-### Print density
+```bash
+./target/release/thermark qr \
+  --url "https://example.com" \
+  --text $'Helvetica\nABC\n123' \
+  --font-name helvetica \
+  --label 50x30
+```
 
-| Command | Default density | Meaning |
-|---------|-----------------|--------|
-| `print` | **3** (`Density::NORMAL`) | Everyday raster print |
-| `qr` / `calibrate` | **4** (`Density::DARK`) | Darker ink for fine type / full-bleed patterns |
+<img src="fixtures/preview_helvetica.png" alt="QR label, Helvetica" width="384" />
 
-Override with `-d 1`…`-d 5` anytime.
+### QR + Times
 
-| Exit code | Meaning |
-|-----------|---------|
-| **0** | Overall pass or warnings only |
-| **1** | At least one **FAIL** (fix before printing) |
+```bash
+./target/release/thermark qr \
+  --url "https://example.com" \
+  --text $'Times\nABC\n123' \
+  --font-name times \
+  --label 50x30
+```
 
-Typical offline printer output:
+<img src="fixtures/preview_times.png" alt="QR label, Times" width="384" />
 
-- `[ok] bluetooth` — adapter is up  
-- `[FAIL] ble_scan` — no devices in N seconds (power on printer, quit vendor apps)  
-- With `-a` but printer off: `[FAIL] ble_connect` — nothing matching that name  
+### QR + Arial
 
-When connected:
+```bash
+./target/release/thermark qr \
+  --url "https://example.com" \
+  --text $'ABC\nHELLO\n123' \
+  --font-name arial \
+  --label 50x30
+```
 
-- `[FAIL] cover` — lid open  
-- `[FAIL] paper` — no labels detected  
-- `[ok] rfid` / paper counters from the tag  
+<img src="fixtures/qr_arial_label.png" alt="QR label, Arial" width="384" />
 
-Quit any official label app before connecting (one BLE client at a time).
+### Small type (fixed `--font-size`)
+
+```bash
+./target/release/thermark qr \
+  --url "https://example.com" \
+  --text $'small type\nABCDEFG\nHIJKLMN\n0123456' \
+  --font-name helvetica \
+  --font-size 11 \
+  --label 50x30
+```
+
+<img src="fixtures/qr_small_type.png" alt="QR label, small type" width="384" />
+
+### Print a raster image
+
+```bash
+./target/release/thermark print -i fixtures/test_label.png --label 50x30
+```
+
+<img src="fixtures/test_label.png" alt="Sample raster label" width="384" />
+
+*Density default 3. Preview without printing: add `--save out.png --no-print` to `qr`.*
+
+### Fonts & tasks
+
+```bash
+./target/release/thermark fonts
+./target/release/thermark tasks
+```
 
 ## Geometry
 
 | | |
 |--|--|
 | Resolution | ~**8 px/mm** (203 dpi) |
-| Max print width (B1-class) | **384 px** (~48 mm) |
-| Example 50×30 mm label | **384×240 px** |
+| Max width (B1) | **384 px** (~48 mm) |
+| 50×30 mm label | **384×240 px** |
 
-Always pass `--label WWxHH` so the canvas matches your media.
+## Config & doctor
+
+```bash
+./target/release/thermark config set -a "B1-YourPrinter" -m b1
+./target/release/thermark config show
+./target/release/thermark doctor                 # host + scan
+./target/release/thermark doctor --use-config    # + connect / sensors
+```
+
+| Exit | Meaning |
+|------|---------|
+| **0** | Pass or warnings |
+| **1** | At least one **FAIL** |
 
 ## Library
 
@@ -163,30 +158,26 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+Exact name match by default; substring: `BleTransport::connect_with(..., BleMatchMode::Fuzzy)`.
+
 ## Fixtures
 
-Sample label PNGs used during development live in `fixtures/` (not Cargo `examples/`).
+PNG previews in [`fixtures/`](fixtures/) are the same images the README shows. They are checked by `tests/fixtures_readme.rs` (dimensions, ink, encode).
+
+```bash
+cargo test --test fixtures_readme
+```
 
 ## Logging
 
-Uses [`tracing`](https://docs.rs/tracing). Defaults to `info`; `-v` → `debug`. Override with `RUST_LOG`:
-
 ```bash
+./target/release/thermark -v info
 RUST_LOG=thermark=debug,btleplug=info ./target/release/thermark scan
-./target/release/thermark -v info -a "B1-YourPrinter"
 ```
 
-## Tests
+## Protocol
 
-```bash
-cargo test
-```
-
-## Protocol notes
-
-See `AGENTS.md` for packet format, BLE UUIDs, error codes, and operational pitfalls.
-
-Community references: the protocol notes in src/protocol.rs, the protocol reference, the simple print-task form.
+See [`AGENTS.md`](AGENTS.md). Community: the protocol notes in src/protocol.rs.
 
 ## License
 

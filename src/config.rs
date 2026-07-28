@@ -201,8 +201,8 @@ impl Config {
             return Ok(a.to_string());
         }
         Err(Error::msg(
-            "no printer address: pass -a \"B1-Name\", set THERMARK_ADDR, \
-             or save one with: thermark config set -a \"B1-Name\"",
+            "no printer address: pass -a \"B1-YourPrinter\" (full name), set THERMARK_ADDR, \
+             or: thermark scan --save / thermark config set -a \"B1-YourPrinter\"",
         ))
     }
 
