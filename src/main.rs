@@ -4,10 +4,10 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use thermark::config::Config;
+use thermark::config::{Config, ConnPref};
 use thermark::doctor::{self, DoctorConn};
 use thermark::font;
-use thermark::geometry::{LabelMm, DEFAULT_B1_LABEL};
+use thermark::geometry::LabelMm;
 use thermark::image_encode;
 use thermark::label::{self, QrLabelOptions, TextSide};
 use thermark::print_task::{hardware_matrix, PrintTask};
@@ -226,19 +226,11 @@ struct ResolvedConn {
 impl ConnArgs {
     fn resolve(&self, cfg: &Config) -> Result<ResolvedConn> {
         let addr = cfg.resolve_addr(self.addr.as_deref())?;
-        let conn_str = cfg.resolve_connection(self.conn.map(|c| match c {
-            ConnKind::Ble => "ble",
-            ConnKind::Usb => "usb",
-        }));
-        let conn = match conn_str.as_str() {
-            "usb" | "serial" => ConnKind::Usb,
-            _ => ConnKind::Ble,
-        };
-        let scan_secs = cfg.resolve_scan_secs(self.scan_secs);
+        let pref = cfg.resolve_connection(self.conn.map(ConnKind::as_pref_str));
         Ok(ResolvedConn {
-            conn,
+            conn: ConnKind::from_pref(pref),
             addr,
-            scan_secs,
+            scan_secs: cfg.resolve_scan_secs(self.scan_secs),
         })
     }
 }
@@ -248,6 +240,35 @@ impl ConnArgs {
 enum ConnKind {
     Ble,
     Usb,
+}
+
+impl ConnKind {
+    fn as_pref_str(self) -> &'static str {
+        match self {
+            Self::Ble => "ble",
+            Self::Usb => "usb",
+        }
+    }
+
+    fn from_pref(p: ConnPref) -> Self {
+        match p {
+            ConnPref::Ble => Self::Ble,
+            ConnPref::Usb => Self::Usb,
+        }
+    }
+
+    fn to_pref(self) -> ConnPref {
+        match self {
+            Self::Ble => ConnPref::Ble,
+            Self::Usb => ConnPref::Usb,
+        }
+    }
+}
+
+impl std::fmt::Display for ConnKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_pref_str())
+    }
 }
 
 /// Open BLE or USB session with a resolved print task.
@@ -421,7 +442,6 @@ async fn main() -> Result<()> {
             session.finish().await;
             result?;
             println!("OK — calibration printed ({label})");
-            let _ = DEFAULT_B1_LABEL;
         }
         Commands::Fonts => {
             let fonts = font::list_available_fonts();
@@ -444,9 +464,7 @@ async fn main() -> Result<()> {
             seconds,
             use_config,
         } => {
-            let cfg = Config::load().unwrap_or_default();
-            // Host-only unless -a, THERMARK_ADDR, --use-config, or (implicit) saved addr with -a omitted
-            // Default doctor without flags stays host-only for quick BT checks.
+            // Host-only by default; -a or --use-config enables connect + sensors.
             let addr = if let Some(a) = addr {
                 Some(a)
             } else if use_config {
@@ -454,12 +472,12 @@ async fn main() -> Result<()> {
             } else {
                 None
             };
-            let kind = match conn.unwrap_or_else(|| match cfg.resolve_connection(None).as_str() {
-                "usb" | "serial" => ConnKind::Usb,
-                _ => ConnKind::Ble,
-            }) {
-                ConnKind::Ble => DoctorConn::Ble,
-                ConnKind::Usb => DoctorConn::Usb,
+            let kind = match conn
+                .map(ConnKind::to_pref)
+                .unwrap_or_else(|| cfg.resolve_connection(None))
+            {
+                ConnPref::Ble => DoctorConn::Ble,
+                ConnPref::Usb => DoctorConn::Usb,
             };
             let report = doctor::run_doctor(addr.as_deref(), model, seconds, kind)
                 .await
@@ -561,7 +579,7 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
             let path = Config::default_path()?;
             println!("path: {}", path.display());
             let cfg = Config::load()?;
-            if cfg == Config::default() && !path.exists() {
+            if cfg.is_empty() && !path.exists() {
                 println!("(no config file yet)");
                 println!("Save a printer: thermark config set -a \"B1-YourPrinter\"");
                 return Ok(());
@@ -589,20 +607,15 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
             scan_secs,
         } => {
             let mut cfg = Config::load().unwrap_or_default();
-            cfg.addr = Some(addr.clone());
-            cfg.connection = Some(match conn {
-                ConnKind::Ble => "ble".into(),
-                ConnKind::Usb => "usb".into(),
-            });
-            if let Some(m) = model {
-                cfg.model = Some(m.to_string());
-            }
-            if let Some(s) = scan_secs {
-                cfg.scan_secs = Some(s);
-            }
+            cfg.apply_set(
+                &addr,
+                conn.to_pref(),
+                model.map(|m| m.to_string()),
+                scan_secs,
+            );
             let path = cfg.save()?;
             println!("saved default printer → {addr}");
-            println!("  connection: {conn:?}");
+            println!("  connection: {conn}");
             println!("  file: {}", path.display());
             println!("Now you can run: thermark info   (no -a needed)");
         }
