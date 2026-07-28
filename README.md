@@ -119,6 +119,19 @@ Thermal is **1-bit**. Center the photo and dither so midtones don’t turn into 
 | `--dither` | Floyd–Steinberg (photos) |
 | `-d 3` | Normal density |
 
+### Line-art sticker (turtle)
+
+Bold B/W line art prints cleaner **without** dither. Margin is already baked into `sticker_turtle.png` (384×240):
+
+```bash
+./target/release/thermark print \
+  -i fixtures/sticker_turtle.png \
+  --label 50x30 \
+  --no-fill --margin 0 -d 4
+```
+
+<img src="fixtures/sticker_turtle.png" alt="Cute turtle line-art sticker" width="384" />
+
 Preview QR without printing: `qr ... --save /tmp/out.png --no-print`.
 
 ```bash
@@ -178,6 +191,8 @@ cargo test --test fixtures_readme
 | `sticker_name.png` | Name badge |
 | `sticker_calibrate.png` | Geometry / bleed check |
 | `photo_sticker.jpg` | Photo print source |
+| `sticker_turtle.png` | Cute turtle line-art (thermal B/W) |
+| `sticker_turtle_src.jpg` | Turtle art source (preprocess input) |
 
 ## Logging
 

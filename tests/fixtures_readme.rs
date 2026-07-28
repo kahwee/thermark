@@ -42,6 +42,8 @@ enum Kind {
     QrSticker,
     /// Photograph source (JPEG); print path uses contain + dither.
     Photo,
+    /// Centered B/W line-art on full canvas with white margin (no QR asymmetry).
+    Art,
 }
 
 /// Canonical fixture set. Keep in sync with README and `fixtures/` on disk.
@@ -71,6 +73,16 @@ fn curated() -> &'static [Fixture] {
             name: "photo_sticker.jpg",
             purpose: "Photo sticker source (Unsplash); use --no-fill --margin --dither",
             kind: Kind::Photo,
+        },
+        Fixture {
+            name: "sticker_turtle_src.jpg",
+            purpose: "Cute turtle line-art source (preprocess input for thermal B/W)",
+            kind: Kind::Photo,
+        },
+        Fixture {
+            name: "sticker_turtle.png",
+            purpose: "Cute turtle line-art sticker (thermal-optimized B/W)",
+            kind: Kind::Art,
         },
     ]
 }
@@ -151,7 +163,7 @@ fn all_fixtures_open_and_encode() {
                     "photo fixture should be JPEG"
                 );
             }
-            Kind::Calibrate | Kind::QrSticker => {
+            Kind::Calibrate | Kind::QrSticker | Kind::Art => {
                 assert_eq!(
                     (w, h),
                     (W, H),
@@ -223,6 +235,21 @@ fn all_fixtures_open_and_encode() {
             Kind::Photo => {
                 // Natural photo: mid-tone heavy, not a 1-bit logo.
                 assert!((0.05..0.85).contains(&frac), "photo dark frac {frac:.3}");
+            }
+            Kind::Art => {
+                // Centered line-art: modest ink, white margin ring (no edge bleed).
+                assert!(
+                    (0.05..0.45).contains(&frac),
+                    "{} art dark fraction {frac:.3} out of band",
+                    f.name
+                );
+                for &(x, y) in &[(2u32, 2), (W - 3, 2), (2, H - 3), (W - 3, H - 3)] {
+                    assert!(
+                        gray.get_pixel(x, y)[0] >= 200,
+                        "{} art corner ({x},{y}) should stay white (margin)",
+                        f.name
+                    );
+                }
             }
         }
     }
