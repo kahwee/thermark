@@ -114,6 +114,17 @@ Bold B/W line art is the best look on thermal (hard edges, no dither). Margin is
 
 <img src="fixtures/sticker_turtle.png" alt="Cute turtle line-art sticker" width="384" />
 
+Same pipeline for other line art (e.g. excavator): preprocess to 384×240 B/W with baked margin, then print with `--no-fill --margin 0 -d 4`.
+
+```bash
+./target/release/thermark print \
+  -i fixtures/sticker_excavator.png \
+  --label 50x30 \
+  --no-fill --margin 0 -d 4
+```
+
+<img src="fixtures/sticker_excavator.png" alt="Cute excavator line-art sticker" width="384" />
+
 ### Your own photo or PNG
 
 Thermal is **1-bit**. For photos, center + dither so midtones don’t blotch:
@@ -184,6 +195,8 @@ async fn main() -> anyhow::Result<()> {
 |------|-----|
 | **`sticker_turtle.png`** | **Primary art/print smoke** — cute turtle, B/W, margined |
 | `sticker_turtle_src.jpg` | Turtle source art (preprocess input) |
+| `sticker_excavator.png` | Cute excavator line-art, B/W, margined |
+| `sticker_excavator_src.jpg` | Excavator source art (preprocess input) |
 | `sticker_link.png` | Package / share URL |
 | `sticker_inventory.png` | Bin / SKU tag |
 | `sticker_name.png` | Name badge |

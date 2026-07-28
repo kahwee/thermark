@@ -61,6 +61,16 @@ fn curated() -> &'static [Fixture] {
             kind: Kind::Photo,
         },
         Fixture {
+            name: "sticker_excavator.png",
+            purpose: "Cute excavator line-art, thermal B/W, centered + margin",
+            kind: Kind::Art,
+        },
+        Fixture {
+            name: "sticker_excavator_src.jpg",
+            purpose: "Excavator art source (preprocess → sticker_excavator.png)",
+            kind: Kind::Photo,
+        },
+        Fixture {
             name: "sticker_link.png",
             purpose: "Package / share link: QR + order-style text",
             kind: Kind::QrSticker,
