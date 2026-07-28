@@ -28,7 +28,7 @@ pub mod printer;
 pub mod protocol;
 pub mod transport;
 
-pub use config::{Config, ConnPref};
+pub use config::{Config, ConfigFormat, ConnPref};
 pub use errors::{Error, PrinterErrorCode, Result};
 pub use geometry::{LabelMm, LabelPx, DEFAULT_B1_LABEL, PX_PER_MM};
 pub use mock::MockTransport;

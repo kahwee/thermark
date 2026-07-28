@@ -99,9 +99,10 @@ Use `doctor` when something fails — offline printer, lid open, no paper, Bluet
 
 | | |
 |--|--|
-| File | macOS `~/Library/Application Support/thermark/config.toml` · Linux `~/.config/thermark/config.toml` |
-| Set | `thermark config set -a "B1-YourPrinter"` |
-| Show | `thermark config show` / `thermark config path` |
+| File | macOS `~/Library/Application Support/thermark/config.toml` (or `.json`) |
+| Set TOML | `thermark config set -a "B1-YourPrinter"` |
+| Set JSON | `thermark config set -a "B1-YourPrinter" --format json` |
+| Show | `thermark config show` · `thermark config show --json` · `thermark config path` |
 | Clear | `thermark config clear` |
 | Env overrides | `THERMARK_ADDR` (addr only) · `THERMARK_CONFIG` (file path) |
 

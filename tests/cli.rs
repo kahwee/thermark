@@ -125,6 +125,13 @@ fn config_set_show_clear() {
         .stdout(predicate::str::contains('7'));
 
     thermark_with_config(&path)
+        .args(["config", "show", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("B1-TestPrinter"))
+        .stdout(predicate::str::contains('{'));
+
+    thermark_with_config(&path)
         .args(["config", "path"])
         .assert()
         .success()
@@ -137,6 +144,38 @@ fn config_set_show_clear() {
         .stdout(predicate::str::contains("removed"));
 
     assert!(!path.exists());
+}
+
+#[test]
+fn config_set_json_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+
+    thermark_with_config(&path)
+        .args([
+            "config",
+            "set",
+            "-a",
+            "B1-JsonPrinter",
+            "--format",
+            "json",
+            "-m",
+            "b1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("json"));
+
+    assert!(path.exists());
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.trim_start().starts_with('{'), "{body}");
+    assert!(body.contains("B1-JsonPrinter"));
+
+    thermark_with_config(&path)
+        .args(["config", "show", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("B1-JsonPrinter"));
 }
 
 #[test]

@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use thermark::config::{Config, ConnPref};
+use thermark::config::{Config, ConfigFormat, ConnPref};
 use thermark::doctor::{self, DoctorConn};
 use thermark::font;
 use thermark::geometry::LabelMm;
@@ -181,7 +181,11 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 enum ConfigCmd {
     /// Print path + current saved values
-    Show,
+    Show {
+        /// Emit JSON (machine-readable)
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Print config file path only
     Path,
     /// Save default printer (merge into existing config)
@@ -198,6 +202,9 @@ enum ConfigCmd {
         /// Default BLE scan seconds before connect
         #[arg(long)]
         scan_secs: Option<u64>,
+        /// File format: toml (default) or json
+        #[arg(long, value_parser = ["toml", "json"], default_value = "toml")]
+        format: String,
     },
     /// Remove the config file
     Clear,
@@ -575,13 +582,18 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
         ConfigCmd::Path => {
             println!("{}", Config::default_path()?.display());
         }
-        ConfigCmd::Show => {
+        ConfigCmd::Show { json } => {
             let path = Config::default_path()?;
-            println!("path: {}", path.display());
             let cfg = Config::load()?;
+            if json {
+                println!("{}", cfg.to_string_pretty(ConfigFormat::Json)?);
+                return Ok(());
+            }
+            println!("path: {}", path.display());
             if cfg.is_empty() && !path.exists() {
                 println!("(no config file yet)");
                 println!("Save a printer: thermark config set -a \"B1-YourPrinter\"");
+                println!("JSON file:      thermark config set -a \"B1-YourPrinter\" --format json");
                 return Ok(());
             }
             println!("addr:        {}", cfg.addr.as_deref().unwrap_or("(unset)"));
@@ -599,13 +611,17 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
                     .map(|n| n.to_string())
                     .unwrap_or_else(|| "(default 4)".into())
             );
+            println!("format:      {}", ConfigFormat::from_path(&path));
         }
         ConfigCmd::Set {
             addr,
             conn,
             model,
             scan_secs,
+            format,
         } => {
+            let format = ConfigFormat::parse(&format)
+                .ok_or_else(|| anyhow::anyhow!("format must be toml or json"))?;
             let mut cfg = Config::load().unwrap_or_default();
             cfg.apply_set(
                 &addr,
@@ -613,16 +629,21 @@ fn cmd_config(action: ConfigCmd) -> Result<()> {
                 model.map(|m| m.to_string()),
                 scan_secs,
             );
-            let path = cfg.save()?;
+            let path = cfg.save_as(format)?;
             println!("saved default printer → {addr}");
             println!("  connection: {conn}");
-            println!("  file: {}", path.display());
+            println!("  format:     {format}");
+            println!("  file:       {}", path.display());
             println!("Now you can run: thermark info   (no -a needed)");
+            println!("JSON view:       thermark config show --json");
         }
         ConfigCmd::Clear => {
             let path = Config::default_path()?;
             if Config::clear()? {
-                println!("removed {}", path.display());
+                println!(
+                    "removed config under {}",
+                    path.parent().unwrap_or(path.as_path()).display()
+                );
             } else {
                 println!("no config file at {}", path.display());
             }
