@@ -1,5 +1,6 @@
-//! High-level printer client (protocol state machine).
+//! High-level printer client (protocol state machine / print jobs).
 
+use super::info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
 use crate::errors::{Error, PrinterErrorCode, Result};
 use crate::geometry::{LabelMm, LabelPx};
 use crate::image_encode;
@@ -159,7 +160,6 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn get_info(&mut self, key: InfoKey) -> Result<InfoValue> {
-        // Response cmd = 0x40 + key (e.g. serial key 0x0B → 0x4B).
         let req = protocol::info(key);
         let resp_cmd = (Cmd::PrinterInfo as u8).wrapping_add(key as u8);
         let pkt = self
@@ -169,7 +169,6 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn heartbeat(&mut self) -> Result<Heartbeat> {
-        // Primary: response cmd = 0xDD (0xDC + 1)
         if let Ok(pkt) = self
             .transceive_offset(Cmd::Heartbeat as u8, vec![0x01], 1)
             .await
@@ -177,7 +176,6 @@ impl<T: Transport> PrinterClient<T> {
             return Ok(Heartbeat::parse(&pkt.data));
         }
 
-        // Some firmwares reply with 0xDE / 0xDF / 0xD9 instead
         self.send_pkt(&protocol::heartbeat()).await?;
         let packets = self.recv_pkts(Duration::from_millis(500)).await?;
         let pkt = packets
@@ -188,7 +186,6 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn set_label_type(&mut self, t: u8) -> Result<bool> {
-        // Response is 0x33 = 0x23 + 0x10
         let pkt = self
             .transceive_offset(Cmd::SetLabelType as u8, vec![t], 0x10)
             .await?;
@@ -250,6 +247,8 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Core raster job after pixels are already row packets.
+    ///
+    /// Returns [`Error::PrintNotConfirmed`] if the printer never ACKs PrintEnd.
     pub async fn print_rows(
         &mut self,
         width: u32,
@@ -266,6 +265,13 @@ impl<T: Transport> PrinterClient<T> {
             "print job"
         );
 
+        let rows_u16 = u16::try_from(height).map_err(|_| Error::ImageTooLarge { width, height })?;
+        let cols_u16 = u16::try_from(width).map_err(|_| Error::ImageTooLarge { width, height })?;
+        let max_w = self.model.max_width_px().min(self.task.max_width_px());
+        if width > max_w {
+            return Err(Error::ImageTooWide { width, max: max_w });
+        }
+
         if self.task.uses_print_clear() {
             let _ = self
                 .transceive(
@@ -281,7 +287,7 @@ impl<T: Transport> PrinterClient<T> {
         self.set_label_type(1).await?;
         self.start_print().await?;
         self.start_page().await?;
-        self.set_page_size(height as u16, width as u16).await?;
+        self.set_page_size(rows_u16, cols_u16).await?;
 
         for (i, pkt) in rows.into_iter().enumerate() {
             self.send_raw_packet(pkt).await?;
@@ -312,14 +318,26 @@ impl<T: Transport> PrinterClient<T> {
 
         let end_tries = if self.pace { 50 } else { 5 };
         for _ in 0..end_tries {
-            if self.end_print().await.unwrap_or(false) {
-                info!("print finished");
-                return Ok(());
+            match self.end_print().await {
+                Ok(true) => {
+                    info!("print finished");
+                    return Ok(());
+                }
+                Ok(false) => {
+                    // Printer replied but did not confirm success — retry.
+                }
+                Err(Error::Timeout { .. }) => {
+                    // No reply yet — retry.
+                }
+                Err(e) => {
+                    // Real protocol / transport / printer error — surface it.
+                    return Err(e);
+                }
             }
             self.maybe_sleep(Duration::from_millis(100)).await;
         }
-        warn!("end_print did not confirm success; job may still have printed");
-        Ok(())
+        warn!("end_print did not confirm success after {end_tries} tries");
+        Err(Error::PrintNotConfirmed)
     }
 
     /// Fire-and-forget send (used for image row stream).
@@ -327,7 +345,7 @@ impl<T: Transport> PrinterClient<T> {
         self.send_pkt(&packet).await
     }
 
-    /// Full print job for an image file (B1 print-task sequence from community wiki).
+    /// Full print job for an image file.
     pub async fn print_image_file(
         &mut self,
         path: &Path,
@@ -363,7 +381,6 @@ impl<T: Transport> PrinterClient<T> {
             };
         }
 
-        // Map physical label → exact pixel canvas
         let label_px: Option<LabelPx> = opts.label.map(|l| l.to_pixels(max_w));
         if let Some(lp) = label_px {
             info!(
@@ -383,12 +400,9 @@ impl<T: Transport> PrinterClient<T> {
             img = image_encode::fit_width(img, max_w);
         }
 
-        // Always pad width up to a multiple of 8; if still under printhead and
-        // no explicit label, leave as-is (the simple print-task form behaviour).
         let (width, height, rows) =
             image_encode::encode_image(img, max_w, 0, opts.threshold.get())?;
 
-        // Preflight (best-effort)
         if let Ok(rfid) = self.rfid_info().await {
             info!(%rfid, "RFID");
         }
@@ -451,243 +465,6 @@ impl<T: Transport> PrinterClient<T> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct RfidInfo {
-    pub tag_present: bool,
-    pub uuid_hex: String,
-    pub barcode: String,
-    pub serial: String,
-    pub all_paper: i16,
-    pub used_paper: i16,
-    pub consumables_type: u8,
-    pub capacity: Option<i16>,
-}
-
-impl RfidInfo {
-    fn parse(data: &[u8]) -> Self {
-        if data.len() <= 1 {
-            return Self {
-                tag_present: false,
-                ..Default::default()
-            };
-        }
-        let mut i = 0usize;
-        let mut out = Self {
-            tag_present: true,
-            ..Default::default()
-        };
-        if data.len() >= 8 {
-            out.uuid_hex = hex::encode(&data[0..8]);
-            i = 8;
-        }
-        // length-prefixed strings
-        if i < data.len() {
-            let n = data[i] as usize;
-            i += 1;
-            if i + n <= data.len() {
-                out.barcode = String::from_utf8_lossy(&data[i..i + n]).into_owned();
-                i += n;
-            }
-        }
-        if i < data.len() {
-            let n = data[i] as usize;
-            i += 1;
-            if i + n <= data.len() {
-                out.serial = String::from_utf8_lossy(&data[i..i + n]).into_owned();
-                i += n;
-            }
-        }
-        if i + 4 <= data.len() {
-            out.all_paper = i16::from_be_bytes([data[i], data[i + 1]]);
-            out.used_paper = i16::from_be_bytes([data[i + 2], data[i + 3]]);
-            i += 4;
-        }
-        if i < data.len() {
-            out.consumables_type = data[i];
-            i += 1;
-        }
-        if i + 2 <= data.len() {
-            out.capacity = Some(i16::from_be_bytes([data[i], data[i + 1]]));
-        }
-        out
-    }
-}
-
-impl std::fmt::Display for RfidInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.tag_present {
-            return write!(f, "(no RFID tag)");
-        }
-        write!(
-            f,
-            "barcode={} serial={} paper={}/{} type={} uuid={}",
-            self.barcode,
-            self.serial,
-            self.used_paper,
-            self.all_paper,
-            self.consumables_type,
-            self.uuid_hex
-        )?;
-        if let Some(c) = self.capacity {
-            write!(f, " capacity={c}")?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum InfoValue {
-    Int(u64),
-    Float(f64),
-    /// Printable ASCII (device serial strings, etc.).
-    Text(String),
-    /// Opaque bytes as hex.
-    Hex(String),
-    Raw(Vec<u8>),
-}
-
-impl InfoValue {
-    fn parse(key: InfoKey, data: &[u8]) -> Self {
-        match key {
-            InfoKey::DeviceSerial => {
-                // Often ASCII; fall back to hex for binary payloads.
-                if !data.is_empty() && data.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
-                    Self::Text(String::from_utf8_lossy(data).into_owned())
-                } else {
-                    Self::Hex(hex::encode(data))
-                }
-            }
-            InfoKey::SoftVersion | InfoKey::HardVersion => {
-                let n = be_int(data);
-                Self::Float(n as f64 / 100.0)
-            }
-            _ => Self::Int(be_int(data)),
-        }
-    }
-}
-
-impl std::fmt::Display for InfoValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Int(v) => write!(f, "{v}"),
-            Self::Float(v) => write!(f, "{v:.2}"),
-            Self::Text(s) | Self::Hex(s) => write!(f, "{s}"),
-            Self::Raw(b) => write!(f, "{}", hex::encode(b)),
-        }
-    }
-}
-
-fn be_int(data: &[u8]) -> u64 {
-    data.iter().fold(0u64, |acc, b| (acc << 8) | *b as u64)
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Heartbeat {
-    pub closing_state: Option<u8>,
-    pub power_level: Option<u8>,
-    pub paper_state: Option<u8>,
-    pub rfid_read_state: Option<u8>,
-    pub raw_len: usize,
-}
-
-impl Heartbeat {
-    fn parse(data: &[u8]) -> Self {
-        let mut hb = Self {
-            raw_len: data.len(),
-            ..Default::default()
-        };
-        match data.len() {
-            20 => {
-                hb.paper_state = data.get(18).copied();
-                hb.rfid_read_state = data.get(19).copied();
-            }
-            13 => {
-                hb.closing_state = data.get(9).copied();
-                hb.power_level = data.get(10).copied();
-                hb.paper_state = data.get(11).copied();
-                hb.rfid_read_state = data.get(12).copied();
-            }
-            19 => {
-                hb.closing_state = data.get(15).copied();
-                hb.power_level = data.get(16).copied();
-                hb.paper_state = data.get(17).copied();
-                hb.rfid_read_state = data.get(18).copied();
-            }
-            10 => {
-                hb.closing_state = data.get(8).copied();
-                hb.power_level = data.get(9).copied();
-            }
-            9 => {
-                hb.closing_state = data.get(8).copied();
-            }
-            _ => {}
-        }
-        hb
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PrinterSummary {
-    pub serial: Option<InfoValue>,
-    pub soft: Option<InfoValue>,
-    pub hard: Option<InfoValue>,
-    pub battery: Option<InfoValue>,
-    pub device_type: Option<InfoValue>,
-    pub heartbeat: Option<Heartbeat>,
-    pub rfid: Option<RfidInfo>,
-}
-
-impl std::fmt::Display for PrinterSummary {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Printer info")?;
-        if let Some(v) = &self.serial {
-            writeln!(f, "  serial:       {v}")?;
-        }
-        if let Some(v) = &self.device_type {
-            writeln!(f, "  device type:  {v}")?;
-        }
-        if let Some(v) = &self.soft {
-            writeln!(f, "  soft version: {v}")?;
-        }
-        if let Some(v) = &self.hard {
-            writeln!(f, "  hard version: {v}")?;
-        }
-        if let Some(v) = &self.battery {
-            writeln!(f, "  battery:      {v}")?;
-        }
-        if let Some(r) = &self.rfid {
-            writeln!(f, "  RFID:         {r}")?;
-            // Barcodes often embed size like "50*30" or "H5030"
-            if !r.barcode.is_empty() {
-                writeln!(
-                    f,
-                    "  tip: barcode often encodes label size — use --label matching your roll"
-                )?;
-            }
-        }
-        if let Some(hb) = &self.heartbeat {
-            writeln!(f, "  heartbeat ({} bytes):", hb.raw_len)?;
-            if let Some(v) = hb.power_level {
-                writeln!(f, "    power:  {v}")?;
-            }
-            if let Some(v) = hb.closing_state {
-                writeln!(f, "    lid:    {v}  (0=closed on most models)")?;
-            }
-            if let Some(v) = hb.paper_state {
-                writeln!(f, "    paper:  {v}  (0=inserted on most models)")?;
-            }
-            if let Some(v) = hb.rfid_read_state {
-                writeln!(f, "    rfid:   {v}  (1=RFID ok)")?;
-            }
-        }
-        writeln!(
-            f,
-            "  geometry:     8 px/mm (~203 dpi), B1 max width 384 px (~48 mm)"
-        )?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,14 +482,12 @@ mod tests {
         let mut c = client_b1();
         assert_eq!(c.print_task(), PrintTask::B1);
 
-        // 16x2 black image → two bitmap rows after invert of dark source
         let gray = GrayImage::from_pixel(16, 2, Luma([0]));
         c.print_gray_image(&gray, Density::DARK)
             .await
             .expect("print");
 
         let cmds = c.transport().tx_cmds();
-        // density, label type, print start, page start, page size, row*, page end, status, print end
         assert!(cmds.contains(&0x21), "density: {cmds:?}");
         assert!(cmds.contains(&0x23), "label type: {cmds:?}");
         assert!(cmds.contains(&0x01), "print start: {cmds:?}");
@@ -726,13 +501,11 @@ mod tests {
         assert!(cmds.contains(&0xa3), "status: {cmds:?}");
         assert!(cmds.contains(&0xf3), "print end: {cmds:?}");
 
-        // B1 page size is 6 bytes: rows=2, cols=16
         let ps = c.transport().first_tx(0x13).expect("page size pkt");
         assert_eq!(ps.data.len(), 6);
         assert_eq!(u16::from_be_bytes([ps.data[0], ps.data[1]]), 2);
         assert_eq!(u16::from_be_bytes([ps.data[2], ps.data[3]]), 16);
 
-        // B1 print start is 7 bytes
         let st = c.transport().first_tx(0x01).expect("start");
         assert_eq!(st.data.len(), 7);
     }
@@ -740,7 +513,7 @@ mod tests {
     #[tokio::test]
     async fn print_start_error_lack_paper() {
         let mut mock = MockTransport::new();
-        mock.fail_cmd(0x01, 0x02); // LackPaper
+        mock.fail_cmd(0x01, 0x02);
         let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
@@ -799,5 +572,37 @@ mod tests {
         assert!(Density::new(6).is_err());
         let mut c = client_b1();
         assert!(c.set_density(Density::NORMAL).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn print_not_confirmed_when_end_print_muted() {
+        let mut mock = MockTransport::new();
+        mock.mute_cmd(0xf3); // no PrintEnd reply
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::PrintNotConfirmed),
+            "expected PrintNotConfirmed, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn image_too_large_for_u16_page_size() {
+        let mut c = client_b1();
+        // Construct rows for absurd height via print_rows directly
+        let err = c
+            .print_rows(8, u32::from(u16::MAX) + 1, vec![], Density::NORMAL)
+            .await
+            .unwrap_err();
+        match err {
+            Error::ImageTooLarge { height, .. } => {
+                assert!(height > u32::from(u16::MAX));
+            }
+            other => panic!("expected ImageTooLarge, got {other:?}"),
+        }
     }
 }

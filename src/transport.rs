@@ -6,20 +6,29 @@
 
 use crate::errors::{Error, Result};
 use crate::packet::Packet;
-use async_trait::async_trait;
 use std::time::Duration;
 use tracing::debug;
 
 /// Common packet transport used by [`crate::printer::PrinterClient`].
-#[async_trait]
+///
+/// Native `async fn` in traits (no `async-trait`); not object-safe by design.
 pub trait Transport: Send {
-    async fn send_raw(&mut self, data: &[u8]) -> Result<()>;
-    async fn recv_packets(&mut self, wait: Duration) -> Result<Vec<Packet>>;
+    fn send_raw(&mut self, data: &[u8]) -> impl std::future::Future<Output = Result<()>> + Send;
 
-    async fn send_packet(&mut self, packet: &Packet) -> Result<()> {
-        let bytes = packet.encode();
-        debug!(bytes = %hex::encode(&bytes), "TX");
-        self.send_raw(&bytes).await
+    fn recv_packets(
+        &mut self,
+        wait: Duration,
+    ) -> impl std::future::Future<Output = Result<Vec<Packet>>> + Send;
+
+    fn send_packet(
+        &mut self,
+        packet: &Packet,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        async {
+            let bytes = packet.encode();
+            debug!(bytes = %hex::encode(&bytes), "TX");
+            self.send_raw(&bytes).await
+        }
     }
 }
 
@@ -281,7 +290,6 @@ mod ble {
         }
     }
 
-    #[async_trait]
     impl Transport for BleTransport {
         async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
             const CHUNK: usize = 180;
@@ -412,7 +420,6 @@ mod serial {
         }
     }
 
-    #[async_trait]
     impl Transport for SerialTransport {
         async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
             self.port

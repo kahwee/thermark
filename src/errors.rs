@@ -32,6 +32,17 @@ pub enum Error {
     #[error("rotate must be 0/90/180/270, got {0}")]
     InvalidRotation(u32),
 
+    /// Raster dimensions exceed what SetPageSize can express (u16) or the head.
+    #[error("image size {width}x{height}px is out of range for this printer")]
+    ImageTooLarge { width: u32, height: u32 },
+
+    /// Job streamed but the printer never confirmed PrintEnd.
+    #[error(
+        "print job finished without printer confirmation (end_print never succeeded; \
+         label may still have printed — check the device)"
+    )]
+    PrintNotConfirmed,
+
     /// Bad `--label` / size string (e.g. not `50x30`).
     #[error("invalid label size: {0}")]
     InvalidLabel(String),

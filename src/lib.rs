@@ -35,7 +35,7 @@ pub use geometry::{DEFAULT_B1_LABEL, LabelMm, LabelPx, PX_PER_MM};
 pub use mock::MockTransport;
 pub use packet::Packet;
 pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
-pub use printer::{PrintOptions, PrinterClient};
+pub use printer::{Heartbeat, InfoValue, PrintOptions, PrinterClient, PrinterSummary, RfidInfo};
 pub use protocol::Model;
 pub use transport::Transport;
 pub use types::{Density, Rotation, Threshold};

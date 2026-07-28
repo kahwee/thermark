@@ -57,7 +57,7 @@ Quit vendor apps before BLE connect (one client only).
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
 | `errors.rs` | Print error 0xDB reason codes |
 | `transport.rs` | BLE + serial; `PRINTER_SERVICE` / `PRINTER_CHAR` |
-| `printer.rs` | High-level job sequence, RFID, info |
+| `printer/` | Client + print job; `info` (heartbeat/RFID/summary) |
 | `geometry.rs` | 8 px/mm, `LabelMm` / `LabelPx` |
 | `image_encode.rs` | Raster → row packets |
 | `font.rs` | System TTF/TTC (`ab_glyph`), named fonts |

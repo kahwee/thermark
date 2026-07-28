@@ -24,7 +24,6 @@ required-features = ["ble", "serial"]
 
 [dependencies]
 anyhow = "1"
-async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 hex = "0.4"

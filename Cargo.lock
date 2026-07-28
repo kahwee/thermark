@@ -1426,7 +1426,6 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "assert_cmd",
- "async-trait",
  "btleplug",
  "clap",
  "directories",
