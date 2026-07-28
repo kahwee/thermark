@@ -236,6 +236,8 @@ impl Session {
         }
     }
 
+    /// Prefer calling this after every successful path; [`BleTransport`]'s `Drop`
+    /// still disconnects if this is skipped after an error.
     async fn finish(self) {
         if let Self::Ble(c) = self {
             c.into_transport().disconnect().await.ok();
@@ -280,8 +282,9 @@ async fn main() -> Result<()> {
         Commands::Ports => cmd_ports()?,
         Commands::Info { conn, model } => {
             let mut session = Session::connect(&conn, model, false, None).await?;
-            print!("{}", session.fetch_summary().await?);
+            let result = session.fetch_summary().await;
             session.finish().await;
+            print!("{}", result?);
         }
         Commands::Print {
             conn,
@@ -315,9 +318,10 @@ async fn main() -> Result<()> {
                 fill: fill || label_mm.is_some(),
             };
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
-            session.print_image_file_opts(&image, opts).await?;
-            println!("OK — sent print job");
+            let result = session.print_image_file_opts(&image, opts).await;
             session.finish().await;
+            result?;
+            println!("OK — sent print job");
         }
         Commands::Calibrate {
             conn,
@@ -348,9 +352,10 @@ async fn main() -> Result<()> {
                 fill: true,
             };
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
-            session.print_image_file_opts(&tmp, opts).await?;
-            println!("OK — calibration printed ({label})");
+            let result = session.print_image_file_opts(&tmp, opts).await;
             session.finish().await;
+            result?;
+            println!("OK — calibration printed ({label})");
             let _ = DEFAULT_B1_LABEL;
         }
         Commands::Fonts => {
@@ -445,9 +450,10 @@ async fn main() -> Result<()> {
                 fill: false,
             };
             let mut session = Session::connect(&conn, model, simple_start, task).await?;
-            session.print_image_file_opts(&png_path, opts).await?;
-            println!("OK — QR label printed");
+            let result = session.print_image_file_opts(&png_path, opts).await;
             session.finish().await;
+            result?;
+            println!("OK — QR label printed");
         }
         Commands::Encode { cmd, data } => {
             let cmd = u8::from_str_radix(cmd.trim_start_matches("0x"), 16)

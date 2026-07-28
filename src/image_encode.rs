@@ -181,7 +181,8 @@ pub fn calibration_pattern(label: LabelPx) -> GrayImage {
                 let expect = ((h as i64 - 1 - y as i64) * (w as i64 - 1)) / (h as i64 - 1).max(1);
                 (x as i64 - expect).abs() <= 2
             };
-            let on_cross = (x as i64 - w as i64 / 2).abs() <= 2 || (y as i64 - h as i64 / 2).abs() <= 2;
+            let on_cross =
+                (x as i64 - w as i64 / 2).abs() <= 2 || (y as i64 - h as i64 / 2).abs() <= 2;
             if on_border || on_diag1 || on_diag2 || on_cross {
                 img.put_pixel(x, y, Luma([0]));
             }

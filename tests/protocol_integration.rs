@@ -19,7 +19,9 @@ fn b1_print_start_roundtrip() {
 
 #[test]
 fn b1_page_size_matches_50x30() {
-    let lp = LabelMm::parse("50x30").unwrap().to_pixels(Model::B1.max_width_px());
+    let lp = LabelMm::parse("50x30")
+        .unwrap()
+        .to_pixels(Model::B1.max_width_px());
     let p = protocol::set_page_size_b1(lp.height_px as u16, lp.width_px as u16, 1);
     assert_eq!(p.cmd, 0x13);
     assert_eq!(p.data.len(), 6);
@@ -60,17 +62,15 @@ fn model_max_widths() {
 #[test]
 fn qr_label_exact_canvas_and_square_qr() {
     let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
-    let img = make_qr_label(
-        "https://www.youtube.com",
-        "ABC\n123",
-        lp,
-        TextSide::Right,
-    )
-    .expect("layout");
+    let img =
+        make_qr_label("https://www.youtube.com", "ABC\n123", lp, TextSide::Right).expect("layout");
     assert_eq!(img.dimensions(), (384, 240));
 
     let side = max_qr_side(lp);
-    assert!(side >= 200, "QR should use most of label height, got {side}");
+    assert!(
+        side >= 200,
+        "QR should use most of label height, got {side}"
+    );
     let qr = render_qr_square("https://example.com", side).unwrap();
     assert_eq!(qr.dimensions(), (side, side));
 }
@@ -79,10 +79,7 @@ fn qr_label_exact_canvas_and_square_qr() {
 fn px_per_mm_constant() {
     assert!((PX_PER_MM - 8.0).abs() < f64::EPSILON);
     // 50mm * 8 = 400, clamped to 384
-    assert_eq!(
-        LabelMm::new(50.0, 30.0).to_pixels(384).width_px,
-        384
-    );
+    assert_eq!(LabelMm::new(50.0, 30.0).to_pixels(384).width_px, 384);
 }
 
 #[test]

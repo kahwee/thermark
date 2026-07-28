@@ -3,8 +3,8 @@
 use crate::errors::{Error, Result};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{GrayImage, Luma};
-use tracing::{debug, info};
 use std::path::{Path, PathBuf};
+use tracing::{debug, info};
 
 /// Glyph metrics for the built-in 5×7 fallback (used only if no TTF loads).
 pub const GLYPH_W: u32 = 5;
@@ -95,11 +95,13 @@ impl LabelFont {
 
     /// Load a face from a `.ttf`/`.otf` or a face `index` inside a `.ttc` collection.
     pub fn load_index(path: &Path, index: u32) -> Result<Self> {
-        let data = std::fs::read(path).map_err(|e| {
-            Error::font(format!("read font {}: {e}", path.display()))
-        })?;
+        let data = std::fs::read(path)
+            .map_err(|e| Error::font(format!("read font {}: {e}", path.display())))?;
         FontRef::try_from_slice_and_index(&data, index).map_err(|e| {
-            Error::font(format!("parse font {} (index {index}): {e:?}", path.display()))
+            Error::font(format!(
+                "parse font {} (index {index}): {e:?}",
+                path.display()
+            ))
         })?;
         Ok(Self {
             data,
@@ -127,10 +129,7 @@ impl LabelFont {
                     "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
                     0,
                 ),
-                (
-                    "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
-                    0,
-                ),
+                ("/System/Library/Fonts/Supplemental/Times New Roman.ttf", 0),
                 ("/System/Library/Fonts/Times.ttc", 0),
                 ("/System/Library/Fonts/NewYork.ttf", 0),
             ],
@@ -146,10 +145,7 @@ impl LabelFont {
                 ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
             ],
             "courier" | "courier new" => &[
-                (
-                    "/System/Library/Fonts/Supplemental/Courier New Bold.ttf",
-                    0,
-                ),
+                ("/System/Library/Fonts/Supplemental/Courier New Bold.ttf", 0),
                 ("/System/Library/Fonts/Supplemental/Courier New.ttf", 0),
             ],
             _ => &[],
@@ -220,13 +216,18 @@ impl LabelFont {
         let font = self.font();
         let scale = PxScale::from(px_height);
         let sf = font.as_scaled(scale);
-        (sf.ascent() - sf.descent() + sf.line_gap())
-            .ceil()
-            .max(1.0) as u32
+        (sf.ascent() - sf.descent() + sf.line_gap()).ceil().max(1.0) as u32
     }
 
     /// Draw black text (Luma 0) onto a white-ish label image. Origin = baseline-left.
-    pub fn draw_text(&self, img: &mut GrayImage, x: f32, baseline_y: f32, text: &str, px_height: f32) {
+    pub fn draw_text(
+        &self,
+        img: &mut GrayImage,
+        x: f32,
+        baseline_y: f32,
+        text: &str,
+        px_height: f32,
+    ) {
         let font = self.font();
         let scale = PxScale::from(px_height);
         let sf = font.as_scaled(scale);
@@ -453,7 +454,10 @@ mod tests {
             }
         }
         assert!(count > 10, "expected ink for ABC");
-        assert!(max_x > min_x + 20, "ABC should span left→right, got {min_x}..{max_x}");
+        assert!(
+            max_x > min_x + 20,
+            "ABC should span left→right, got {min_x}..{max_x}"
+        );
     }
 
     #[test]
@@ -478,8 +482,17 @@ mod tests {
         // A is typically wider left stem; sample: left third should have ink (A), right third (C)
         let mid1 = min_x + (max_x - min_x) / 3;
         let mid2 = min_x + 2 * (max_x - min_x) / 3;
-        let left = img.enumerate_pixels().filter(|(x, _, p)| *x < mid1 && p[0] < 128).count();
-        let right = img.enumerate_pixels().filter(|(x, _, p)| *x > mid2 && p[0] < 128).count();
-        assert!(left > 5 && right > 5, "A and C regions should both have ink");
+        let left = img
+            .enumerate_pixels()
+            .filter(|(x, _, p)| *x < mid1 && p[0] < 128)
+            .count();
+        let right = img
+            .enumerate_pixels()
+            .filter(|(x, _, p)| *x > mid2 && p[0] < 128)
+            .count();
+        assert!(
+            left > 5 && right > 5,
+            "A and C regions should both have ink"
+        );
     }
 }

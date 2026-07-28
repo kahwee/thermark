@@ -7,9 +7,9 @@ use crate::packet::Packet;
 use crate::print_task::PrintTask;
 use crate::protocol::{self, Cmd, InfoKey, Model};
 use crate::transport::Transport;
-use tracing::{debug, info, warn};
 use std::path::Path;
 use std::time::Duration;
+use tracing::{debug, info, warn};
 
 pub struct PrinterClient<T: Transport> {
     transport: T,
@@ -137,7 +137,10 @@ impl<T: Transport> PrinterClient<T> {
                 );
             }
             if i + 1 < attempts {
-                debug!(expected = format_args!("{response_cmd:#04x}"), "retry wait for response");
+                debug!(
+                    expected = format_args!("{response_cmd:#04x}"),
+                    "retry wait for response"
+                );
             }
         }
         Err(Error::Timeout {
@@ -147,12 +150,7 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Response offset style used by the simple print-task form (resp = req + offset).
-    async fn transceive_offset(
-        &mut self,
-        cmd: u8,
-        data: Vec<u8>,
-        offset: u8,
-    ) -> Result<Packet> {
+    async fn transceive_offset(&mut self, cmd: u8, data: Vec<u8>, offset: u8) -> Result<Packet> {
         let req = Packet::new(cmd, data);
         let resp = cmd.wrapping_add(offset);
         self.transceive(req, resp, 8, Duration::from_millis(150))
@@ -209,7 +207,12 @@ impl<T: Transport> PrinterClient<T> {
     pub async fn start_print(&mut self) -> Result<bool> {
         let req = self.task.print_start(1);
         let pkt = self
-            .transceive(req, Cmd::PrintStart as u8 + 1, 6, Duration::from_millis(250))
+            .transceive(
+                req,
+                Cmd::PrintStart as u8 + 1,
+                6,
+                Duration::from_millis(250),
+            )
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
@@ -238,7 +241,12 @@ impl<T: Transport> PrinterClient<T> {
     pub async fn set_page_size(&mut self, rows: u16, cols: u16) -> Result<bool> {
         let req = self.task.set_page_size(rows, cols, 1);
         let pkt = self
-            .transceive(req, Cmd::SetPageSize as u8 + 1, 6, Duration::from_millis(200))
+            .transceive(
+                req,
+                Cmd::SetPageSize as u8 + 1,
+                6,
+                Duration::from_millis(200),
+            )
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
@@ -379,8 +387,7 @@ impl<T: Transport> PrinterClient<T> {
 
         // Always pad width up to a multiple of 8; if still under printhead and
         // no explicit label, leave as-is (the simple print-task form behaviour).
-        let (width, height, rows) =
-            image_encode::encode_image(img, max_w, 0, opts.threshold)?;
+        let (width, height, rows) = image_encode::encode_image(img, max_w, 0, opts.threshold)?;
 
         // Preflight (best-effort)
         if let Ok(rfid) = self.rfid_info().await {
@@ -406,11 +413,7 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Print an in-memory grayscale image (dark pixels print).
-    pub async fn print_gray_image(
-        &mut self,
-        gray: &image::GrayImage,
-        density: u8,
-    ) -> Result<()> {
+    pub async fn print_gray_image(&mut self, gray: &image::GrayImage, density: u8) -> Result<()> {
         let max_w = self.model.max_width_px().min(self.task.max_width_px());
         let img = image::DynamicImage::ImageLuma8(gray.clone());
         let (width, height, rows) = image_encode::encode_image(img, max_w, 0, 127)?;
@@ -670,7 +673,10 @@ impl std::fmt::Display for PrinterSummary {
                 writeln!(f, "    rfid:   {v}  (1=RFID ok)")?;
             }
         }
-        writeln!(f, "  geometry:     8 px/mm (~203 dpi), B1 max width 384 px (~48 mm)")?;
+        writeln!(
+            f,
+            "  geometry:     8 px/mm (~203 dpi), B1 max width 384 px (~48 mm)"
+        )?;
         Ok(())
     }
 }

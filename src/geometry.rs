@@ -41,11 +41,15 @@ impl LabelMm {
         let w = parts
             .next()
             .and_then(|p| p.trim().parse::<f64>().ok())
-            .ok_or_else(|| Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30")))?;
+            .ok_or_else(|| {
+                Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30"))
+            })?;
         let h = parts
             .next()
             .and_then(|p| p.trim().parse::<f64>().ok())
-            .ok_or_else(|| Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30")))?;
+            .ok_or_else(|| {
+                Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30"))
+            })?;
         if w <= 0.0 || h <= 0.0 {
             return Err(Error::invalid_label("label dimensions must be positive"));
         }

@@ -37,8 +37,9 @@ cargo test --lib --no-default-features
   --url "https://example.com" --text $'ABC\nHELLO'
 
 # Readiness: adapter, scan, connect, lid/paper/RFID/battery
-./target/release/thermark doctor
-./target/release/thermark doctor -a "B1-YourPrinter"
+./target/release/thermark doctor              # host + scan only
+./target/release/thermark doctor -a "B1-…"    # + connect/sensors
+# exit 1 if any FAIL (printer offline → ble_scan / ble_connect fail)
 ```
 
 Quit vendor apps before BLE connect (one client only).

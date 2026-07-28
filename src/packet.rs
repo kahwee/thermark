@@ -184,4 +184,84 @@ mod tests {
         assert_eq!(enc[3], 6);
         assert_eq!(Packet::decode(&enc).unwrap().data.len(), 6);
     }
+
+    #[test]
+    fn drain_garbage_never_panics_and_clears() {
+        let mut buf = vec![0u8, 1, 2, 0xAA, 0x55, 0xFF];
+        let pkts = Packet::drain_buffer(&mut buf);
+        assert!(pkts.is_empty());
+        // No complete head → buffer cleared
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn drain_recovers_valid_after_noise() {
+        let good = Packet::new(0x1a, vec![0x01]).encode();
+        let mut buf = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        buf.extend_from_slice(&good);
+        let pkts = Packet::drain_buffer(&mut buf);
+        assert_eq!(pkts.len(), 1);
+        assert_eq!(pkts[0].cmd, 0x1a);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn drain_bad_checksum_skips_and_continues() {
+        let good = Packet::new(0x40, vec![0x0b]).encode();
+        let mut bad = good.clone();
+        // Flip checksum byte (second-to-last before tail)
+        let cs = bad.len() - 3;
+        bad[cs] ^= 0xFF;
+        let mut buf = bad;
+        buf.extend_from_slice(&good);
+        let pkts = Packet::drain_buffer(&mut buf);
+        assert_eq!(pkts.len(), 1);
+        assert_eq!(pkts[0].cmd, 0x40);
+    }
+
+    /// Property: random noise never panics; output packets always re-encode cleanly.
+    #[test]
+    fn prop_drain_random_noise_no_panic() {
+        use proptest::prelude::*;
+        proptest::proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..512))| {
+            let mut buf = noise;
+            let pkts = Packet::drain_buffer(&mut buf);
+            for p in pkts {
+                let enc = p.encode();
+                let dec = Packet::decode(&enc).expect("roundtrip after drain");
+                prop_assert_eq!(dec, p);
+            }
+            // leftover is either empty or a proper incomplete frame starting at HEAD
+            if !buf.is_empty() {
+                prop_assert!(buf.len() < 7 || buf.starts_with(&HEAD));
+            }
+        });
+    }
+
+    /// Property: a valid packet is recovered when preceded by noise that cannot
+    /// form a frame head (`55 55`).
+    #[test]
+    fn prop_valid_packet_survives_noise_wrap() {
+        use proptest::prelude::*;
+        // Bytes that never form HEAD when consecutive (exclude 0x55 entirely).
+        let noise = prop::collection::vec(0u8..=0x54u8, 0..24);
+        proptest::proptest!(|(
+            cmd in any::<u8>(),
+            data in prop::collection::vec(any::<u8>(), 0..32),
+            prefix in noise.clone(),
+            suffix in noise,
+        )| {
+            let p = Packet::new(cmd, data);
+            let enc = p.encode();
+            let mut buf = prefix;
+            buf.extend_from_slice(&enc);
+            buf.extend_from_slice(&suffix);
+            let pkts = Packet::drain_buffer(&mut buf);
+            prop_assert!(
+                pkts.iter().any(|x| x == &p),
+                "lost packet among cmds {:?}",
+                pkts.iter().map(|x| x.cmd).collect::<Vec<_>>()
+            );
+        });
+    }
 }

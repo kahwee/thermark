@@ -7,8 +7,8 @@
 use crate::errors::{Error, Result};
 use crate::packet::Packet;
 use async_trait::async_trait;
-use tracing::debug;
 use std::time::Duration;
+use tracing::debug;
 
 /// Common packet transport used by [`crate::printer::PrinterClient`].
 #[async_trait]
@@ -33,10 +33,10 @@ mod ble {
     };
     use btleplug::platform::{Adapter, Manager, Peripheral};
     use futures::stream::StreamExt;
-    use tracing::{debug, info};
     use std::collections::HashMap;
     use tokio::sync::mpsc;
     use tokio::time::{sleep, timeout};
+    use tracing::{debug, info};
     use uuid::Uuid;
 
     /// BLE service / characteristic used by common pocket thermal label printers
@@ -52,7 +52,9 @@ mod ble {
         characteristic: Characteristic,
         rx: mpsc::UnboundedReceiver<Vec<u8>>,
         rx_buf: Vec<u8>,
-        _notify_task: tokio::task::JoinHandle<()>,
+        notify_task: Option<tokio::task::JoinHandle<()>>,
+        /// True after explicit or Drop-time teardown (avoids double disconnect).
+        closed: bool,
     }
 
     #[derive(Debug, Clone)]
@@ -229,13 +231,53 @@ mod ble {
                 characteristic,
                 rx,
                 rx_buf: Vec::new(),
-                _notify_task: notify_task,
+                notify_task: Some(notify_task),
+                closed: false,
             })
         }
 
-        pub async fn disconnect(self) -> Result<()> {
-            self.peripheral.disconnect().await.ok();
+        /// Graceful teardown: abort notify task and disconnect the peripheral.
+        ///
+        /// Safe to call more than once. Also runs best-effort from [`Drop`] if
+        /// the transport is abandoned after a mid-job error.
+        pub async fn disconnect(mut self) -> Result<()> {
+            self.close().await;
             Ok(())
+        }
+
+        async fn close(&mut self) {
+            if self.closed {
+                return;
+            }
+            self.closed = true;
+            if let Some(task) = self.notify_task.take() {
+                task.abort();
+            }
+            if let Err(e) = self.peripheral.disconnect().await {
+                debug!(error = %e, "BLE disconnect (ignored)");
+            } else {
+                debug!("BLE disconnected");
+            }
+        }
+    }
+
+    impl Drop for BleTransport {
+        fn drop(&mut self) {
+            if self.closed {
+                return;
+            }
+            self.closed = true;
+            if let Some(task) = self.notify_task.take() {
+                task.abort();
+            }
+            // Prefer async disconnect on the current runtime so mid-error paths
+            // (e.g. print failure without Session::finish) still free the link.
+            let peripheral = self.peripheral.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = peripheral.disconnect().await;
+                });
+            }
         }
     }
 
@@ -297,9 +339,10 @@ mod ble {
             .adapters()
             .await
             .map_err(|e| Error::transport(format!("list adapters: {e}")))?;
-        adapters.into_iter().next().ok_or_else(|| {
-            Error::transport("no Bluetooth adapter found — is Bluetooth enabled?")
-        })
+        adapters
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::transport("no Bluetooth adapter found — is Bluetooth enabled?"))
     }
 
     /// True if a host Bluetooth adapter is available (does not require a printer).

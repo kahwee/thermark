@@ -60,7 +60,9 @@ impl PrintTask {
     pub fn notes(self) -> &'static str {
         match self {
             Self::B1 => "Hardware-tested on B1. 7-byte PrintStart, 6-byte page size, status poll.",
-            Self::B21V1 => "Experimental. Based on wiki B21_V1 (1-byte PrintStart, 4-byte page size).",
+            Self::B21V1 => {
+                "Experimental. Based on wiki B21_V1 (1-byte PrintStart, 4-byte page size)."
+            }
             Self::D110 => "Experimental. Based on wiki D110 / D11 203dpi notes.",
             Self::Simple => "Experimental fallback (plain simple PrintStart).",
         }
@@ -122,9 +124,8 @@ impl std::fmt::Display for PrintTask {
 impl std::str::FromStr for PrintTask {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| {
-            format!("unknown print task '{s}' (try b1, b21v1, d110, simple)")
-        })
+        Self::parse(s)
+            .ok_or_else(|| format!("unknown print task '{s}' (try b1, b21v1, d110, simple)"))
     }
 }
 
@@ -223,6 +224,8 @@ mod tests {
     #[test]
     fn matrix_has_tested_b1() {
         let m = hardware_matrix();
-        assert!(m.iter().any(|h| h.model == "B1" && h.status == SupportStatus::Tested));
+        assert!(m
+            .iter()
+            .any(|h| h.model == "B1" && h.status == SupportStatus::Tested));
     }
 }

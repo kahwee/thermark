@@ -78,12 +78,10 @@ impl MockTransport {
             0x20 => Some(Packet::new(0x30, vec![0x01])), // PrintClear
             0xe3 => Some(Packet::new(0xe4, vec![0x01])), // PageEnd
             0xf3 => Some(Packet::new(0xf4, vec![0x01])), // PrintEnd
-            0xa3 => {
-                Some(Packet::new(
-                    0xb3,
-                    vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-                ))
-            }
+            0xa3 => Some(Packet::new(
+                0xb3,
+                vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            )),
             0xdc => {
                 let mut d = vec![0u8; 13];
                 d[9] = 0; // lid closed
@@ -164,7 +162,9 @@ mod tests {
     async fn injects_print_error() {
         let mut m = MockTransport::new();
         m.fail_cmd(0x01, 0x02);
-        m.send_packet(&protocol::print_start_simple()).await.unwrap();
+        m.send_packet(&protocol::print_start_simple())
+            .await
+            .unwrap();
         let rx = m.recv_packets(Duration::from_millis(1)).await.unwrap();
         assert_eq!(rx[0].cmd, 0xdb);
         assert_eq!(rx[0].data, vec![0x02]);

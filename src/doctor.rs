@@ -7,10 +7,10 @@ use crate::protocol::Model;
 use std::fmt;
 use std::time::Duration;
 
-#[cfg(feature = "ble")]
-use crate::transport::{self, BleTransport};
 #[cfg(feature = "serial")]
 use crate::transport::SerialTransport;
+#[cfg(feature = "ble")]
+use crate::transport::{self, BleTransport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckStatus {

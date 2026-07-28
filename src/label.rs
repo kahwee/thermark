@@ -180,7 +180,8 @@ fn overlay_gray(dst: &mut GrayImage, src: &GrayImage, x0: u32, y0: u32) {
 pub fn max_qr_side(label: LabelPx) -> u32 {
     let margin = 6u32;
     let gap = 8u32;
-    let text_col_w = (((label.width_px as f64) * 0.34).round() as u32).clamp(64, label.width_px / 2);
+    let text_col_w =
+        (((label.width_px as f64) * 0.34).round() as u32).clamp(64, label.width_px / 2);
     let qr_budget_w = label.width_px.saturating_sub(text_col_w + margin * 2 + gap);
     let qr_budget_h = label.height_px.saturating_sub(margin * 2);
     qr_budget_w.min(qr_budget_h).max(16)

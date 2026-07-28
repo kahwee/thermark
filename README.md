@@ -75,6 +75,36 @@ The CLI binary requires both `ble` and `serial` (the default feature set).
 ./target/release/thermark doctor -a "B1-YourPrinter"
 ```
 
+### Doctor (readiness checks)
+
+Use `doctor` when something fails — offline printer, lid open, no paper, Bluetooth off.
+
+```bash
+# Host only (no -a): crate version, fonts, serial ports, Bluetooth adapter, BLE scan
+./target/release/thermark doctor
+
+# Full path: also connect + heartbeat (cover / paper / RFID / battery-ish)
+./target/release/thermark doctor -a "B1-YourPrinter"
+./target/release/thermark doctor -a "B1-YourPrinter" -s 8   # longer scan
+```
+
+| Exit code | Meaning |
+|-----------|---------|
+| **0** | Overall pass or warnings only |
+| **1** | At least one **FAIL** (fix before printing) |
+
+Typical offline printer output:
+
+- `[ok] bluetooth` — adapter is up  
+- `[FAIL] ble_scan` — no devices in N seconds (power on printer, quit vendor apps)  
+- With `-a` but printer off: `[FAIL] ble_connect` — nothing matching that name  
+
+When connected:
+
+- `[FAIL] cover` — lid open  
+- `[FAIL] paper` — no labels detected  
+- `[ok] rfid` / paper counters from the tag  
+
 Quit any official label app before connecting (one BLE client at a time).
 
 ## Geometry
