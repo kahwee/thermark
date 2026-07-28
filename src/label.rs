@@ -1,8 +1,8 @@
 //! Compose printable labels: square QR + side text (system fonts).
 
+use crate::errors::{Error, Result};
 use crate::font::LabelFont;
 use crate::geometry::LabelPx;
-use anyhow::{bail, Result};
 use image::{GrayImage, Luma};
 use qrcode::QrCode;
 
@@ -31,12 +31,12 @@ pub struct QrLabelOptions {
 /// Build a label: **square** QR + readable side text using a system TTF font.
 pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
     if opts.url.is_empty() {
-        bail!("url must not be empty");
+        return Err(Error::qr("url must not be empty"));
     }
     let w = opts.label.width_px;
     let h = opts.label.height_px;
     if w < 32 || h < 32 {
-        bail!("label too small: {w}x{h}");
+        return Err(Error::qr(format!("label too small: {w}x{h}")));
     }
 
     let font = if let Some(ref p) = opts.font_path {
@@ -128,7 +128,7 @@ pub fn make_qr_label(
 }
 
 pub fn render_qr_square(url: &str, side: u32) -> Result<GrayImage> {
-    let code = QrCode::new(url.as_bytes()).map_err(|e| anyhow::anyhow!("QR encode: {e}"))?;
+    let code = QrCode::new(url.as_bytes()).map_err(|e| Error::qr(format!("QR encode: {e}")))?;
     let colors = code.to_colors();
     let modules = code.width();
     let quiet = 2usize;

@@ -34,19 +34,20 @@ impl LabelMm {
     }
 
     /// Parse `"50x30"`, `"50×30"`, or `"50*30"` (width x height, mm).
-    pub fn parse(s: &str) -> Result<Self, String> {
+    pub fn parse(s: &str) -> crate::errors::Result<Self> {
+        use crate::errors::Error;
         let s = s.trim().to_ascii_lowercase().replace(['×', '*'], "x");
         let mut parts = s.split('x');
         let w = parts
             .next()
             .and_then(|p| p.trim().parse::<f64>().ok())
-            .ok_or_else(|| format!("bad label size '{s}', expected e.g. 50x30"))?;
+            .ok_or_else(|| Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30")))?;
         let h = parts
             .next()
             .and_then(|p| p.trim().parse::<f64>().ok())
-            .ok_or_else(|| format!("bad label size '{s}', expected e.g. 50x30"))?;
+            .ok_or_else(|| Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30")))?;
         if w <= 0.0 || h <= 0.0 {
-            return Err("label dimensions must be positive".into());
+            return Err(Error::invalid_label("label dimensions must be positive"));
         }
         Ok(Self::new(w, h))
     }

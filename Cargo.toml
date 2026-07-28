@@ -7,27 +7,38 @@ license = "MIT"
 readme = "README.md"
 keywords = ["thermal", "label", "bluetooth", "ble", "printer"]
 categories = ["hardware-support", "command-line-utilities"]
+repository = "https://github.com/kahwee/thermark"
+
+[features]
+default = ["ble", "serial"]
+# Bluetooth LE (btleplug). On Linux needs libdbus-1-dev.
+ble = ["dep:btleplug", "dep:futures", "dep:uuid"]
+# USB serial. On Linux needs libudev-dev.
+serial = ["dep:serialport"]
 
 [[bin]]
 name = "thermark"
 path = "src/main.rs"
+required-features = ["ble", "serial"]
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-btleplug = "0.11"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
-futures = "0.3"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 log = "0.4"
 qrcode = "0.14"
 ab_glyph = "0.2"
-serialport = "4"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
-uuid = { version = "1", features = ["v4"] }
+
+# Optional transports (enable via features)
+btleplug = { version = "0.11", optional = true }
+futures = { version = "0.3", optional = true }
+serialport = { version = "4", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
 
 [profile.release]
 lto = true

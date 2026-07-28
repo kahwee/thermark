@@ -1,12 +1,16 @@
 //! Environment + printer readiness checks (`thermark doctor`).
 
-use crate::print_task::{PrintTask, SupportStatus, hardware_matrix};
+use crate::errors::Result;
+use crate::print_task::{hardware_matrix, PrintTask, SupportStatus};
 use crate::printer::{Heartbeat, PrinterClient, RfidInfo};
 use crate::protocol::Model;
-use crate::transport::{self, BleTransport, SerialTransport};
-use anyhow::Result;
 use std::fmt;
 use std::time::Duration;
+
+#[cfg(feature = "ble")]
+use crate::transport::{self, BleTransport};
+#[cfg(feature = "serial")]
+use crate::transport::SerialTransport;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckStatus {
@@ -273,6 +277,7 @@ pub async fn run_doctor(
     }
 
     // Serial ports (informational)
+    #[cfg(feature = "serial")]
     match SerialTransport::list_ports() {
         Ok(ports) if ports.is_empty() => checks.push(Check {
             name: "serial_ports".into(),
@@ -290,159 +295,19 @@ pub async fn run_doctor(
             detail: format!("could not list: {e}"),
         }),
     }
+    #[cfg(not(feature = "serial"))]
+    checks.push(Check {
+        name: "serial_ports".into(),
+        status: CheckStatus::Warn,
+        detail: "serial feature disabled at build time".into(),
+    });
 
     match conn_kind {
         DoctorConn::Ble => {
-            // Adapter
-            match transport::bluetooth_available().await {
-                Ok(info) => checks.push(Check {
-                    name: "bluetooth".into(),
-                    status: CheckStatus::Pass,
-                    detail: info,
-                }),
-                Err(e) => {
-                    checks.push(Check {
-                        name: "bluetooth".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!("{e:#}"),
-                    });
-                    return Ok(DoctorReport { checks });
-                }
-            }
-
-            // Scan
-            let scan_for = Duration::from_secs(scan_secs.max(1));
-            match BleTransport::scan(scan_for).await {
-                Ok(devs) if devs.is_empty() => {
-                    checks.push(Check {
-                        name: "ble_scan".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!(
-                            "no printers in {scan_secs}s — power on, quit vendor apps, move closer"
-                        ),
-                    });
-                    if addr.is_none() {
-                        return Ok(DoctorReport { checks });
-                    }
-                }
-                Ok(devs) => {
-                    let names: Vec<_> = devs
-                        .iter()
-                        .map(|d| format!("{} ({})", d.name, d.id))
-                        .collect();
-                    checks.push(Check {
-                        name: "ble_scan".into(),
-                        status: CheckStatus::Pass,
-                        detail: format!("{} device(s): {}", devs.len(), names.join("; ")),
-                    });
-                }
-                Err(e) => {
-                    checks.push(Check {
-                        name: "ble_scan".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!("{e:#}"),
-                    });
-                    return Ok(DoctorReport { checks });
-                }
-            }
-
-            // Connect + heartbeat if addr given
-            if let Some(selector) = addr {
-                match BleTransport::connect(selector, scan_for).await {
-                    Ok(ble) => {
-                        checks.push(Check {
-                            name: "ble_connect".into(),
-                            status: CheckStatus::Pass,
-                            detail: format!("connected via '{selector}'"),
-                        });
-                        let mut client = PrinterClient::new(ble, model);
-                        match client.heartbeat().await {
-                            Ok(hb) => {
-                                checks.push(Check {
-                                    name: "heartbeat".into(),
-                                    status: CheckStatus::Pass,
-                                    detail: format!("{} bytes", hb.raw_len),
-                                });
-                                checks.extend(evaluate_heartbeat(&hb));
-                            }
-                            Err(e) => checks.push(Check {
-                                name: "heartbeat".into(),
-                                status: CheckStatus::Fail,
-                                detail: format!("{e}"),
-                            }),
-                        }
-                        match client.rfid_info().await {
-                            Ok(r) => checks.push(evaluate_rfid(&r)),
-                            Err(e) => checks.push(Check {
-                                name: "rfid_tag".into(),
-                                status: CheckStatus::Warn,
-                                detail: format!("query failed: {e}"),
-                            }),
-                        }
-                        if let Ok(serial) = client.get_info(crate::protocol::InfoKey::DeviceSerial).await
-                        {
-                            checks.push(Check {
-                                name: "serial".into(),
-                                status: CheckStatus::Pass,
-                                detail: serial.to_string(),
-                            });
-                        }
-                        client.into_transport().disconnect().await.ok();
-                    }
-                    Err(e) => checks.push(Check {
-                        name: "ble_connect".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!("{e:#}"),
-                    }),
-                }
-            } else {
-                checks.push(Check {
-                    name: "ble_connect".into(),
-                    status: CheckStatus::Warn,
-                    detail: "skipped — pass -a \"PrinterName\" to test connect + sensors"
-                        .into(),
-                });
-            }
+            doctor_ble(&mut checks, addr, model, scan_secs).await?;
         }
         DoctorConn::Usb => {
-            let Some(path) = addr else {
-                checks.push(Check {
-                    name: "usb".into(),
-                    status: CheckStatus::Fail,
-                    detail: "USB doctor requires -a /dev/cu.… (see thermark ports)".into(),
-                });
-                return Ok(DoctorReport { checks });
-            };
-            match SerialTransport::open(path) {
-                Ok(ser) => {
-                    checks.push(Check {
-                        name: "usb_open".into(),
-                        status: CheckStatus::Pass,
-                        detail: path.into(),
-                    });
-                    let mut client = PrinterClient::new(ser, model);
-                    match client.heartbeat().await {
-                        Ok(hb) => {
-                            checks.push(Check {
-                                name: "heartbeat".into(),
-                                status: CheckStatus::Pass,
-                                detail: format!("{} bytes", hb.raw_len),
-                            });
-                            checks.extend(evaluate_heartbeat(&hb));
-                        }
-                        Err(e) => checks.push(Check {
-                            name: "heartbeat".into(),
-                            status: CheckStatus::Fail,
-                            detail: format!("{e}"),
-                        }),
-                    }
-                }
-                Err(e) => checks.push(Check {
-                    name: "usb_open".into(),
-                    status: CheckStatus::Fail,
-                    detail: format!("{e:#}"),
-                }),
-            }
+            doctor_usb(&mut checks, addr, model).await?;
         }
     }
 
@@ -462,6 +327,192 @@ pub async fn run_doctor(
     });
 
     Ok(DoctorReport { checks })
+}
+
+#[cfg(feature = "ble")]
+async fn doctor_ble(
+    checks: &mut Vec<Check>,
+    addr: Option<&str>,
+    model: Model,
+    scan_secs: u64,
+) -> Result<()> {
+    match transport::bluetooth_available().await {
+        Ok(info) => checks.push(Check {
+            name: "bluetooth".into(),
+            status: CheckStatus::Pass,
+            detail: info,
+        }),
+        Err(e) => {
+            checks.push(Check {
+                name: "bluetooth".into(),
+                status: CheckStatus::Fail,
+                detail: format!("{e}"),
+            });
+            return Ok(());
+        }
+    }
+
+    let scan_for = Duration::from_secs(scan_secs.max(1));
+    match BleTransport::scan(scan_for).await {
+        Ok(devs) if devs.is_empty() => {
+            checks.push(Check {
+                name: "ble_scan".into(),
+                status: CheckStatus::Fail,
+                detail: format!(
+                    "no printers in {scan_secs}s — power on, quit vendor apps, move closer"
+                ),
+            });
+            if addr.is_none() {
+                return Ok(());
+            }
+        }
+        Ok(devs) => {
+            let names: Vec<_> = devs
+                .iter()
+                .map(|d| format!("{} ({})", d.name, d.id))
+                .collect();
+            checks.push(Check {
+                name: "ble_scan".into(),
+                status: CheckStatus::Pass,
+                detail: format!("{} device(s): {}", devs.len(), names.join("; ")),
+            });
+        }
+        Err(e) => {
+            checks.push(Check {
+                name: "ble_scan".into(),
+                status: CheckStatus::Fail,
+                detail: format!("{e}"),
+            });
+            return Ok(());
+        }
+    }
+
+    if let Some(selector) = addr {
+        match BleTransport::connect(selector, scan_for).await {
+            Ok(ble) => {
+                checks.push(Check {
+                    name: "ble_connect".into(),
+                    status: CheckStatus::Pass,
+                    detail: format!("connected via '{selector}'"),
+                });
+                let mut client = PrinterClient::new(ble, model);
+                match client.heartbeat().await {
+                    Ok(hb) => {
+                        checks.push(Check {
+                            name: "heartbeat".into(),
+                            status: CheckStatus::Pass,
+                            detail: format!("{} bytes", hb.raw_len),
+                        });
+                        checks.extend(evaluate_heartbeat(&hb));
+                    }
+                    Err(e) => checks.push(Check {
+                        name: "heartbeat".into(),
+                        status: CheckStatus::Fail,
+                        detail: format!("{e}"),
+                    }),
+                }
+                match client.rfid_info().await {
+                    Ok(r) => checks.push(evaluate_rfid(&r)),
+                    Err(e) => checks.push(Check {
+                        name: "rfid_tag".into(),
+                        status: CheckStatus::Warn,
+                        detail: format!("query failed: {e}"),
+                    }),
+                }
+                if let Ok(serial) = client
+                    .get_info(crate::protocol::InfoKey::DeviceSerial)
+                    .await
+                {
+                    checks.push(Check {
+                        name: "serial".into(),
+                        status: CheckStatus::Pass,
+                        detail: serial.to_string(),
+                    });
+                }
+                client.into_transport().disconnect().await.ok();
+            }
+            Err(e) => checks.push(Check {
+                name: "ble_connect".into(),
+                status: CheckStatus::Fail,
+                detail: format!("{e}"),
+            }),
+        }
+    } else {
+        checks.push(Check {
+            name: "ble_connect".into(),
+            status: CheckStatus::Warn,
+            detail: "skipped — pass -a \"PrinterName\" to test connect + sensors".into(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "ble"))]
+async fn doctor_ble(
+    checks: &mut Vec<Check>,
+    _addr: Option<&str>,
+    _model: Model,
+    _scan_secs: u64,
+) -> Result<()> {
+    checks.push(Check {
+        name: "bluetooth".into(),
+        status: CheckStatus::Fail,
+        detail: "ble feature disabled at build time".into(),
+    });
+    Ok(())
+}
+
+#[cfg(feature = "serial")]
+async fn doctor_usb(checks: &mut Vec<Check>, addr: Option<&str>, model: Model) -> Result<()> {
+    let Some(path) = addr else {
+        checks.push(Check {
+            name: "usb".into(),
+            status: CheckStatus::Fail,
+            detail: "USB doctor requires -a /dev/cu.… (see thermark ports)".into(),
+        });
+        return Ok(());
+    };
+    match SerialTransport::open(path) {
+        Ok(ser) => {
+            checks.push(Check {
+                name: "usb_open".into(),
+                status: CheckStatus::Pass,
+                detail: path.into(),
+            });
+            let mut client = PrinterClient::new(ser, model);
+            match client.heartbeat().await {
+                Ok(hb) => {
+                    checks.push(Check {
+                        name: "heartbeat".into(),
+                        status: CheckStatus::Pass,
+                        detail: format!("{} bytes", hb.raw_len),
+                    });
+                    checks.extend(evaluate_heartbeat(&hb));
+                }
+                Err(e) => checks.push(Check {
+                    name: "heartbeat".into(),
+                    status: CheckStatus::Fail,
+                    detail: format!("{e}"),
+                }),
+            }
+        }
+        Err(e) => checks.push(Check {
+            name: "usb_open".into(),
+            status: CheckStatus::Fail,
+            detail: format!("{e}"),
+        }),
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "serial"))]
+async fn doctor_usb(checks: &mut Vec<Check>, _addr: Option<&str>, _model: Model) -> Result<()> {
+    checks.push(Check {
+        name: "usb".into(),
+        status: CheckStatus::Fail,
+        detail: "serial feature disabled at build time".into(),
+    });
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

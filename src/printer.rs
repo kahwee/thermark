@@ -103,17 +103,11 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     async fn send_pkt(&mut self, packet: &Packet) -> Result<()> {
-        self.transport
-            .send_packet(packet)
-            .await
-            .map_err(|e| Error::transport(e.to_string()))
+        self.transport.send_packet(packet).await
     }
 
     async fn recv_pkts(&mut self, wait: Duration) -> Result<Vec<Packet>> {
-        self.transport
-            .recv_packets(wait)
-            .await
-            .map_err(|e| Error::transport(e.to_string()))
+        self.transport.recv_packets(wait).await
     }
 
     /// Send a request and wait for a matching response command.

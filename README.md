@@ -28,6 +28,22 @@ cargo build --release
 # binary: target/release/thermark
 ```
 
+### Cargo features
+
+| Feature | Default | What it enables |
+|---------|---------|-----------------|
+| `ble` | yes | Bluetooth LE (`btleplug`; Linux needs `libdbus-1-dev`) |
+| `serial` | yes | USB serial (`serialport`; Linux needs `libudev-dev`) |
+
+Library-only (protocol + mock, no hardware deps):
+
+```bash
+cargo build --lib --no-default-features
+cargo test --lib --no-default-features
+```
+
+The CLI binary requires both `ble` and `serial` (the default feature set).
+
 ## Usage
 
 ```bash

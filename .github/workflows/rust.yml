@@ -21,8 +21,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
 
-    - name: Build
+    - name: Build (default features)
       run: cargo build --verbose
 
-    - name: Run tests
+    - name: Test (default features)
       run: cargo test --verbose
+
+    - name: Test library without hardware deps
+      run: cargo test --lib --no-default-features --verbose
+
+    - name: Test library with ble only
+      run: cargo test --lib --no-default-features --features ble --verbose
+
+    - name: Test library with serial only
+      run: cargo test --lib --no-default-features --features serial --verbose

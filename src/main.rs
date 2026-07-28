@@ -304,7 +304,7 @@ async fn main() -> Result<()> {
                 bail!("image not found: {}", image.display());
             }
             let label_mm = match label {
-                Some(s) => Some(LabelMm::parse(&s).map_err(anyhow::Error::msg)?),
+                Some(s) => Some(LabelMm::parse(&s)?),
                 None => None,
             };
             let opts = PrintOptions {
@@ -329,7 +329,7 @@ async fn main() -> Result<()> {
             task,
         } => {
             let model: Model = model.parse()?;
-            let label_mm = LabelMm::parse(&label).map_err(anyhow::Error::msg)?;
+            let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
             info!(
                 "calibration pattern {}x{} px ({:.1}x{:.1} mm)",
@@ -402,7 +402,7 @@ async fn main() -> Result<()> {
             no_print,
         } => {
             let model: Model = model.parse()?;
-            let label_mm = LabelMm::parse(&label).map_err(anyhow::Error::msg)?;
+            let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
             let side = match text_side.to_ascii_lowercase().as_str() {
                 "left" | "l" => TextSide::Left,

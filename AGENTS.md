@@ -27,6 +27,8 @@ macOS CoreBluetooth uses **UUID** device ids, not classic MACs.
 ```bash
 cargo build --release
 cargo test
+# library without BLE/serial sysdeps:
+cargo test --lib --no-default-features
 ./target/release/thermark scan
 ./target/release/thermark info -a "B1-YourPrinter"
 ./target/release/thermark calibrate -a "B1-YourPrinter" --label 50x30

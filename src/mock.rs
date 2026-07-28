@@ -1,8 +1,8 @@
 //! In-memory transport for tests (no Bluetooth / USB).
 
+use crate::errors::{Error, Result};
 use crate::packet::Packet;
 use crate::transport::Transport;
-use anyhow::{bail, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -79,16 +79,12 @@ impl MockTransport {
             0xe3 => Some(Packet::new(0xe4, vec![0x01])), // PageEnd
             0xf3 => Some(Packet::new(0xf4, vec![0x01])), // PrintEnd
             0xa3 => {
-                // PrintStatus — page done-ish
-                // layout loosely: page u16, progress bytes…
                 Some(Packet::new(
                     0xb3,
                     vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                 ))
             }
             0xdc => {
-                // Heartbeat Advanced1 13-byte style: lid=0 paper=0 rfid=1 power=3
-                // indices used by Heartbeat::parse for len 13
                 let mut d = vec![0u8; 13];
                 d[9] = 0; // lid closed
                 d[10] = 3; // power
@@ -108,7 +104,6 @@ impl MockTransport {
                 };
                 Some(Packet::new(0x40u8.wrapping_add(key), body))
             }
-            // generic ack
             other => Some(Packet::new(other.wrapping_add(1), vec![0x01])),
         }
     }
@@ -118,10 +113,12 @@ impl MockTransport {
 impl Transport for MockTransport {
     async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
         self.tx.push(data.to_vec());
-        let pkt = match Packet::decode(data) {
-            Ok(p) => p,
-            Err(e) => bail!("mock: client sent undecodable frame: {e} ({})", hex::encode(data)),
-        };
+        let pkt = Packet::decode(data).map_err(|e| {
+            Error::msg(format!(
+                "mock: client sent undecodable frame: {e} ({})",
+                hex::encode(data)
+            ))
+        })?;
         let cmd = pkt.cmd;
         let pdata = pkt.data.clone();
         self.tx_packets.push(pkt);

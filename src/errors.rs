@@ -3,6 +3,7 @@
 //! `PrinterErrorCode` source: the protocol reference payloads.ts
 //! (<the protocol reference>).
 
+use crate::packet::PacketError;
 use std::fmt;
 
 /// Public result alias for the library.
@@ -31,9 +32,25 @@ pub enum Error {
     #[error("rotate must be 0/90/180/270, got {0}")]
     InvalidRotation(u32),
 
+    /// Bad `--label` / size string (e.g. not `50x30`).
+    #[error("invalid label size: {0}")]
+    InvalidLabel(String),
+
+    /// Packet framing / checksum.
+    #[error(transparent)]
+    Packet(#[from] PacketError),
+
     /// BLE / serial / I/O transport failure.
     #[error("transport: {0}")]
     Transport(String),
+
+    /// Font load / parse failure.
+    #[error("font: {0}")]
+    Font(String),
+
+    /// QR encode / layout failure.
+    #[error("qr: {0}")]
+    Qr(String),
 
     /// Image codec / open failure.
     #[error("image: {0}")]
@@ -55,6 +72,18 @@ impl Error {
 
     pub fn transport(s: impl Into<String>) -> Self {
         Self::Transport(s.into())
+    }
+
+    pub fn font(s: impl Into<String>) -> Self {
+        Self::Font(s.into())
+    }
+
+    pub fn qr(s: impl Into<String>) -> Self {
+        Self::Qr(s.into())
+    }
+
+    pub fn invalid_label(s: impl Into<String>) -> Self {
+        Self::InvalidLabel(s.into())
     }
 }
 
@@ -283,9 +312,7 @@ impl PrinterErrorCode {
 
     pub fn hint(self) -> Option<&'static str> {
         match self {
-            Self::CoverOpen => {
-                Some("Close the B1 cover fully until it clicks.")
-            }
+            Self::CoverOpen => Some("Close the B1 cover fully until it clicks."),
             Self::LackPaper | Self::PaperOutException | Self::ECheckPaper => {
                 Some("Load a label roll with 2–5 mm sticking out of the exit slot.")
             }
@@ -293,13 +320,15 @@ impl PrinterErrorCode {
                 Some("Charge the printer, then try again.")
             }
             Self::WrongPaper | Self::SetPaperFail | Self::SetPrintLabelMaterialError => {
-                Some("Use compatible NIIMBOT labels for this model; check label type in settings.")
+                Some("Use compatible labels for this model; check label type in settings.")
             }
             Self::WriteRfidFail | Self::RfidTagNotWritten | Self::NotSupportWrittenRfid => {
-                Some("RFID consumable issue — try official NIIMBOT labels or a different roll.")
+                Some("RFID consumable issue — try official labels or a different roll.")
             }
             Self::Overheat => Some("Wait for the print head to cool, then retry."),
-            Self::PrinterBusy => Some("Wait for the current job to finish, or power-cycle the printer."),
+            Self::PrinterBusy => {
+                Some("Wait for the current job to finish, or power-cycle the printer.")
+            }
             Self::DataError | Self::CanvasParameterError | Self::IllegalPage => {
                 Some("Check image size (B1 max width 384 px) and print-task parameters.")
             }
@@ -356,5 +385,11 @@ mod tests {
             Error::Printer(PrinterErrorCode::LackPaper) => {}
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn packet_error_converts() {
+        let err: Error = PacketError::BadHead.into();
+        assert!(matches!(err, Error::Packet(_)));
     }
 }

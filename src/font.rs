@@ -1,5 +1,6 @@
 //! Text rendering for labels: system TrueType fonts (preferred) + tiny bitmap fallback.
 
+use crate::errors::{Error, Result};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use image::{GrayImage, Luma};
 use log::info;
@@ -45,11 +46,11 @@ pub fn system_font_candidates() -> Vec<PathBuf> {
     paths
 }
 
-fn bail_no_font(name: &str) -> anyhow::Result<LabelFont> {
-    Err(anyhow::anyhow!(
+fn bail_no_font(name: &str) -> Result<LabelFont> {
+    Err(Error::font(format!(
         "could not load font '{name}'. Try: --font-name helvetica | times | arial \
          or --font /path/to.ttf  (run `thermark fonts` to list)"
-    ))
+    )))
 }
 
 /// Find the first readable candidate, optionally preferring a name substring (e.g. "Arial", "Bold").
@@ -88,16 +89,17 @@ pub struct LabelFont {
 }
 
 impl LabelFont {
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
+    pub fn load(path: &Path) -> Result<Self> {
         Self::load_index(path, 0)
     }
 
     /// Load a face from a `.ttf`/`.otf` or a face `index` inside a `.ttc` collection.
-    pub fn load_index(path: &Path, index: u32) -> anyhow::Result<Self> {
-        let data = std::fs::read(path)
-            .map_err(|e| anyhow::anyhow!("read font {}: {e}", path.display()))?;
+    pub fn load_index(path: &Path, index: u32) -> Result<Self> {
+        let data = std::fs::read(path).map_err(|e| {
+            Error::font(format!("read font {}: {e}", path.display()))
+        })?;
         FontRef::try_from_slice_and_index(&data, index).map_err(|e| {
-            anyhow::anyhow!("parse font {} (index {index}): {e:?}", path.display())
+            Error::font(format!("parse font {} (index {index}): {e:?}", path.display()))
         })?;
         Ok(Self {
             data,
@@ -107,7 +109,7 @@ impl LabelFont {
     }
 
     /// Try common system names: "helvetica", "times", "arial", etc.
-    pub fn load_named(name: &str) -> anyhow::Result<Self> {
+    pub fn load_named(name: &str) -> Result<Self> {
         let key = name.to_ascii_lowercase();
         let tries: &[(&str, u32)] = match key.as_str() {
             "helvetica" | "helvetica neue" | "helv" => &[
@@ -177,11 +179,11 @@ impl LabelFont {
         bail_no_font(name)
     }
 
-    pub fn load_default() -> anyhow::Result<Self> {
+    pub fn load_default() -> Result<Self> {
         Self::load_named("arial bold").or_else(|_| {
             let path = find_system_font(None).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no system font found — pass --font /path/to.ttf or --font-name helvetica"
+                Error::font(
+                    "no system font found — pass --font /path/to.ttf or --font-name helvetica",
                 )
             })?;
             info!("using font {}", path.display());
