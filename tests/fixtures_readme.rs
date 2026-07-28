@@ -71,6 +71,11 @@ fn curated() -> &'static [Fixture] {
             kind: Kind::Photo,
         },
         Fixture {
+            name: "sticker_crew.png",
+            purpose: "Hybrid art+text badge: excavator + DIG CREW / SITE 12",
+            kind: Kind::Art,
+        },
+        Fixture {
             name: "sticker_link.png",
             purpose: "Package / share link: QR + order-style text",
             kind: Kind::QrSticker,

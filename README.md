@@ -4,11 +4,25 @@
 
 Built for B1-class 50×30 mm labels (**384×240 px** at 8 px/mm). Hardware-tested on a real B1.
 
+### What problem does this solve?
+
+Vendor apps lock you into a GUI, cloud accounts, and opaque templates. **thermark** is terminal-first: exact millimetre geometry, offline, scriptable.
+
+**Use cases**
+
+- Package / order stickers with a scannable QR and human-readable ship notes
+- Inventory bin tags (SKU, qty, date) that still leave a quiet edge for the print head
+- Desk and event name badges with identity lines beside a QR
+- Workshop / site crew badges: cute line art + bold status text on one 50×30
+- Photo or mascot stickers (1-bit thermal) for makers, kids, or product samples
+- Batch / CI automation via CLI or the Rust library — no cloud round-trip
+
 | Why people use it | What you get |
 |-------------------|--------------|
 | Share a URL on a package or laptop | QR + short text, one command |
 | Label bins, cables, samples | Dense multi-line tags that still scan |
 | Desk / event name stickers | Clean QR + identity lines |
+| Art + text crew / site badges | Hybrid layout, pure B/W thermal |
 | Photo stickers (1-bit thermal) | Centered fit, margins, dither |
 | Automate / script | Plain CLI + Rust library, offline |
 
@@ -124,6 +138,21 @@ Same pipeline for other line art (e.g. excavator): preprocess to 384×240 B/W wi
 ```
 
 <img src="fixtures/sticker_excavator.png" alt="Cute excavator line-art sticker" width="384" />
+
+### Art + text badge (crew / site)
+
+Hybrid layout: line art on the left, bold readable type on the right. Precomposed 384×240 pure B/W (`sticker_crew.png`) so the printer gets hard edges — no dither, no fill crop.
+
+```bash
+./target/release/thermark print \
+  -i fixtures/sticker_crew.png \
+  --label 50x30 \
+  --no-fill --margin 0 -d 4
+```
+
+<img src="fixtures/sticker_crew.png" alt="DIG CREW excavator art+text badge" width="384" />
+
+Compose your own the same way: place art in ~left 55%, text column on the right, hard-threshold to 0/255, save at label size, then print with `--no-fill --margin 0 -d 4`.
 
 ### Your own photo or PNG
 
