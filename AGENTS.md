@@ -52,7 +52,7 @@ Quit vendor apps before BLE connect (one client only).
 
 | File | Role |
 |------|------|
-| `config.rs` | User `config.toml` (default BLE addr) |
+| `config.rs` | User `config.json` (default BLE addr) |
 | `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
 | `errors.rs` | Print error 0xDB reason codes |

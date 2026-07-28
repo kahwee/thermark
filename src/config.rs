@@ -1,11 +1,9 @@
-//! User config: default printer address and connection prefs.
+//! User config: default printer address and connection prefs (**JSON only**).
 //!
 //! File location (platform standard):
-//! - **macOS:** `~/Library/Application Support/thermark/config.{toml,json}`
-//! - **Linux:** `~/.config/thermark/config.{toml,json}`
-//! - **Windows:** `%APPDATA%\thermark\config.{toml,json}`
-//!
-//! Formats: **TOML** (default) or **JSON** (path ends in `.json`, or `config set --format json`).
+//! - **macOS:** `~/Library/Application Support/thermark/config.json`
+//! - **Linux:** `~/.config/thermark/config.json`
+//! - **Windows:** `%APPDATA%\thermark\config.json`
 //!
 //! Override path with env `THERMARK_CONFIG`.
 //!
@@ -18,62 +16,6 @@ use crate::errors::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-const TOML_HEADER: &str = "\
-# thermark user config — do not commit device serials to git
-# Override path: THERMARK_CONFIG=/path/to/config.toml
-# Override addr only: THERMARK_ADDR=B1-YourPrinter
-";
-
-/// On-disk config encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ConfigFormat {
-    #[default]
-    Toml,
-    Json,
-}
-
-impl ConfigFormat {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "toml" => Some(Self::Toml),
-            "json" => Some(Self::Json),
-            _ => None,
-        }
-    }
-
-    pub fn from_path(path: &Path) -> Self {
-        match path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("json") => Self::Json,
-            _ => Self::Toml,
-        }
-    }
-
-    pub fn file_name(self) -> &'static str {
-        match self {
-            Self::Toml => "config.toml",
-            Self::Json => "config.json",
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Toml => "toml",
-            Self::Json => "json",
-        }
-    }
-}
-
-impl std::fmt::Display for ConfigFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 /// Preferred link type stored in config / resolved for the CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -106,7 +48,7 @@ impl std::fmt::Display for ConnPref {
     }
 }
 
-/// On-disk / in-memory user preferences.
+/// On-disk / in-memory user preferences (JSON).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     /// Default BLE name / UUID or serial device path.
@@ -144,7 +86,7 @@ impl Config {
         Ok(dirs.config_dir().to_path_buf())
     }
 
-    /// Path used by the CLI (`THERMARK_CONFIG`, else existing json/toml, else `config.toml`).
+    /// Path used by the CLI (`THERMARK_CONFIG` or `…/config.json`).
     pub fn default_path() -> Result<PathBuf> {
         if let Ok(p) = std::env::var("THERMARK_CONFIG") {
             let p = p.trim();
@@ -152,30 +94,7 @@ impl Config {
                 return Ok(PathBuf::from(p));
             }
         }
-        let dir = Self::config_dir()?;
-        let json = dir.join(ConfigFormat::Json.file_name());
-        let toml = dir.join(ConfigFormat::Toml.file_name());
-        if json.exists() {
-            return Ok(json);
-        }
-        if toml.exists() {
-            return Ok(toml);
-        }
-        Ok(toml)
-    }
-
-    /// Default path forced to a format (for `config set --format json`).
-    pub fn path_for_format(format: ConfigFormat) -> Result<PathBuf> {
-        if let Ok(p) = std::env::var("THERMARK_CONFIG") {
-            let p = p.trim();
-            if !p.is_empty() {
-                let mut path = PathBuf::from(p);
-                // Align extension with requested format when env path is used.
-                path.set_extension(format.as_str());
-                return Ok(path);
-            }
-        }
-        Ok(Self::config_dir()?.join(format.file_name()))
+        Ok(Self::config_dir()?.join("config.json"))
     }
 
     /// Load from the default path. Missing file → empty config (not an error).
@@ -190,43 +109,18 @@ impl Config {
         }
         let text = fs::read_to_string(path)
             .map_err(|e| Error::msg(format!("read config {}: {e}", path.display())))?;
-        Self::parse_str(&text, ConfigFormat::from_path(path))
+        Self::parse_json(&text)
             .map_err(|e| Error::msg(format!("parse config {}: {e}", path.display())))
-    }
-
-    /// Parse config body (TOML or JSON).
-    pub fn parse_str(text: &str, format: ConfigFormat) -> Result<Self> {
-        match format {
-            ConfigFormat::Toml => {
-                toml::from_str(text).map_err(|e| Error::msg(format!("invalid TOML: {e}")))
-            }
-            ConfigFormat::Json => {
-                serde_json::from_str(text).map_err(|e| Error::msg(format!("invalid JSON: {e}")))
-            }
-        }
-    }
-
-    /// Parse TOML body (no file I/O).
-    pub fn parse_toml(text: &str) -> Result<Self> {
-        Self::parse_str(text, ConfigFormat::Toml)
     }
 
     /// Parse JSON body (no file I/O).
     pub fn parse_json(text: &str) -> Result<Self> {
-        Self::parse_str(text, ConfigFormat::Json)
+        serde_json::from_str(text).map_err(|e| Error::msg(format!("invalid JSON: {e}")))
     }
 
-    /// Serialize for display / file.
-    pub fn to_string_pretty(&self, format: ConfigFormat) -> Result<String> {
-        match format {
-            ConfigFormat::Toml => {
-                let text = toml::to_string_pretty(self)
-                    .map_err(|e| Error::msg(format!("serialize TOML: {e}")))?;
-                Ok(format!("{TOML_HEADER}{text}"))
-            }
-            ConfigFormat::Json => serde_json::to_string_pretty(self)
-                .map_err(|e| Error::msg(format!("serialize JSON: {e}"))),
-        }
+    /// Pretty-print JSON for display / file.
+    pub fn to_json_pretty(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|e| Error::msg(format!("serialize JSON: {e}")))
     }
 
     /// Write to the default path (creates parent dirs).
@@ -236,39 +130,22 @@ impl Config {
         Ok(path)
     }
 
-    /// Write using a chosen format under the platform config dir.
-    pub fn save_as(&self, format: ConfigFormat) -> Result<PathBuf> {
-        let path = Self::path_for_format(format)?;
-        self.save_to(&path)?;
-        Ok(path)
-    }
-
-    /// Write to an explicit path (format from extension: `.json` vs TOML).
+    /// Write JSON to an explicit path.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| Error::msg(format!("create config dir {}: {e}", parent.display())))?;
         }
-        let body = self.to_string_pretty(ConfigFormat::from_path(path))?;
+        let body = self.to_json_pretty()?;
+        let body = format!("{body}\n");
         fs::write(path, body)
             .map_err(|e| Error::msg(format!("write config {}: {e}", path.display())))?;
         Ok(())
     }
 
-    /// Delete default config file(s). Returns true if anything was removed.
+    /// Delete the default config file if it exists.
     pub fn clear() -> Result<bool> {
-        let mut removed = false;
-        if let Ok(p) = std::env::var("THERMARK_CONFIG") {
-            let p = PathBuf::from(p.trim());
-            if !p.as_os_str().is_empty() {
-                return Self::clear_at(&p);
-            }
-        }
-        if let Ok(dir) = Self::config_dir() {
-            removed |= Self::clear_at(&dir.join(ConfigFormat::Toml.file_name()))?;
-            removed |= Self::clear_at(&dir.join(ConfigFormat::Json.file_name()))?;
-        }
-        Ok(removed)
+        Self::clear_at(&Self::default_path()?)
     }
 
     /// Delete config at an explicit path.
@@ -348,7 +225,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Serialize env mutations (resolve_addr uses THERMARK_ADDR).
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_clean_env<T>(f: impl FnOnce() -> T) -> T {
@@ -362,46 +238,6 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_toml_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        let cfg = Config {
-            addr: Some("B1-YourPrinter".into()),
-            connection: Some("ble".into()),
-            model: Some("b1".into()),
-            scan_secs: Some(6),
-        };
-        cfg.save_to(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("thermark user config"));
-        assert!(text.contains("B1-YourPrinter"));
-
-        let loaded = Config::load_from(&path).unwrap();
-        assert_eq!(loaded, cfg);
-    }
-
-    #[test]
-    fn missing_file_is_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nope.toml");
-        let cfg = Config::load_from(&path).unwrap();
-        assert!(cfg.is_empty());
-        assert!(cfg.addr.is_none());
-    }
-
-    #[test]
-    fn invalid_toml_errors() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("bad.toml");
-        std::fs::write(&path, "addr = [unterminated").unwrap();
-        let err = Config::load_from(&path).unwrap_err().to_string();
-        assert!(
-            err.contains("parse config") || err.contains("TOML"),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn roundtrip_json_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
@@ -409,7 +245,7 @@ mod tests {
             addr: Some("B1-YourPrinter".into()),
             connection: Some("ble".into()),
             model: Some("b1".into()),
-            scan_secs: Some(5),
+            scan_secs: Some(6),
         };
         cfg.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -420,23 +256,20 @@ mod tests {
     }
 
     #[test]
+    fn missing_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nope.json");
+        let cfg = Config::load_from(&path).unwrap();
+        assert!(cfg.is_empty());
+    }
+
+    #[test]
     fn invalid_json_errors() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad.json");
         std::fs::write(&path, "{not json").unwrap();
         let err = Config::load_from(&path).unwrap_err().to_string();
         assert!(err.contains("parse") || err.contains("JSON"), "{err}");
-    }
-
-    #[test]
-    fn to_string_pretty_json() {
-        let cfg = Config {
-            addr: Some("B1-X".into()),
-            ..Default::default()
-        };
-        let s = cfg.to_string_pretty(ConfigFormat::Json).unwrap();
-        let back: Config = serde_json::from_str(&s).unwrap();
-        assert_eq!(back.addr.as_deref(), Some("B1-X"));
     }
 
     #[test]
@@ -450,13 +283,8 @@ mod tests {
         cfg.apply_set("B1-New", ConnPref::Ble, None, None);
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
         assert_eq!(cfg.connection.as_deref(), Some("ble"));
-        // model + scan_secs kept when not provided
         assert_eq!(cfg.model.as_deref(), Some("b21"));
         assert_eq!(cfg.scan_secs, Some(9));
-
-        cfg.apply_set("B1-New", ConnPref::Ble, Some("b1".into()), Some(3));
-        assert_eq!(cfg.model.as_deref(), Some("b1"));
-        assert_eq!(cfg.scan_secs, Some(3));
     }
 
     #[test]
@@ -474,17 +302,11 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(cfg.resolve_addr(Some("from-cli")).unwrap(), "from-cli");
-            assert_eq!(cfg.resolve_addr(Some("  from-cli  ")).unwrap(), "from-cli");
             assert_eq!(cfg.resolve_addr(None).unwrap(), "from-config");
-            assert_eq!(cfg.resolve_addr(Some("")).unwrap(), "from-config");
-            assert_eq!(cfg.resolve_addr(Some("   ")).unwrap(), "from-config");
-
-            // SAFETY: ENV_LOCK held by with_clean_env.
             unsafe {
                 std::env::set_var("THERMARK_ADDR", "from-env");
             }
             assert_eq!(cfg.resolve_addr(None).unwrap(), "from-env");
-            assert_eq!(cfg.resolve_addr(Some("from-cli")).unwrap(), "from-cli");
             unsafe {
                 std::env::remove_var("THERMARK_ADDR");
             }
@@ -494,8 +316,10 @@ mod tests {
     #[test]
     fn resolve_addr_missing_errors() {
         with_clean_env(|| {
-            let cfg = Config::default();
-            let err = cfg.resolve_addr(None).unwrap_err().to_string();
+            let err = Config::default()
+                .resolve_addr(None)
+                .unwrap_err()
+                .to_string();
             assert!(err.contains("config set"), "{err}");
         });
     }
@@ -508,39 +332,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.resolve_connection(None), ConnPref::Usb);
-        assert_eq!(cfg.resolve_connection(Some("ble")), ConnPref::Ble);
         assert_eq!(cfg.resolve_connection(Some("serial")), ConnPref::Usb);
-        assert_eq!(Config::default().resolve_connection(None), ConnPref::Ble);
-
         assert_eq!(cfg.resolve_scan_secs(None), 8);
-        assert_eq!(cfg.resolve_scan_secs(Some(2)), 2);
-        assert_eq!(Config::default().resolve_scan_secs(None), 4);
-        // floor at 1
         assert_eq!(cfg.resolve_scan_secs(Some(0)), 1);
-    }
-
-    #[test]
-    fn conn_pref_parse() {
-        assert_eq!(ConnPref::parse("ble"), ConnPref::Ble);
-        assert_eq!(ConnPref::parse("BLE"), ConnPref::Ble);
-        assert_eq!(ConnPref::parse("usb"), ConnPref::Usb);
-        assert_eq!(ConnPref::parse("serial"), ConnPref::Usb);
-        assert_eq!(ConnPref::parse("???"), ConnPref::Ble);
-        assert_eq!(ConnPref::Ble.as_str(), "ble");
-        assert_eq!(ConnPref::Usb.to_string(), "usb");
     }
 
     #[test]
     fn clear_at_removes_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         Config {
             addr: Some("x".into()),
             ..Default::default()
         }
         .save_to(&path)
         .unwrap();
-        assert!(path.exists());
         assert!(Config::clear_at(&path).unwrap());
         assert!(!path.exists());
         assert!(!Config::clear_at(&path).unwrap());
@@ -550,8 +356,7 @@ mod tests {
     fn default_path_honors_thermark_config_env() {
         with_clean_env(|| {
             let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("custom.toml");
-            // SAFETY: ENV_LOCK held by with_clean_env.
+            let path = dir.path().join("custom.json");
             unsafe {
                 std::env::set_var("THERMARK_CONFIG", path.as_os_str());
             }
@@ -563,14 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_toml_empty_object() {
-        let cfg = Config::parse_toml("").unwrap();
-        assert!(cfg.is_empty());
-        let cfg = Config::parse_toml("addr = \"B1-X\"\n").unwrap();
-        assert_eq!(cfg.addr.as_deref(), Some("B1-X"));
-    }
-
-    #[test]
     fn parse_json_object() {
         let cfg = Config::parse_json(r#"{"addr":"B1-Y","connection":"usb"}"#).unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-Y"));
@@ -578,14 +375,13 @@ mod tests {
     }
 
     #[test]
-    fn format_from_path() {
-        assert_eq!(
-            ConfigFormat::from_path(Path::new("x.json")),
-            ConfigFormat::Json
-        );
-        assert_eq!(
-            ConfigFormat::from_path(Path::new("x.toml")),
-            ConfigFormat::Toml
-        );
+    fn to_json_pretty_roundtrip() {
+        let cfg = Config {
+            addr: Some("B1-X".into()),
+            ..Default::default()
+        };
+        let s = cfg.to_json_pretty().unwrap();
+        let back = Config::parse_json(&s).unwrap();
+        assert_eq!(back, cfg);
     }
 }

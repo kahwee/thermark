@@ -50,9 +50,10 @@ The CLI binary requires both `ble` and `serial` (the default feature set).
 # Scan for printers
 ./target/release/thermark scan
 
-# Save default BLE device (macOS: ~/Library/Application Support/thermark/config.toml)
+# Save default BLE device (macOS: ~/Library/Application Support/thermark/config.json)
 ./target/release/thermark config set -a "B1-YourPrinter"
 ./target/release/thermark config show
+./target/release/thermark config show --json
 
 # Prefer the full BLE name from scan (macOS uses UUIDs, not MACs)
 # After config set, -a is optional:
@@ -99,9 +100,8 @@ Use `doctor` when something fails — offline printer, lid open, no paper, Bluet
 
 | | |
 |--|--|
-| File | macOS `~/Library/Application Support/thermark/config.toml` (or `.json`) |
-| Set TOML | `thermark config set -a "B1-YourPrinter"` |
-| Set JSON | `thermark config set -a "B1-YourPrinter" --format json` |
+| File | macOS `~/Library/Application Support/thermark/config.json` · Linux `~/.config/thermark/config.json` |
+| Set | `thermark config set -a "B1-YourPrinter"` |
 | Show | `thermark config show` · `thermark config show --json` · `thermark config path` |
 | Clear | `thermark config clear` |
 | Env overrides | `THERMARK_ADDR` (addr only) · `THERMARK_CONFIG` (file path) |

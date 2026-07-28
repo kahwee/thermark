@@ -18,7 +18,7 @@ fn thermark_with_config(path: &Path) -> Command {
 
 fn temp_config_path() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
+    let path = dir.path().join("config.json");
     (dir, path)
 }
 
@@ -54,7 +54,6 @@ fn tasks_prints_matrix() {
 
 #[test]
 fn encode_rfid_probe() {
-    // 55 55 1a 01 01 1a aa aa
     thermark()
         .args(["encode", "1a", "01"])
         .assert()
@@ -87,7 +86,6 @@ fn fonts_runs() {
 
 #[test]
 fn doctor_host_only_runs() {
-    // No -a: host checks only (Bluetooth may pass or fail; process should exit cleanly).
     let assert = thermark().arg("doctor").assert();
     let output = assert.get_output();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -112,10 +110,11 @@ fn config_set_show_clear() {
         .success()
         .stdout(predicate::str::contains("B1-TestPrinter"));
 
-    assert!(path.exists(), "config file should be created");
+    assert!(path.exists(), "config.json should be created");
     let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.trim_start().starts_with('{'), "{body}");
     assert!(body.contains("B1-TestPrinter"));
-    assert!(body.contains("scan_secs"));
+    assert!(body.contains("scan_secs") || body.contains("\"scan_secs\""));
 
     thermark_with_config(&path)
         .args(["config", "show"])
@@ -135,7 +134,7 @@ fn config_set_show_clear() {
         .args(["config", "path"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("config.toml"));
+        .stdout(predicate::str::contains("config.json"));
 
     thermark_with_config(&path)
         .args(["config", "clear"])
@@ -144,38 +143,6 @@ fn config_set_show_clear() {
         .stdout(predicate::str::contains("removed"));
 
     assert!(!path.exists());
-}
-
-#[test]
-fn config_set_json_format() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
-
-    thermark_with_config(&path)
-        .args([
-            "config",
-            "set",
-            "-a",
-            "B1-JsonPrinter",
-            "--format",
-            "json",
-            "-m",
-            "b1",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("json"));
-
-    assert!(path.exists());
-    let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.trim_start().starts_with('{'), "{body}");
-    assert!(body.contains("B1-JsonPrinter"));
-
-    thermark_with_config(&path)
-        .args(["config", "show", "--json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("B1-JsonPrinter"));
 }
 
 #[test]
@@ -192,7 +159,6 @@ fn config_set_merges_model_and_connection() {
     assert!(body.contains("usb"));
     assert!(body.contains("b21"));
 
-    // Second set without -m keeps previous model, updates addr + connection.
     thermark_with_config(&path)
         .args(["config", "set", "-a", "B1-B", "-c", "ble"])
         .assert()
@@ -240,14 +206,12 @@ fn doctor_use_config_without_saved_addr_fails() {
 #[test]
 fn thermark_addr_env_used_when_no_flag() {
     let (_dir, path) = temp_config_path();
-    // Will fail to connect (fake name) but must attempt using THERMARK_ADDR, not "no address".
     let assert = thermark_with_config(&path)
         .env("THERMARK_ADDR", "B1-EnvOnlyFake")
         .args(["info", "--scan-secs", "1"])
         .assert()
         .failure();
     let err = String::from_utf8_lossy(&assert.get_output().stderr);
-    // Should not be the missing-address message.
     assert!(
         !err.contains("no printer address"),
         "expected BLE/connect failure, got missing-addr: {err}"
