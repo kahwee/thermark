@@ -178,21 +178,19 @@ async fn main() -> anyhow::Result<()> {
 
 ## Fixtures
 
-[`fixtures/`](fixtures/) holds the same stickers as this README. Locked by tests (size, ink distribution, encode, photo margins):
+[`fixtures/`](fixtures/) matches this README. Locked by `cargo test --test fixtures_readme`.
 
-```bash
-cargo test --test fixtures_readme
-```
+**Canonical line-art smoke image:** [`fixtures/sticker_turtle.png`](fixtures/sticker_turtle.png) — used in CLI/print tests and as the thermal art reference.
 
 | File | Use |
 |------|-----|
+| **`sticker_turtle.png`** | **Primary art/print smoke** — cute turtle, B/W, margined |
+| `sticker_turtle_src.jpg` | Turtle source art (preprocess input) |
 | `sticker_link.png` | Package / share URL |
 | `sticker_inventory.png` | Bin / SKU tag |
 | `sticker_name.png` | Name badge |
 | `sticker_calibrate.png` | Geometry / bleed check |
 | `photo_sticker.jpg` | Photo print source |
-| `sticker_turtle.png` | Cute turtle line-art (thermal B/W) |
-| `sticker_turtle_src.jpg` | Turtle art source (preprocess input) |
 
 ## Logging
 

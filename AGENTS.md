@@ -36,7 +36,9 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
 ./target/release/thermark scan --save
 ./target/release/thermark doctor --use-config
 
-# Realistic stickers (see fixtures/ + README)
+# Stickers (fixtures/ + README). Canonical art smoke: sticker_turtle.png
+./target/release/thermark print -i fixtures/sticker_turtle.png \
+  --label 50x30 --no-fill --margin 0 -d 4
 ./target/release/thermark qr --url "https://example.com/o/1042" \
   --text $'ORDER #1042\nShip by Fri\nPriority' --font-name helvetica --label 50x30
 ./target/release/thermark print -i fixtures/photo_sticker.jpg \
@@ -44,7 +46,7 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
 ./target/release/thermark calibrate --label 50x30
 ```
 
-Fixtures: `sticker_link`, `sticker_inventory`, `sticker_name`, `sticker_calibrate`, `photo_sticker` — locked by `tests/fixtures_readme.rs`.  
+Fixtures locked by `tests/fixtures_readme.rs`. **Primary print/art smoke:** `fixtures/sticker_turtle.png`.
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
 Experimental print tasks need `--allow-experimental`.
 

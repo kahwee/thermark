@@ -98,7 +98,8 @@ fn experimental_task_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            "fixtures/sticker_link.png",
+            // Canonical line-art smoke fixture
+            "fixtures/sticker_turtle.png",
             "--task",
             "simple",
         ])
@@ -116,7 +117,7 @@ fn experimental_model_default_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            "fixtures/sticker_link.png",
+            "fixtures/sticker_turtle.png",
             "--model",
             "b21",
         ])
@@ -132,6 +133,29 @@ fn print_help_mentions_allow_experimental() {
         .assert()
         .success()
         .stdout(predicate::str::contains("allow-experimental"));
+}
+
+#[test]
+fn print_help_mentions_dither_and_no_fill() {
+    thermark()
+        .args(["print", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dither"))
+        .stdout(predicate::str::contains("no-fill"));
+}
+
+/// Turtle fixture must exist — CLI print path smoke dependency.
+#[test]
+fn turtle_fixture_exists_for_print_smoke() {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/sticker_turtle.png");
+    assert!(
+        p.is_file(),
+        "canonical art fixture missing: {} (print smoke tests depend on it)",
+        p.display()
+    );
+    let meta = std::fs::metadata(&p).expect("stat turtle");
+    assert!(meta.len() > 500, "turtle fixture suspiciously small");
 }
 
 #[test]

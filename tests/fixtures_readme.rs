@@ -1,12 +1,11 @@
 //! Curated sticker fixtures under `fixtures/` — docs + boundary smoke tests.
 //!
-//! These match real pocket-label jobs (link share, inventory, name badge, calibrate,
-//! photo sticker). Every file in `fixtures/` must be listed here.
+//! **Canonical art smoke fixture:** [`sticker_turtle.png`](../fixtures/sticker_turtle.png)
+//! (thermal-optimized cute turtle line-art). Also QR jobs, calibrate, and photo paths.
+//! Every file in `fixtures/` must be listed here.
 //!
-//! Regenerate PNGs (needs system fonts):
 //! ```text
-//! cargo build --release
-//! ./target/release/thermark qr ... --save fixtures/sticker_link.png --no-print
+//! cargo test --test fixtures_readme
 //! cargo test --test fixtures_readme regenerate_calibrate -- --ignored --nocapture
 //! ```
 
@@ -47,8 +46,20 @@ enum Kind {
 }
 
 /// Canonical fixture set. Keep in sync with README and `fixtures/` on disk.
+///
+/// `sticker_turtle.png` is the primary line-art / print-path smoke image.
 fn curated() -> &'static [Fixture] {
     &[
+        Fixture {
+            name: "sticker_turtle.png",
+            purpose: "PRIMARY: cute turtle line-art, thermal B/W, centered + margin",
+            kind: Kind::Art,
+        },
+        Fixture {
+            name: "sticker_turtle_src.jpg",
+            purpose: "Turtle art source (preprocess → sticker_turtle.png)",
+            kind: Kind::Photo,
+        },
         Fixture {
             name: "sticker_link.png",
             purpose: "Package / share link: QR + order-style text",
@@ -71,21 +82,14 @@ fn curated() -> &'static [Fixture] {
         },
         Fixture {
             name: "photo_sticker.jpg",
-            purpose: "Photo sticker source (Unsplash); use --no-fill --margin --dither",
+            purpose: "Photo sticker source; use --no-fill --margin --dither",
             kind: Kind::Photo,
-        },
-        Fixture {
-            name: "sticker_turtle_src.jpg",
-            purpose: "Cute turtle line-art source (preprocess input for thermal B/W)",
-            kind: Kind::Photo,
-        },
-        Fixture {
-            name: "sticker_turtle.png",
-            purpose: "Cute turtle line-art sticker (thermal-optimized B/W)",
-            kind: Kind::Art,
         },
     ]
 }
+
+/// Path to the canonical line-art smoke fixture (relative to crate root).
+pub const TURTLE_FIXTURE: &str = "fixtures/sticker_turtle.png";
 
 fn open_gray(name: &str) -> image::GrayImage {
     let path = fixtures_dir().join(name);
@@ -319,6 +323,98 @@ fn inventory_sticker_dense_type_still_has_quiet_margin() {
     assert!(
         edge_f < 0.35,
         "inventory right edge too dark ({edge_f:.2}) — layout bleeding to edge?"
+    );
+}
+
+/// Hero line-art fixture: turtle is print-ready 384×240 with white margins.
+#[test]
+fn turtle_is_canonical_art_smoke_fixture() {
+    let path = fixtures_dir().join("sticker_turtle.png");
+    assert!(path.is_file(), "missing {TURTLE_FIXTURE}");
+    let gray = open_gray("sticker_turtle.png");
+    assert_eq!(gray.dimensions(), (W, H));
+
+    let (_, _, frac) = ink_stats(&gray);
+    assert!(
+        (0.05..0.25).contains(&frac),
+        "turtle should be light line-art, dark_frac={frac:.3}"
+    );
+
+    // 16px-class margin: outer ring white.
+    for x in 0..W {
+        assert!(gray.get_pixel(x, 0)[0] >= 200, "top margin");
+        assert!(gray.get_pixel(x, H - 1)[0] >= 200, "bottom margin");
+    }
+    for y in 0..H {
+        assert!(gray.get_pixel(0, y)[0] >= 200, "left margin");
+        assert!(gray.get_pixel(W - 1, y)[0] >= 200, "right margin");
+    }
+
+    // Content lives in the center (not an empty sticker).
+    let mut center_dark = 0usize;
+    for y in H / 4..(3 * H / 4) {
+        for x in W / 4..(3 * W / 4) {
+            if gray.get_pixel(x, y)[0] < 128 {
+                center_dark += 1;
+            }
+        }
+    }
+    assert!(
+        center_dark > 200,
+        "turtle body should have solid black strokes in center ({center_dark} dark px)"
+    );
+
+    // Hard threshold (no dither) is the right path for line-art.
+    let hard = image_encode::gray_to_print_bits(&gray, 127, false);
+    let dit = image_encode::gray_to_print_bits(&gray, 127, true);
+    let hard_black = hard.pixels().filter(|p| p[0] > 127).count();
+    let dit_black = dit.pixels().filter(|p| p[0] > 127).count();
+    // Already near-B/W art: hard threshold keeps most strokes; counts should be close.
+    let ratio = hard_black as f64 / dit_black.max(1) as f64;
+    assert!(
+        (0.7..1.3).contains(&ratio),
+        "turtle hard vs dither black ratio {ratio:.2} (hard={hard_black} dit={dit_black})"
+    );
+
+    assert_encodes("sticker_turtle.png");
+}
+
+#[tokio::test]
+async fn turtle_mock_print_job_streams_full_canvas() {
+    use thermark::geometry::LabelMm;
+    use thermark::mock::MockTransport;
+    use thermark::printer::{PrintOptions, PrinterClient};
+    use thermark::protocol::Model;
+    use thermark::types::Density;
+
+    let path = fixtures_dir().join("sticker_turtle.png");
+    let mut c = PrinterClient::new(MockTransport::new(), Model::B1).with_pace(false);
+    c.print_image_file_opts(
+        &path,
+        PrintOptions {
+            density: Density::DARK,
+            label: Some(LabelMm::parse("50x30").unwrap()),
+            fill: false,
+            margin_px: 0, // already margined in the PNG
+            dither: false,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("mock print turtle");
+
+    let cmds = c.transport().tx_cmds();
+    assert!(cmds.contains(&0x01), "print start: {cmds:?}");
+    assert!(
+        cmds.iter().any(|c| *c == 0x85 || *c == 0x84),
+        "row data: {cmds:?}"
+    );
+    assert!(cmds.contains(&0xf3), "print end: {cmds:?}");
+    // Full 50×30 → 240 rows of raster (empty or bitmap).
+    let rows = cmds.iter().filter(|c| **c == 0x84 || **c == 0x85).count();
+    assert!(
+        rows >= 200,
+        "expected ~240 row packets for turtle canvas, got {rows}"
     );
 }
 
