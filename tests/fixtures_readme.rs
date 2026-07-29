@@ -71,6 +71,16 @@ fn curated() -> &'static [Fixture] {
             kind: Kind::Photo,
         },
         Fixture {
+            name: "sticker_dumptruck.png",
+            purpose: "Cute dump truck line-art, thermal B/W, centered + margin",
+            kind: Kind::Art,
+        },
+        Fixture {
+            name: "sticker_dumptruck_src.jpg",
+            purpose: "Dump truck art source (preprocess → sticker_dumptruck.png)",
+            kind: Kind::Photo,
+        },
+        Fixture {
             name: "sticker_crew.png",
             purpose: "Hybrid art+text badge: excavator + DIG CREW / SITE 12",
             kind: Kind::Art,

@@ -174,6 +174,15 @@ Same pipeline for other line art (e.g. excavator): preprocess to 384×240 B/W wi
 
 <img src="fixtures/sticker_excavator.png" alt="Cute excavator line-art sticker" width="384" />
 
+```bash
+./target/release/thermark print \
+  -i fixtures/sticker_dumptruck.png \
+  --label 50x30 \
+  --no-fill --margin 0 -d 4
+```
+
+<img src="fixtures/sticker_dumptruck.png" alt="Cute dump truck line-art sticker" width="384" />
+
 ### Art + text badge (crew / site)
 
 Hybrid layout: line art on the left, bold readable type on the right. Precomposed 384×240 pure B/W (`sticker_crew.png`) so the printer gets hard edges — no dither, no fill crop.
@@ -261,6 +270,8 @@ async fn main() -> anyhow::Result<()> {
 | `sticker_turtle_src.jpg` | Turtle source art (preprocess input) |
 | `sticker_excavator.png` | Cute excavator line-art, B/W, margined |
 | `sticker_excavator_src.jpg` | Excavator source art (preprocess input) |
+| `sticker_dumptruck.png` | Cute dump truck line-art, B/W, margined |
+| `sticker_dumptruck_src.jpg` | Dump truck source art (preprocess input) |
 | `sticker_link.png` | Package / share URL |
 | `sticker_inventory.png` | Bin / SKU tag |
 | `sticker_name.png` | Name badge |
