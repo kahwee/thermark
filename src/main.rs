@@ -188,7 +188,7 @@ enum Commands {
         /// Network name (SSID) — shown on the sticker
         #[arg(long)]
         ssid: String,
-        /// Wi‑Fi password (encoded in QR only by default)
+        /// Wi‑Fi password (or set THERMARK_WIFI_PASSWORD — preferred, avoids shell history)
         #[arg(long, default_value = "")]
         password: String,
         /// Security: wpa (default), wep, nopass
@@ -446,8 +446,115 @@ fn init_tracing(verbose: bool) {
         .init();
 }
 
+/// Resolve Wi‑Fi password: CLI flag, else `THERMARK_WIFI_PASSWORD` env.
+fn resolve_wifi_password(flag: String) -> Result<String> {
+    if !flag.is_empty() {
+        eprintln!(
+            "tip: password is on the command line (shell history). \
+             Prefer:  THERMARK_WIFI_PASSWORD='…' thermark wifi --ssid \"…\""
+        );
+        return Ok(flag);
+    }
+    match std::env::var("THERMARK_WIFI_PASSWORD") {
+        Ok(p) if !p.trim().is_empty() => Ok(p),
+        _ => bail!(
+            "Wi‑Fi password required.\n  \
+             THERMARK_WIFI_PASSWORD='…' thermark wifi --ssid \"Network\"\n  \
+             or: thermark wifi --ssid \"Network\" --password '…'\n  \
+             open network: --security nopass"
+        ),
+    }
+}
+
+/// Paths under `fixtures/` are public product demos — block secret Wi‑Fi saves there.
+fn guard_wifi_save_path(path: &Path) -> Result<()> {
+    let is_fixtures = path.components().any(|c| c.as_os_str() == "fixtures");
+    if is_fixtures {
+        bail!(
+            "refusing to save a Wi‑Fi sticker under fixtures/ \
+             (that path is committed product demos — real credentials must not land there).\n  \
+             Use:  --save local/prints/home-wifi.png\n  \
+             or omit --save (writes under /tmp). See local/README.md"
+        );
+    }
+    Ok(())
+}
+
+/// Friendly warnings for common print foot-guns (learned from real use).
+fn warn_print_limits(image: &Path, label: &Option<String>, no_fill: bool, dither: bool) {
+    let ext = image
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let is_photo_ext = matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "webp" | "heic" | "tif" | "tiff"
+    );
+
+    if label.is_none() {
+        if let Ok((w, h)) = image::image_dimensions(image) {
+            if w > 384 || h > 280 {
+                eprintln!(
+                    "warning: no --label set; printing raw {w}×{h} px. \
+                     Wrong size / tiny sticker? use --label 50x30"
+                );
+            }
+        } else {
+            eprintln!("tip: pass --label 50x30 so the image is scaled to a full physical sticker");
+        }
+    }
+
+    if is_photo_ext && !dither {
+        eprintln!(
+            "tip: this looks like a photo file (.{ext}). \
+             Try --dither --no-fill --margin 16 -d 3 for cleaner midtones"
+        );
+    }
+    if is_photo_ext && !no_fill && label.is_some() {
+        eprintln!("tip: default --fill may crop the photo; use --no-fill to fit the whole image");
+    }
+}
+
+/// Extra stderr tips after a failure (does not change the error itself).
+fn emit_error_tips(err: &anyhow::Error) {
+    let s = format!("{err:#}").to_ascii_lowercase();
+    if s.contains("ble")
+        || s.contains("bluetooth")
+        || s.contains("connect")
+        || s.contains("transport")
+    {
+        eprintln!(
+            "tip: quit any official label app (one BLE client only). \
+             Full name: `thermark scan` then -a \"B1-…\". Exact match by default; --fuzzy if needed."
+        );
+    }
+    if s.contains("cover") || s.contains("lackpaper") || s.contains("no paper") {
+        eprintln!(
+            "tip: close the lid fully; load labels with 2–5 mm sticking out of the exit slot"
+        );
+    }
+    if s.contains("timeout") {
+        eprintln!("tip: run `thermark doctor --use-config` for lid/paper/BLE readiness");
+    }
+    if s.contains("image width") || s.contains("too wide") {
+        eprintln!("tip: --label 50x30 scales to the sticker; max width is 384 px on B1");
+    }
+    if s.contains("password") && s.contains("wifi") {
+        eprintln!("tip: THERMARK_WIFI_PASSWORD=… avoids leaving the secret in shell history");
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        emit_error_tips(&e);
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
     let cfg = Config::load().unwrap_or_default();
@@ -486,8 +593,14 @@ async fn main() -> Result<()> {
             allow_experimental,
         } => {
             if !image.exists() {
-                bail!("image not found: {}", image.display());
+                bail!(
+                    "image not found: {}\n  \
+                     tip: personal prints live under local/prints/ (gitignored), \
+                     not fixtures/",
+                    image.display()
+                );
             }
+            warn_print_limits(&image, &label, no_fill, dither);
             let model = cfg.resolve_model(model);
             let label_mm = match label {
                 Some(s) => Some(LabelMm::parse(&s)?),
@@ -704,6 +817,12 @@ async fn main() -> Result<()> {
             let model = cfg.resolve_model(model);
             let label_mm = LabelMm::parse(&label)?;
             let lp = label_mm.to_pixels(model.max_width_px());
+            let password = resolve_wifi_password(password)?;
+            if ssid.trim().chars().count() > 24 {
+                eprintln!(
+                    "tip: long SSID names wrap on a 50×30 sticker — shorter names read better"
+                );
+            }
             // Never log the password (only SSID + security).
             info!(%ssid, ?security, hidden, show_password, "wifi sticker");
             let gray = make_wifi_label(&WifiLabelOptions {
@@ -718,18 +837,23 @@ async fn main() -> Result<()> {
                 font_name,
                 font_size,
                 border,
+            })
+            .with_context(|| {
+                "building Wi‑Fi sticker (if QR failed: password may be too long for a dense code)"
             })?;
 
             let png_path =
                 save.unwrap_or_else(|| std::env::temp_dir().join("thermark_wifi_label.png"));
-            // Refuse to write demo path into repo accidentally if user passes fixtures/
-            // with real secrets — we still allow fixtures only for intentional demos.
+            guard_wifi_save_path(&png_path)?;
             gray.save(&png_path)
                 .with_context(|| format!("save {}", png_path.display()))?;
             println!("saved {}", png_path.display());
             println!("SSID on sticker: {ssid}");
             if show_password {
-                eprintln!("warning: password is printed in cleartext on the label");
+                eprintln!(
+                    "warning: password is printed in cleartext on the label \
+                     (anyone who sees the sticker can read it)"
+                );
             } else {
                 println!("password: in QR only (not printed as text)");
             }

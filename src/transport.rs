@@ -328,14 +328,20 @@ mod ble {
                 "connecting"
             );
 
-            peripheral
-                .connect()
-                .await
-                .map_err(|e| Error::transport(format!("BLE connect: {e}")))?;
-            peripheral
-                .discover_services()
-                .await
-                .map_err(|e| Error::transport(format!("discover services: {e}")))?;
+            peripheral.connect().await.map_err(|e| {
+                Error::transport(format!(
+                    "BLE connect failed: {e}. \
+                     Only one app can use the printer — quit the official label app, \
+                     then retry. If it still fails: power-cycle the printer, move closer, \
+                     and use the full name from `thermark scan` (exact match by default)."
+                ))
+            })?;
+            peripheral.discover_services().await.map_err(|e| {
+                Error::transport(format!(
+                    "discover services failed: {e}. Wrong device or incomplete BLE connection — \
+                     run `thermark scan` and pass -a with the full advertising name."
+                ))
+            })?;
 
             let characteristic = find_printer_char(&peripheral).await?;
 

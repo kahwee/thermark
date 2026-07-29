@@ -68,8 +68,15 @@ pub fn wifi_qr_payload(
     }
     if matches!(security, WifiSecurity::Wpa | WifiSecurity::Wep) && password.is_empty() {
         return Err(Error::msg(
-            "password required for WPA/WEP (use --security nopass for open networks)",
+            "password required for WPA/WEP. Pass --password … or set THERMARK_WIFI_PASSWORD \
+             (keeps the secret out of shell history). Open network: --security nopass",
         ));
+    }
+    if ssid.chars().count() > 32 {
+        return Err(Error::msg(format!(
+            "SSID is {n} characters (Wi‑Fi max is usually 32); shorten the network name",
+            n = ssid.chars().count()
+        )));
     }
 
     let mut s = String::from("WIFI:");
@@ -165,6 +172,13 @@ mod tests {
     #[test]
     fn rejects_empty_ssid() {
         assert!(wifi_qr_payload("", "x", WifiSecurity::Wpa, false).is_err());
+    }
+
+    #[test]
+    fn rejects_ssid_over_32_chars() {
+        let long = "a".repeat(33);
+        let err = wifi_qr_payload(&long, "x", WifiSecurity::Wpa, false).unwrap_err();
+        assert!(err.to_string().contains("32"), "{err}");
     }
 
     #[test]

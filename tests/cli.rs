@@ -195,6 +195,70 @@ fn wifi_demo_renders_without_print() {
 }
 
 #[test]
+fn wifi_password_from_env_without_flag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("wifi-env.png");
+    let (_cfg_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .env("THERMARK_WIFI_PASSWORD", "from-env-secret")
+        .args([
+            "wifi",
+            "--ssid",
+            "EnvNet",
+            "--label",
+            "50x30",
+            "--font-name",
+            "helvetica",
+            "--save",
+            out.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("EnvNet"));
+    assert!(out.is_file());
+}
+
+#[test]
+fn wifi_refuses_save_under_fixtures() {
+    let (_cfg_dir, cfg) = temp_config_path();
+    let fixtures_out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join("_should_not_write_wifi.png");
+    thermark_with_config(&cfg)
+        .args([
+            "wifi",
+            "--ssid",
+            "Nope",
+            "--password",
+            "secret",
+            "--label",
+            "50x30",
+            "--save",
+            fixtures_out.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("fixtures"));
+    assert!(
+        !fixtures_out.exists(),
+        "must not write Wi‑Fi sticker into fixtures/"
+    );
+}
+
+#[test]
+fn wifi_missing_password_errors_helpfully() {
+    let (_cfg_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .env_remove("THERMARK_WIFI_PASSWORD")
+        .args(["wifi", "--ssid", "NoPass", "--label", "50x30", "--no-print"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("THERMARK_WIFI_PASSWORD"));
+}
+
+#[test]
 fn print_help_mentions_fuzzy_ble_match() {
     thermark()
         .args(["print", "--help"])

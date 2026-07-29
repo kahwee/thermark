@@ -17,7 +17,10 @@ pub enum Error {
     Printer(PrinterErrorCode),
 
     /// Timed out waiting for a response packet.
-    #[error("timeout waiting for response {expected:#04x} after request {request:#04x}")]
+    #[error(
+        "timeout waiting for response {expected:#04x} after request {request:#04x} \
+         (tip: printer offline/busy, or vendor app holding BLE — try `thermark doctor --use-config`)"
+    )]
     Timeout { expected: u8, request: u8 },
 
     /// Density outside 1..=5.
@@ -25,7 +28,10 @@ pub enum Error {
     InvalidDensity(u8),
 
     /// Image wider than printhead.
-    #[error("image width {width}px exceeds printer max {max}px")]
+    #[error(
+        "image width {width}px exceeds printer max {max}px \
+         (tip: pass --label 50x30 so thermark scales to the sticker canvas)"
+    )]
     ImageTooWide { width: u32, max: u32 },
 
     /// Unsupported rotation angle.
