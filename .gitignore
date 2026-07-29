@@ -5,3 +5,7 @@
 *.swo
 .idea/
 .vscode/
+
+# Personal stickers, real Wi‑Fi labels, one-off art (never commit secrets)
+/local/**
+!/local/README.md

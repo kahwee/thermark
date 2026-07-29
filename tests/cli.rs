@@ -98,8 +98,8 @@ fn experimental_task_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            // Canonical line-art smoke fixture
-            "fixtures/sticker_turtle.png",
+            // Product smoke fixture (guest Wi‑Fi demo)
+            "fixtures/sticker_wifi.png",
             "--task",
             "simple",
         ])
@@ -117,7 +117,7 @@ fn experimental_model_default_requires_allow_flag() {
             "-a",
             "B1-Fake",
             "-i",
-            "fixtures/sticker_turtle.png",
+            "fixtures/sticker_wifi.png",
             "--model",
             "b21",
         ])
@@ -145,17 +145,17 @@ fn print_help_mentions_dither_and_no_fill() {
         .stdout(predicate::str::contains("no-fill"));
 }
 
-/// Turtle fixture must exist — CLI print path smoke dependency.
+/// Product smoke fixture must exist — CLI print path dependency.
 #[test]
-fn turtle_fixture_exists_for_print_smoke() {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/sticker_turtle.png");
+fn wifi_fixture_exists_for_print_smoke() {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/sticker_wifi.png");
     assert!(
         p.is_file(),
-        "canonical art fixture missing: {} (print smoke tests depend on it)",
+        "product smoke fixture missing: {} (print tests depend on it)",
         p.display()
     );
-    let meta = std::fs::metadata(&p).expect("stat turtle");
-    assert!(meta.len() > 500, "turtle fixture suspiciously small");
+    let meta = std::fs::metadata(&p).expect("stat wifi fixture");
+    assert!(meta.len() > 500, "wifi fixture suspiciously small");
 }
 
 #[test]

@@ -89,14 +89,16 @@ QR = one-tap join. Side text = **network name** (password stays in the QR unless
 
 <img src="fixtures/sticker_wifi.png" alt="Guest Wi‑Fi sticker demo" width="384" />
 
-**Your real network** (do **not** commit the PNG or put it under `fixtures/`):
+**Your real network** (save under `local/`, never `fixtures/` or git):
 
 ```bash
+mkdir -p local/prints
 ./target/release/thermark wifi \
   --ssid "YourNetworkName" \
   --password 'your-password' \
-  --label 50x30
-# or: --save /tmp/my-wifi.png --no-print   # keep outside the repo
+  --label 50x30 \
+  --save local/prints/home-wifi.png
+# or print immediately without saving
 ```
 
 ### Link / package sticker
@@ -150,60 +152,18 @@ Full-bleed pattern to verify margins and feed before a batch.
 
 <img src="fixtures/sticker_calibrate.png" alt="Calibration sticker" width="384" />
 
-### Line-art sticker (turtle)
+### Your own image (art, badge, photo)
 
-Bold B/W line art is the best look on thermal (hard edges, no dither). Margin is baked into `sticker_turtle.png` (384×240):
-
-```bash
-./target/release/thermark print \
-  -i fixtures/sticker_turtle.png \
-  --label 50x30 \
-  --no-fill --margin 0 -d 4
-```
-
-<img src="fixtures/sticker_turtle.png" alt="Cute turtle line-art sticker" width="384" />
-
-Same pipeline for other line art (e.g. excavator): preprocess to 384×240 B/W with baked margin, then print with `--no-fill --margin 0 -d 4`.
+Save one-offs under **`local/`** (gitignored) — not `fixtures/`.
 
 ```bash
-./target/release/thermark print \
-  -i fixtures/sticker_excavator.png \
-  --label 50x30 \
-  --no-fill --margin 0 -d 4
-```
+mkdir -p local/prints
+# line art: pure B/W, 384×240, then:
+./target/release/thermark print -i local/prints/my-art.png \
+  --label 50x30 --no-fill --margin 0 -d 4
 
-<img src="fixtures/sticker_excavator.png" alt="Cute excavator line-art sticker" width="384" />
-
-```bash
-./target/release/thermark print \
-  -i fixtures/sticker_dumptruck.png \
-  --label 50x30 \
-  --no-fill --margin 0 -d 4
-```
-
-<img src="fixtures/sticker_dumptruck.png" alt="Cute dump truck line-art sticker" width="384" />
-
-### Art + text badge (crew / site)
-
-Hybrid layout: line art on the left, bold readable type on the right. Precomposed 384×240 pure B/W (`sticker_crew.png`) so the printer gets hard edges — no dither, no fill crop.
-
-```bash
-./target/release/thermark print \
-  -i fixtures/sticker_crew.png \
-  --label 50x30 \
-  --no-fill --margin 0 -d 4
-```
-
-<img src="fixtures/sticker_crew.png" alt="DIG CREW excavator art+text badge" width="384" />
-
-Compose your own the same way: place art in ~left 55%, text column on the right, hard-threshold to 0/255, save at label size, then print with `--no-fill --margin 0 -d 4`.
-
-### Your own photo or PNG
-
-Thermal is **1-bit**. For photos, center + dither so midtones don’t blotch:
-
-```bash
-./target/release/thermark print -i your-photo.jpg \
+# photos: center + dither
+./target/release/thermark print -i local/prints/photo.jpg \
   --label 50x30 --no-fill --margin 16 --dither -d 3
 ```
 
@@ -260,18 +220,13 @@ async fn main() -> anyhow::Result<()> {
 
 ## Fixtures
 
-[`fixtures/`](fixtures/) matches this README. Locked by `cargo test --test fixtures_readme`.
+[`fixtures/`](fixtures/) holds **public product demos only** (locked by `cargo test --test fixtures_readme`).
 
-**Canonical line-art smoke image:** [`fixtures/sticker_turtle.png`](fixtures/sticker_turtle.png) — used in CLI/print tests and as the thermal art reference.
+Personal prints and real Wi‑Fi labels go in **`local/`** (see [`local/README.md`](local/README.md); gitignored except that note).
 
 | File | Use |
 |------|-----|
-| **`sticker_turtle.png`** | **Primary art/print smoke** — cute turtle, B/W, margined |
-| `sticker_turtle_src.jpg` | Turtle source art (preprocess input) |
-| `sticker_excavator.png` | Cute excavator line-art, B/W, margined |
-| `sticker_excavator_src.jpg` | Excavator source art (preprocess input) |
-| `sticker_dumptruck.png` | Cute dump truck line-art, B/W, margined |
-| `sticker_dumptruck_src.jpg` | Dump truck source art (preprocess input) |
+| `sticker_wifi.png` | Guest Wi‑Fi demo (fake credentials only) |
 | `sticker_link.png` | Package / share URL |
 | `sticker_inventory.png` | Bin / SKU tag |
 | `sticker_name.png` | Name badge |
