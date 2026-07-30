@@ -10,6 +10,52 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-30
+
+Adds the verification that this project was missing. Nearly every bug this
+month was a rendering change nobody could see until a label came out of the
+printer; both harnesses here make those visible on `cargo test`.
+
+### Added
+
+- **`tests/golden.rs`** — golden-image tests for 13 renders: QR (both text
+  sides), text (centred, left, small fixed size, long-wrapping), Wi-Fi,
+  calibration (plain, full-bleed, numbered), and artwork placement (contain,
+  fill, trimmed, full-bleed). Each is compared pixel by pixel against a stored
+  reference.
+
+  On a mismatch it reports the differing pixel count and first coordinate, and
+  writes the actual render to `target/golden-actual/` so the change can be
+  looked at rather than guessed at. `UPDATE_GOLDEN=1 cargo test --test golden`
+  accepts new output deliberately.
+
+  Verified by perturbation: changing the layout margin by 2 px failed exactly
+  the five font-dependent cases, with counts and coordinates, and left the
+  geometry cases alone — which is correct, since artwork placement uses the
+  safe area rather than that margin.
+
+  Text cases skip where the expected system font is absent; a companion test
+  asserts the geometry cases never skip, so a bare checkout still has cover.
+
+- **`scripts/compare-render.sh <ref>`** — builds any git ref in a throwaway
+  worktree and byte-compares CLI renders against the working tree. Answers
+  "did this change alter any output?" for work that is meant to be
+  behaviour-preserving. Covers the CLI end to end, including flag handling, and
+  works against refs that predate the golden suite. Confirms v0.12.0 changed
+  nothing versus v0.11.0.
+
+### Notes
+
+Which tool for which question:
+
+| Question | Tool |
+|---|---|
+| Did output change when it should not have? | `scripts/compare-render.sh <ref>` |
+| Did a renderer change unexpectedly? | `cargo test --test golden` |
+| Does content land inside the printable band? | `cargo test --test label_placement` |
+| What exactly will the printer receive? | `thermark print --preview out.png` |
+| Is a deliberate visual change actually right? | print one label |
+
 ## [0.12.0] - 2026-07-30
 
 Consolidation of the layout code, after a run of bugs that all traced to the
@@ -468,7 +514,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/kahwee/thermark/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kahwee/thermark/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kahwee/thermark/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kahwee/thermark/compare/v0.9.0...v0.10.0

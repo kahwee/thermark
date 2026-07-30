@@ -153,7 +153,15 @@ CLI: experimental tasks (`b21v1`, `d110`, `simple`, or models that map to them) 
 
 ```bash
 cargo test
+cargo test --test golden              # 13 stored renders, pixel-exact
+UPDATE_GOLDEN=1 cargo test --test golden   # accept new output, deliberately
+scripts/compare-render.sh v0.12.0     # byte-compare renders against a ref
 ```
+
+Rendering changes are invisible until a label prints, so verify without media:
+`--preview` for the exact bitmap, golden tests for unintended changes,
+`compare-render.sh` for behaviour-preserving work, `label_placement` for the
+printable-band invariant. Print only to confirm a *deliberate* visual change.
 
 - Pure logic: packets, geometry, layout, fonts
 - **Mock transport** (`src/mock.rs`): full print job command order, 0xDB errors, summary
