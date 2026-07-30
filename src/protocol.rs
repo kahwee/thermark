@@ -79,10 +79,13 @@ impl Model {
     }
 
     /// Max printable width in pixels (~203 dpi / 8 px per mm).
+    ///
+    /// The effective limit for a job is this *and* the print task's — use
+    /// [`crate::print_task::effective_max_width_px`].
     pub fn max_width_px(self) -> u32 {
         match self {
-            Self::B1 | Self::B21 | Self::B18 => 384,
-            Self::D11 | Self::D110 => 96,
+            Self::B1 | Self::B21 | Self::B18 => crate::geometry::HEAD_WIDE_PX,
+            Self::D11 | Self::D110 => crate::geometry::HEAD_NARROW_PX,
         }
     }
 
@@ -109,15 +112,21 @@ impl std::str::FromStr for Model {
     }
 }
 
+impl Model {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::B1 => "b1",
+            Self::B21 => "b21",
+            Self::B18 => "b18",
+            Self::D11 => "d11",
+            Self::D110 => "d110",
+        }
+    }
+}
+
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::B1 => write!(f, "b1"),
-            Self::B21 => write!(f, "b21"),
-            Self::B18 => write!(f, "b18"),
-            Self::D11 => write!(f, "d11"),
-            Self::D110 => write!(f, "d110"),
-        }
+        f.pad(self.as_str())
     }
 }
 

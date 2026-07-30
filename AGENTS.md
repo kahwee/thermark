@@ -62,11 +62,26 @@ Experimental print tasks need `--allow-experimental`.
 | `errors.rs` | Print error 0xDB reason codes |
 | `transport.rs` | BLE + serial; `PRINTER_SERVICE` / `PRINTER_CHAR` |
 | `printer/` | Client + print job; `info` (heartbeat/RFID/summary) |
-| `geometry.rs` | 8 px/mm, `LabelMm` / `LabelPx` |
-| `image_encode.rs` | Raster → row packets |
+| `geometry.rs` | 8 px/mm, `LabelMm` / `LabelPx`, `HEAD_*_PX` widths |
+| `image_encode.rs` | Image → `Raster` (rows + dimensions together) |
 | `font.rs` | System TTF/TTC (`ab_glyph`), named fonts |
-| `label.rs` | Square QR + side text |
-| `main.rs` | CLI |
+| `label.rs` | Square QR + side text; `qr_layout` owns the geometry |
+| `main.rs` | Entry point only (parse → dispatch → exit) |
+| `cli/args.rs` | clap types + shared arg groups (`ConnArgs`, `TaskArgs`, `FontArgs`) |
+| `cli/session.rs` | Connect → print → disconnect; `resolve_task` |
+| `cli/commands/` | One module per command group |
+| `cli/tips.rs` | Advisory stderr only; never changes behaviour |
+
+### Invariants worth keeping
+
+- **Widths:** size canvases and check rasters with
+  `print_task::effective_max_width_px(model, task)` — never `Model::max_width_px`
+  alone, or a mismatched `--model`/`--task` encodes before failing.
+- **Layout:** QR-beside-text geometry lives only in `label::qr_layout`.
+- **Printer names:** the "looks like a label printer" heuristic lives only in
+  `transport::name_looks_like_label_printer`.
+- **Pacing:** tests use `Pacing::INSTANT`, which differs from `Pacing::REAL`
+  only in durations — never in retry counts or control flow.
 
 ---
 

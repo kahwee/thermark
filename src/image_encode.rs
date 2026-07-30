@@ -4,69 +4,70 @@ use crate::errors::{Error, Result};
 use crate::geometry::LabelPx;
 use crate::packet::Packet;
 use crate::protocol;
+use crate::types::Rotation;
 use image::{DynamicImage, GenericImageView, GrayImage, Luma, RgbaImage, imageops};
 
-/// Load, optionally rotate, threshold to 1-bit, and emit print row packets.
+/// An encoded page: row packets plus the dimensions they were built from.
+///
+/// Bundling the three keeps them from drifting apart — the printer needs the
+/// size in `SetPageSize` to agree with the rows it then receives, and passing
+/// them as three loose arguments made disagreement easy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Raster {
+    pub width: u32,
+    pub height: u32,
+    pub rows: Vec<Packet>,
+}
+
+impl Raster {
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+/// Apply a [`Rotation`] to an image.
+pub fn rotate(img: DynamicImage, rotation: Rotation) -> DynamicImage {
+    match rotation {
+        Rotation::Deg0 => img,
+        Rotation::Deg90 => img.rotate90(),
+        Rotation::Deg180 => img.rotate180(),
+        Rotation::Deg270 => img.rotate270(),
+    }
+}
+
+/// Load, threshold to 1-bit, and emit print row packets.
 ///
 /// Pixel convention: **1 = black (burn)**, **0 = white** after invert+threshold,
 /// matching the simple print-task form (invert grayscale then convert to 1-bit).
-pub fn encode_image_path(
+pub fn encode_path(
     path: &std::path::Path,
     max_width: u32,
-    rotate_deg: u32,
-    threshold: u8,
-) -> Result<(u32, u32, Vec<Packet>)> {
-    encode_image_path_opts(path, max_width, rotate_deg, threshold, false)
-}
-
-/// Like [`encode_image_path`] with optional Floyd–Steinberg dither (photos).
-pub fn encode_image_path_opts(
-    path: &std::path::Path,
-    max_width: u32,
-    rotate_deg: u32,
     threshold: u8,
     dither: bool,
-) -> Result<(u32, u32, Vec<Packet>)> {
+) -> Result<Raster> {
     let img = image::open(path).map_err(Error::from)?;
-    encode_image_opts(img, max_width, rotate_deg, threshold, dither)
+    encode(img, max_width, threshold, dither)
 }
 
-pub fn encode_image(
-    img: DynamicImage,
-    max_width: u32,
-    rotate_deg: u32,
-    threshold: u8,
-) -> Result<(u32, u32, Vec<Packet>)> {
-    encode_image_opts(img, max_width, rotate_deg, threshold, false)
-}
-
-pub fn encode_image_opts(
-    img: DynamicImage,
-    max_width: u32,
-    rotate_deg: u32,
-    threshold: u8,
-    dither: bool,
-) -> Result<(u32, u32, Vec<Packet>)> {
-    let img = match rotate_deg % 360 {
-        0 => img,
-        90 => img.rotate90(),
-        180 => img.rotate180(),
-        270 => img.rotate270(),
-        other => return Err(Error::InvalidRotation(other)),
-    };
-
+/// Threshold an image to 1-bit and emit print row packets.
+///
+/// Rotate beforehand with [`rotate`] if needed.
+pub fn encode(img: DynamicImage, max_width: u32, threshold: u8, dither: bool) -> Result<Raster> {
     let gray = img.to_luma8();
-    let (w, h) = gray.dimensions();
-    if w > max_width {
+    let (width, height) = gray.dimensions();
+    if width > max_width {
         return Err(Error::ImageTooWide {
-            width: w,
+            width,
             max: max_width,
         });
     }
 
     let bw = gray_to_print_bits(&gray, threshold, dither);
-    let packets = rows_to_packets(&bw)?;
-    Ok((w, h, packets))
+    Ok(Raster {
+        width,
+        height,
+        rows: rows_to_packets(&bw),
+    })
 }
 
 /// Convert a grayscale image to print bits (255 = burn / black).
@@ -118,7 +119,7 @@ pub fn gray_to_print_bits(gray: &GrayImage, threshold: u8, dither: bool) -> Gray
     bw
 }
 
-fn rows_to_packets(bw: &GrayImage) -> Result<Vec<Packet>> {
+fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
     let (w, h) = bw.dimensions();
     let bytes_per_row = (w as usize).div_ceil(8);
     let mut out = Vec::with_capacity(h as usize);
@@ -142,38 +143,7 @@ fn rows_to_packets(bw: &GrayImage) -> Result<Vec<Packet>> {
             out.push(protocol::print_bitmap_row(y as u16, 1, &row));
         }
     }
-    Ok(out)
-}
-
-/// Create a simple solid-text-like test pattern (black rectangle + border).
-#[allow(dead_code)]
-pub fn test_pattern(width: u32, height: u32) -> GrayImage {
-    let mut img = GrayImage::from_pixel(width, height, Luma([0]));
-    // Border
-    for x in 0..width {
-        img.put_pixel(x, 0, Luma([255]));
-        img.put_pixel(x, height - 1, Luma([255]));
-    }
-    for y in 0..height {
-        img.put_pixel(0, y, Luma([255]));
-        img.put_pixel(width - 1, y, Luma([255]));
-    }
-    // Diagonal
-    let steps = width.min(height);
-    for i in 0..steps {
-        img.put_pixel(i, i, Luma([255]));
-    }
-    // Filled block in center
-    let x0 = width / 4;
-    let y0 = height / 4;
-    let x1 = width * 3 / 4;
-    let y1 = height * 3 / 4;
-    for y in y0..y1 {
-        for x in x0..x1 {
-            img.put_pixel(x, y, Luma([255]));
-        }
-    }
-    img
+    out
 }
 
 /// Resize preserving aspect to fit within max width (height free).
@@ -199,27 +169,71 @@ pub fn fill_label(img: DynamicImage, label: LabelPx) -> DynamicImage {
     fill_label_with_margin(img, label, 0)
 }
 
+/// The drawable area of a label once the margin is inset.
+///
+/// The requested margin is capped at a quarter of each axis so a large
+/// `--margin` cannot collapse the content box to nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ContentBox {
+    canvas_w: u32,
+    canvas_h: u32,
+    margin: u32,
+    width: u32,
+    height: u32,
+}
+
+impl ContentBox {
+    fn new(label: LabelPx, margin: u32) -> Self {
+        let canvas_w = label.width_px.max(1);
+        let canvas_h = label.height_px.max(1);
+        let margin = margin.min(canvas_w / 4).min(canvas_h / 4);
+        Self {
+            canvas_w,
+            canvas_h,
+            margin,
+            width: canvas_w.saturating_sub(margin * 2).max(1),
+            height: canvas_h.saturating_sub(margin * 2).max(1),
+        }
+    }
+
+    fn white_canvas(&self) -> RgbaImage {
+        RgbaImage::from_pixel(
+            self.canvas_w,
+            self.canvas_h,
+            image::Rgba([255, 255, 255, 255]),
+        )
+    }
+}
+
+/// Scale `img` by `scale`, rounding up to at least 1px on each axis.
+fn scaled_dimensions(img: &DynamicImage, scale: f64) -> (u32, u32) {
+    let (iw, ih) = img.dimensions();
+    (
+        ((iw as f64) * scale).round().max(1.0) as u32,
+        ((ih as f64) * scale).round().max(1.0) as u32,
+    )
+}
+
 /// Like [`fill_label`] with a white inset margin (pixels on each side).
 pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    let tw = label.width_px.max(1);
-    let th = label.height_px.max(1);
-    let m = margin.min(tw / 4).min(th / 4);
-    let cw = tw.saturating_sub(m * 2).max(1);
-    let ch = th.saturating_sub(m * 2).max(1);
-
+    let bx = ContentBox::new(label, margin);
     let (iw, ih) = img.dimensions();
     // Scale so both dimensions cover the content box (may overflow one axis).
-    let scale = f64::max(cw as f64 / iw as f64, ch as f64 / ih as f64);
-    let nw = ((iw as f64) * scale).round().max(1.0) as u32;
-    let nh = ((ih as f64) * scale).round().max(1.0) as u32;
+    let scale = f64::max(bx.width as f64 / iw as f64, bx.height as f64 / ih as f64);
+    let (nw, nh) = scaled_dimensions(&img, scale);
 
     let resized = imageops::resize(&img, nw, nh, imageops::FilterType::CatmullRom);
-    let x0 = nw.saturating_sub(cw) / 2;
-    let y0 = nh.saturating_sub(ch) / 2;
-    let cropped = imageops::crop_imm(&resized, x0, y0, cw, ch).to_image();
+    let cropped = imageops::crop_imm(
+        &resized,
+        nw.saturating_sub(bx.width) / 2,
+        nh.saturating_sub(bx.height) / 2,
+        bx.width,
+        bx.height,
+    )
+    .to_image();
 
-    let mut canvas = RgbaImage::from_pixel(tw, th, image::Rgba([255, 255, 255, 255]));
-    imageops::overlay(&mut canvas, &cropped, m as i64, m as i64);
+    let mut canvas = bx.white_canvas();
+    imageops::overlay(&mut canvas, &cropped, bx.margin as i64, bx.margin as i64);
     DynamicImage::ImageRgba8(canvas)
 }
 
@@ -228,23 +242,20 @@ pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) ->
 /// Prefer this for photographs so nothing is cropped and content sits in the
 /// middle of the label with clean margins.
 pub fn contain_label(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    let tw = label.width_px.max(1);
-    let th = label.height_px.max(1);
-    let m = margin.min(tw / 4).min(th / 4);
-    let cw = tw.saturating_sub(m * 2).max(1);
-    let ch = th.saturating_sub(m * 2).max(1);
-
+    let bx = ContentBox::new(label, margin);
     let (iw, ih) = img.dimensions();
-    let scale = f64::min(cw as f64 / iw as f64, ch as f64 / ih as f64);
-    let nw = ((iw as f64) * scale).round().max(1.0) as u32;
-    let nh = ((ih as f64) * scale).round().max(1.0) as u32;
+    let scale = f64::min(bx.width as f64 / iw as f64, bx.height as f64 / ih as f64);
+    let (nw, nh) = scaled_dimensions(&img, scale);
 
     let resized = imageops::resize(&img, nw, nh, imageops::FilterType::CatmullRom);
-    let mut canvas = RgbaImage::from_pixel(tw, th, image::Rgba([255, 255, 255, 255]));
+    let mut canvas = bx.white_canvas();
     // Center within the full canvas (margin is already baked into max size).
-    let x0 = tw.saturating_sub(nw) / 2;
-    let y0 = th.saturating_sub(nh) / 2;
-    imageops::overlay(&mut canvas, &resized, x0 as i64, y0 as i64);
+    imageops::overlay(
+        &mut canvas,
+        &resized,
+        (bx.canvas_w.saturating_sub(nw) / 2) as i64,
+        (bx.canvas_h.saturating_sub(nh) / 2) as i64,
+    );
     DynamicImage::ImageRgba8(canvas)
 }
 
@@ -299,7 +310,8 @@ mod tests {
     #[test]
     fn encode_respects_max_width() {
         let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 50, Luma([0])));
-        let (w, h, pkts) = encode_image(img, 384, 0, 127).unwrap();
+        let r = encode(img, 384, 127, false).unwrap();
+        let (w, h, pkts) = (r.width, r.height, r.rows);
         assert_eq!((w, h), (100, 50));
         assert_eq!(pkts.len(), 50);
     }
@@ -307,7 +319,7 @@ mod tests {
     #[test]
     fn encode_rejects_too_wide() {
         let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(400, 10, Luma([0])));
-        assert!(encode_image(img, 384, 0, 127).is_err());
+        assert!(encode(img, 384, 127, false).is_err());
     }
 
     #[test]
@@ -363,17 +375,18 @@ mod tests {
     }
 
     #[test]
-    fn black_row_uses_bitmap_packet() {
-        // full black row → PrintBitmapRow (0x85), not empty
-        let mut g = GrayImage::from_pixel(16, 1, Luma([0]));
-        for x in 0..16 {
-            g.put_pixel(x, 0, Luma([255])); // our convention before invert path:
-        }
-        // encode_image inverts: white source → not printed. Use dark source.
-        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(16, 2, Luma([0])));
-        let (_w, _h, pkts) = encode_image(img, 384, 0, 127).unwrap();
-        // after invert, black (0) becomes white (no print)… wait:
-        // inv = 255-0 = 255 > threshold → bit 255 = print black. Good.
-        assert!(pkts.iter().any(|p| p.cmd == Cmd::PrintBitmapRow as u8));
+    fn dark_source_pixels_become_bitmap_rows() {
+        // Dark source (0) inverts to 255 > threshold, so it burns → PrintBitmapRow.
+        let dark = DynamicImage::ImageLuma8(GrayImage::from_pixel(16, 2, Luma([0])));
+        let rows = encode(dark, 384, 127, false).unwrap().rows;
+        assert!(rows.iter().all(|p| p.cmd == Cmd::PrintBitmapRow as u8));
+    }
+
+    #[test]
+    fn white_source_pixels_become_empty_rows() {
+        // The complement: white source burns nothing, so rows are sent as empty.
+        let light = DynamicImage::ImageLuma8(GrayImage::from_pixel(16, 2, Luma([255])));
+        let rows = encode(light, 384, 127, false).unwrap().rows;
+        assert!(rows.iter().all(|p| p.cmd == Cmd::PrintEmptyRow as u8));
     }
 }

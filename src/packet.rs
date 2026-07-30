@@ -164,7 +164,10 @@ mod tests {
     fn encode_simple_rfid() {
         // 55 55 1a 01 01 1a aa aa
         let p = Packet::new(0x1a, vec![0x01]);
-        assert_eq!(p.encode().unwrap(), hex::decode("55551a01011aaaaa").unwrap());
+        assert_eq!(
+            p.encode().unwrap(),
+            hex::decode("55551a01011aaaaa").unwrap()
+        );
     }
 
     #[test]

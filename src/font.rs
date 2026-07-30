@@ -1,4 +1,4 @@
-//! Text rendering for labels: system TrueType fonts (preferred) + tiny bitmap fallback.
+//! Text rendering for labels using system TrueType fonts.
 
 use crate::errors::{Error, Result};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
@@ -6,10 +6,9 @@ use image::{GrayImage, Luma};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
-/// Glyph metrics for the built-in 5×7 fallback (used only if no TTF loads).
-pub const GLYPH_W: u32 = 5;
-pub const GLYPH_H: u32 = 7;
-pub const GLYPH_ADVANCE: u32 = 6;
+/// Smallest and largest text size [`LabelFont::fit_size`] will choose.
+pub const MIN_FONT_PX: f32 = 10.0;
+pub const MAX_FONT_PX: f32 = 72.0;
 
 /// Well-known font locations on macOS (and a few cross-platform fallbacks).
 pub fn system_font_candidates() -> Vec<PathBuf> {
@@ -304,124 +303,32 @@ impl LabelFont {
     }
 
     /// Pick the largest px height that fits all lines in the box.
+    ///
+    /// Falls back to [`MIN_FONT_PX`] when even the smallest size overflows —
+    /// the text will clip, but returning anything larger would clip *more*.
     pub fn fit_size(&self, text: &str, max_w: u32, max_h: u32) -> f32 {
-        for size in (10..=72).rev() {
+        let lo = MIN_FONT_PX as u32;
+        let hi = MAX_FONT_PX as u32;
+        for size in (lo..=hi).rev() {
             let ph = size as f32;
-            let lines = self.wrap(text, max_w, ph);
-            let line_h = self.text_height(ph) + 2;
-            let need = lines.len() as u32 * line_h;
-            let max_line = lines
-                .iter()
-                .map(|l| self.text_width(l, ph))
-                .max()
-                .unwrap_or(0);
-            if need <= max_h && max_line <= max_w {
+            if self.fits(text, max_w, max_h, ph) {
                 return ph;
             }
         }
-        12.0
+        MIN_FONT_PX
     }
-}
 
-// ─── Bitmap fallback (kept for tests / no-font environments) ────────────────
-
-pub fn glyph(ch: char) -> [u8; 7] {
-    // bit4 (0x10) = LEFTMOST pixel (standard 5×7). Draw with col from 4 down to 0.
-    match ch {
-        ' ' => [0; 7],
-        'A' | 'a' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
-        'B' | 'b' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
-        'C' | 'c' => [0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E],
-        'H' | 'h' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
-        'E' | 'e' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
-        'L' | 'l' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
-        'O' | 'o' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
-        'Y' | 'y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
-        'U' | 'u' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
-        'T' | 't' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
-        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
-        '2' => [0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F],
-        '3' => [0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E],
-        _ => [0x1F, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x1F],
+    /// Whether `text` wraps into `max_w` x `max_h` at this size.
+    pub fn fits(&self, text: &str, max_w: u32, max_h: u32, px_height: f32) -> bool {
+        let lines = self.wrap(text, max_w, px_height);
+        let need = lines.len() as u32 * (self.text_height(px_height) + 2);
+        let widest = lines
+            .iter()
+            .map(|l| self.text_width(l, px_height))
+            .max()
+            .unwrap_or(0);
+        need <= max_h && widest <= max_w
     }
-}
-
-/// Draw bitmap text. bit4 = left (correct orientation).
-pub fn draw_text_bitmap(img: &mut GrayImage, x: i32, y: i32, text: &str, scale: u32, black: bool) {
-    let scale = scale.max(1);
-    let color = if black { Luma([0u8]) } else { Luma([255u8]) };
-    let (w, h) = img.dimensions();
-    let mut cx = x;
-    for ch in text.chars() {
-        let g = glyph(ch);
-        for (row, bits) in g.iter().enumerate() {
-            // bit 4 = leftmost column of the 5-wide glyph
-            for col in 0..5u32 {
-                let bit = 4 - col; // col 0 → bit4, col 4 → bit0
-                if bits & (1 << bit) != 0 {
-                    for dy in 0..scale {
-                        for dx in 0..scale {
-                            let px = cx + (col * scale) as i32 + dx as i32;
-                            let py = y + (row as u32 * scale) as i32 + dy as i32;
-                            if px >= 0 && py >= 0 && (px as u32) < w && (py as u32) < h {
-                                img.put_pixel(px as u32, py as u32, color);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        cx += (GLYPH_ADVANCE * scale) as i32;
-    }
-}
-
-// Back-compat wrappers used by older code paths
-pub fn draw_text(img: &mut GrayImage, x: i32, y: i32, text: &str, scale: u32, black: bool) {
-    draw_text_bitmap(img, x, y, text, scale, black);
-}
-
-pub fn chars_fit(width_px: u32, scale: u32) -> u32 {
-    let adv = GLYPH_ADVANCE * scale.max(1);
-    width_px.checked_div(adv).unwrap_or(0)
-}
-
-pub fn text_width(text: &str, scale: u32) -> u32 {
-    text.chars().count() as u32 * GLYPH_ADVANCE * scale.max(1)
-}
-
-pub fn text_height(scale: u32) -> u32 {
-    GLYPH_H * scale.max(1)
-}
-
-pub fn wrap_text(text: &str, max_width_px: u32, scale: u32) -> Vec<String> {
-    let max_chars = chars_fit(max_width_px, scale).max(1) as usize;
-    let mut lines = Vec::new();
-    for paragraph in text.split('\n') {
-        if paragraph.is_empty() {
-            lines.push(String::new());
-            continue;
-        }
-        let mut current = String::new();
-        for word in paragraph.split_whitespace() {
-            let trial = if current.is_empty() {
-                word.to_string()
-            } else {
-                format!("{current} {word}")
-            };
-            if trial.chars().count() <= max_chars {
-                current = trial;
-            } else {
-                if !current.is_empty() {
-                    lines.push(current);
-                }
-                current = word.to_string();
-            }
-        }
-        if !current.is_empty() {
-            lines.push(current);
-        }
-    }
-    lines
 }
 
 #[cfg(test)]
@@ -439,25 +346,30 @@ mod tests {
     }
 
     #[test]
-    fn abc_drawn_left_to_right() {
-        // Bitmap path: ink should span left→right for "ABC"
-        let mut img = GrayImage::from_pixel(80, 20, Luma([255]));
-        draw_text_bitmap(&mut img, 2, 2, "ABC", 2, true);
-        let mut min_x = 999u32;
-        let mut max_x = 0u32;
-        let mut count = 0u32;
-        for (x, _y, p) in img.enumerate_pixels() {
-            if p[0] < 128 {
-                min_x = min_x.min(x);
-                max_x = max_x.max(x);
-                count += 1;
-            }
+    fn fit_size_never_returns_a_size_larger_than_the_smallest_tried() {
+        let Ok(f) = LabelFont::load_default() else {
+            return;
+        };
+        // A box too small for any size: the old fallback returned 12.0 — larger
+        // than the 10px that had already failed — so text overflowed further.
+        let px = f.fit_size("SOME LONGISH LABEL TEXT HERE", 20, 8);
+        assert_eq!(px, MIN_FONT_PX);
+    }
+
+    #[test]
+    fn fit_size_picks_the_largest_size_that_fits() {
+        let Ok(f) = LabelFont::load_default() else {
+            return;
+        };
+        let (w, h) = (127, 228);
+        let px = f.fit_size("Wi-Fi\nGuest\nScan to join", w, h);
+        assert!(f.fits("Wi-Fi\nGuest\nScan to join", w, h, px));
+        if px < MAX_FONT_PX {
+            assert!(
+                !f.fits("Wi-Fi\nGuest\nScan to join", w, h, px + 1.0),
+                "{px} was not the largest fitting size"
+            );
         }
-        assert!(count > 10, "expected ink for ABC");
-        assert!(
-            max_x > min_x + 20,
-            "ABC should span left→right, got {min_x}..{max_x}"
-        );
     }
 
     #[test]

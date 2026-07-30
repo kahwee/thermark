@@ -68,10 +68,12 @@ impl PrintTask {
         }
     }
 
+    /// Width this sequence can address. See [`effective_max_width_px`] for the
+    /// limit that actually applies to a job.
     pub fn max_width_px(self) -> u32 {
         match self {
-            Self::B1 | Self::B21V1 | Self::Simple => 384,
-            Self::D110 => 96,
+            Self::B1 | Self::B21V1 | Self::Simple => crate::geometry::HEAD_WIDE_PX,
+            Self::D110 => crate::geometry::HEAD_NARROW_PX,
         }
     }
 
@@ -110,14 +112,22 @@ impl PrintTask {
     }
 }
 
+impl PrintTask {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::B1 => "b1",
+            Self::B21V1 => "b21v1",
+            Self::D110 => "d110",
+            Self::Simple => "simple",
+        }
+    }
+}
+
 impl std::fmt::Display for PrintTask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::B1 => write!(f, "b1"),
-            Self::B21V1 => write!(f, "b21v1"),
-            Self::D110 => write!(f, "d110"),
-            Self::Simple => write!(f, "simple"),
-        }
+        // `f.pad` honours width/alignment; `write!(f, "…")` silently ignores
+        // them, which left the `thermark tasks` table columns ragged.
+        f.pad(self.as_str())
     }
 }
 
@@ -127,6 +137,16 @@ impl std::str::FromStr for PrintTask {
         Self::parse(s)
             .ok_or_else(|| format!("unknown print task '{s}' (try b1, b21v1, d110, simple)"))
     }
+}
+
+/// The width limit that actually applies to a job: the narrower of the model's
+/// printhead and the print sequence's addressable width.
+///
+/// Use this everywhere a raster is sized or checked. Sizing a canvas from the
+/// model alone (and only checking the pair later) means a mismatched
+/// `--model`/`--task` encodes the whole image before being rejected.
+pub fn effective_max_width_px(model: Model, task: PrintTask) -> u32 {
+    model.max_width_px().min(task.max_width_px())
 }
 
 /// Honest hardware matrix for docs and `thermark tasks`.
@@ -167,12 +187,18 @@ pub enum SupportStatus {
     Experimental,
 }
 
+impl SupportStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tested => "tested",
+            Self::Experimental => "experimental",
+        }
+    }
+}
+
 impl std::fmt::Display for SupportStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Tested => write!(f, "tested"),
-            Self::Experimental => write!(f, "experimental"),
-        }
+        f.pad(self.as_str())
     }
 }
 
@@ -219,6 +245,43 @@ mod tests {
         assert_eq!(PrintTask::for_model(Model::B1), PrintTask::B1);
         assert_eq!(PrintTask::for_model(Model::B21), PrintTask::B21V1);
         assert_eq!(PrintTask::for_model(Model::D11), PrintTask::D110);
+    }
+
+    #[test]
+    fn effective_width_is_the_narrower_of_model_and_task() {
+        use crate::geometry::{HEAD_NARROW_PX, HEAD_WIDE_PX};
+        // Matched pairs keep their own width.
+        assert_eq!(
+            effective_max_width_px(Model::B1, PrintTask::B1),
+            HEAD_WIDE_PX
+        );
+        assert_eq!(
+            effective_max_width_px(Model::D110, PrintTask::D110),
+            HEAD_NARROW_PX
+        );
+        // A mismatch takes the narrower limit from whichever side imposes it.
+        assert_eq!(
+            effective_max_width_px(Model::B1, PrintTask::D110),
+            HEAD_NARROW_PX
+        );
+        assert_eq!(
+            effective_max_width_px(Model::D110, PrintTask::B1),
+            HEAD_NARROW_PX
+        );
+    }
+
+    #[test]
+    fn both_width_tables_agree_on_matched_pairs() {
+        // The two tables are keyed differently; they must not drift apart for
+        // the combinations that actually ship together.
+        for model in [Model::B1, Model::B21, Model::B18, Model::D11, Model::D110] {
+            let task = PrintTask::for_model(model);
+            assert_eq!(
+                model.max_width_px(),
+                task.max_width_px(),
+                "{model} and its default task {task} disagree on printhead width"
+            );
+        }
     }
 
     #[test]

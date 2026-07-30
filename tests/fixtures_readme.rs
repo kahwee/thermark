@@ -94,10 +94,10 @@ fn ink_stats(gray: &image::GrayImage) -> (usize, usize, f64) {
 
 fn assert_encodes(name: &str) {
     let path = fixtures_dir().join(name);
-    let (w, h, packets) = image_encode::encode_image_path(&path, MAX_W, 0, 127)
+    let r = image_encode::encode_path(&path, MAX_W, 127, false)
         .unwrap_or_else(|e| panic!("encode {name}: {e}"));
-    assert_eq!((w, h), (W, H), "{name} encoded size");
-    assert_eq!(packets.len() as u32, H, "{name} one packet per row");
+    assert_eq!((r.width, r.height), (W, H), "{name} encoded size");
+    assert_eq!(r.rows.len() as u32, H, "{name} one packet per row");
 }
 
 #[test]
@@ -273,7 +273,8 @@ async fn wifi_fixture_mock_print_streams_rows() {
     use thermark::types::Density;
 
     let path = fixtures_dir().join("sticker_wifi.png");
-    let mut c = PrinterClient::new(MockTransport::new(), Model::B1).with_pace(false);
+    let mut c = PrinterClient::new(MockTransport::new(), Model::B1)
+        .with_pacing(thermark::printer::Pacing::INSTANT);
     c.print_image_file_opts(
         &path,
         PrintOptions {

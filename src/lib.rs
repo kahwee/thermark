@@ -35,13 +35,19 @@ pub mod wifi;
 
 pub use config::{Config, ConnPref};
 pub use errors::{Error, PrinterErrorCode, Result};
-pub use geometry::{DEFAULT_B1_LABEL, LabelMm, LabelPx, PX_PER_MM};
+pub use geometry::{DEFAULT_B1_LABEL, HEAD_NARROW_PX, HEAD_WIDE_PX, LabelMm, LabelPx, PX_PER_MM};
+pub use image_encode::Raster;
 pub use mock::MockTransport;
 pub use packet::Packet;
-pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
-pub use printer::{Heartbeat, InfoValue, PrintOptions, PrinterClient, PrinterSummary, RfidInfo};
+pub use print_task::{PrintTask, SupportStatus, effective_max_width_px, hardware_matrix};
+pub use printer::{
+    Heartbeat, InfoValue, Pacing, PrintOptions, PrinterClient, PrinterSummary, RfidInfo,
+};
 pub use protocol::Model;
-pub use transport::{BleMatchMode, Transport, score_ble_candidate, select_ble_candidate};
+pub use transport::{
+    BleCandidate, BleMatchMode, Transport, name_looks_like_label_printer, score_ble_candidate,
+    select_ble_candidate,
+};
 pub use types::{Density, Rotation, Threshold};
 pub use wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label, wifi_qr_payload, wifi_side_text};
 

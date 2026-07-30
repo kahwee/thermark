@@ -6,6 +6,7 @@
 
 use crate::errors::{Error, Result};
 use crate::packet::Packet;
+use std::fmt;
 use std::time::Duration;
 use tracing::debug;
 
@@ -54,48 +55,105 @@ impl BleMatchMode {
     }
 }
 
+/// A BLE peripheral seen during a scan.
+///
+/// `name` is `None` when the device advertises no local name — previously a
+/// `"(no name)"` sentinel string that had to be excluded from matching at every
+/// comparison site, and which the connect path never actually produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BleCandidate {
+    pub id: String,
+    pub name: Option<String>,
+}
+
+impl BleCandidate {
+    pub fn new(id: impl Into<String>, name: Option<String>) -> Self {
+        let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        Self {
+            id: id.into(),
+            name,
+        }
+    }
+
+    /// Advertising name, or a placeholder for display only — never for matching.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or("(no name)")
+    }
+
+    /// True if the advertised name looks like a pocket label printer.
+    ///
+    /// Single source of truth for this heuristic: scan filtering, fuzzy-match
+    /// scoring, and `scan --save` ranking all consult it.
+    pub fn looks_like_label_printer(&self) -> bool {
+        self.name
+            .as_deref()
+            .map(name_looks_like_label_printer)
+            .unwrap_or(false)
+    }
+}
+
+impl fmt::Display for BleCandidate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.name {
+            Some(n) => write!(f, "{n} ({})", self.id),
+            None => write!(f, "{}", self.id),
+        }
+    }
+}
+
+/// Name prefixes/substrings used by common pocket thermal label printers.
+const PRINTER_NAME_MARKERS: &[&str] = &["b1", "b21", "b18", "d11", "d110", "niim", "jc-"];
+
+/// Whether an advertising name looks like a label printer (case-insensitive).
+pub fn name_looks_like_label_printer(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    PRINTER_NAME_MARKERS.iter().any(|m| name.contains(m))
+}
+
 /// Score how well `selector` matches a scanned peripheral. Higher is better.
 ///
 /// Returns `None` if this mode does not treat the device as a match.
 pub fn score_ble_candidate(
     selector: &str,
-    id: &str,
-    name: &str,
+    candidate: &BleCandidate,
     mode: BleMatchMode,
 ) -> Option<i32> {
-    let sel = selector.to_ascii_lowercase();
+    let sel = selector.trim().to_ascii_lowercase();
     if sel.is_empty() {
         return None;
     }
-    let id_l = id.to_ascii_lowercase();
-    let name_l = name.to_ascii_lowercase();
+    let id_l = candidate.id.to_ascii_lowercase();
+    let name_l = candidate.name.as_ref().map(|n| n.to_ascii_lowercase());
+
+    let id_exact = id_l == sel;
+    let name_exact = name_l.as_deref() == Some(sel.as_str());
 
     match mode {
         BleMatchMode::Exact => {
-            if id_l == sel {
-                return Some(1000);
+            if id_exact {
+                Some(1000)
+            } else if name_exact {
+                Some(900)
+            } else {
+                None
             }
-            if !name.is_empty() && name != "(no name)" && name_l == sel {
-                return Some(900);
-            }
-            None
         }
         BleMatchMode::Fuzzy => {
             let mut score = 0i32;
-            if id_l == sel {
+            if id_exact {
                 score += 1000;
             }
-            if !name.is_empty() && name != "(no name)" && name_l == sel {
+            if name_exact {
                 score += 900;
             }
-            if !name.is_empty() && name != "(no name)" && name_l.contains(&sel) {
+            if name_l.as_deref().is_some_and(|n| n.contains(&sel)) {
                 score += 100;
             }
             // Partial UUID/id only when selector is long enough to be intentional.
             if id_l.contains(&sel) && sel.len() >= 8 {
                 score += 50;
             }
-            if looks_like_label_printer(&name_l) {
+            if candidate.looks_like_label_printer() {
                 score += 30;
             }
             // Require a real selector hit (not printer-name bonus alone).
@@ -104,71 +162,48 @@ pub fn score_ble_candidate(
     }
 }
 
-fn looks_like_label_printer(name_l: &str) -> bool {
-    name_l.starts_with("b1")
-        || name_l.contains("b1-")
-        || name_l.starts_with("b21")
-        || name_l.contains("b21")
-        || name_l.starts_with("d11")
-        || name_l.contains("d110")
-        || name_l.contains("niim")
-        || name_l.starts_with("jc-")
-}
-
-/// Choose the best match among `(id, name)` candidates.
+/// Choose the best matching candidate.
 ///
 /// Fails when nothing matches, or when two candidates share the top score
 /// (ambiguous fuzzy match).
 pub fn select_ble_candidate(
     selector: &str,
-    candidates: &[(String, String)],
+    candidates: &[BleCandidate],
     mode: BleMatchMode,
-) -> std::result::Result<(String, String), String> {
-    let mut ranked: Vec<(i32, String, String)> = candidates
+) -> Result<BleCandidate> {
+    let mut ranked: Vec<(i32, &BleCandidate)> = candidates
         .iter()
-        .filter_map(|(id, name)| {
-            score_ble_candidate(selector, id, name, mode).map(|s| (s, id.clone(), name.clone()))
-        })
+        .filter_map(|c| score_ble_candidate(selector, c, mode).map(|s| (s, c)))
         .collect();
 
     if ranked.is_empty() {
-        return Err(match mode {
-            BleMatchMode::Exact => format!(
-                "no BLE device with exact name or id '{selector}'. Run `thermark scan` first \
-                 (on macOS the id is a UUID, not a classic MAC). \
-                 Tip: use the full advertising name, e.g. -a \"B1-YourPrinter\". \
-                 Substring match: add --fuzzy (can pick the wrong device)."
-            ),
-            BleMatchMode::Fuzzy => format!(
-                "no BLE device matching '{selector}' (fuzzy). Run `thermark scan` first \
-                 (on macOS the id is a UUID, not a classic MAC). \
-                 Tip: use the full name e.g. -a \"B1-YourPrinter\"."
-            ),
-        });
+        let hint = match mode {
+            BleMatchMode::Exact => "Substring match: add --fuzzy (can pick the wrong device).",
+            BleMatchMode::Fuzzy => "No substring matched either.",
+        };
+        return Err(Error::transport(format!(
+            "no BLE device matching '{selector}' ({mode:?} match). Run `thermark scan` first \
+             (on macOS the id is a UUID, not a classic MAC). \
+             Tip: use the full advertising name, e.g. -a \"B1-YourPrinter\". {hint}"
+        )));
     }
 
-    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
     let best = ranked[0].0;
-    let ties: Vec<_> = ranked.iter().filter(|(s, _, _)| *s == best).collect();
+    let ties: Vec<_> = ranked.iter().filter(|(s, _)| *s == best).collect();
     if ties.len() > 1 {
         let list = ties
             .iter()
-            .map(|(_, id, name)| {
-                if name.is_empty() {
-                    id.clone()
-                } else {
-                    format!("{name} ({id})")
-                }
-            })
+            .map(|(_, c)| c.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(format!(
+        return Err(Error::transport(format!(
             "ambiguous BLE match for '{selector}' (score {best}): {list}. \
              Use the full unique name or peripheral id."
-        ));
+        )));
     }
 
-    Ok((ranked[0].1.clone(), ranked[0].2.clone()))
+    Ok(ranked[0].1.clone())
 }
 
 // ─── BLE ────────────────────────────────────────────────────────────────────
@@ -205,15 +240,28 @@ mod ble {
         closed: bool,
     }
 
+    /// A scanned peripheral plus its signal strength.
     #[derive(Debug, Clone)]
     pub struct BleDeviceInfo {
-        pub id: String,
-        pub name: String,
+        pub candidate: BleCandidate,
         pub rssi: Option<i16>,
+    }
+
+    impl BleDeviceInfo {
+        pub fn id(&self) -> &str {
+            &self.candidate.id
+        }
+
+        pub fn display_name(&self) -> &str {
+            self.candidate.display_name()
+        }
     }
 
     impl BleTransport {
         /// Scan for B1-class label-printer peripherals.
+        ///
+        /// Devices advertising the printer GATT service are included even when
+        /// their name is unrecognized, so an unknown model is still findable.
         pub async fn scan(duration: Duration) -> Result<Vec<BleDeviceInfo>> {
             let adapter = default_adapter().await?;
             adapter
@@ -225,47 +273,31 @@ mod ble {
                 .peripherals()
                 .await
                 .map_err(|e| Error::transport(format!("BLE peripherals: {e}")))?;
-            let mut out = Vec::new();
+            let mut found: HashMap<String, BleDeviceInfo> = HashMap::new();
             for p in peris {
-                let props = match p
+                let Some(props) = p
                     .properties()
                     .await
                     .map_err(|e| Error::transport(format!("BLE properties: {e}")))?
-                {
-                    Some(pr) => pr,
-                    None => continue,
+                else {
+                    continue;
                 };
-                let name = props.local_name.unwrap_or_default();
-                let name_l = name.to_ascii_lowercase();
-                let interesting = name_l.contains("niim")
-                    || name_l.starts_with("b1")
-                    || name_l.contains("b1-")
-                    || name_l.starts_with("b21")
-                    || name_l.contains("b21")
-                    || name_l.starts_with("d11")
-                    || name_l.contains("d110")
-                    || name_l.starts_with("jc-")
+                let candidate = BleCandidate::new(p.id().to_string(), props.local_name);
+                let interesting = candidate.looks_like_label_printer()
                     || props.services.contains(&PRINTER_SERVICE);
-
                 if interesting {
-                    out.push(BleDeviceInfo {
-                        id: p.id().to_string(),
-                        name: if name.is_empty() {
-                            "(no name)".into()
-                        } else {
-                            name
+                    found.insert(
+                        candidate.id.clone(),
+                        BleDeviceInfo {
+                            candidate,
+                            rssi: props.rssi,
                         },
-                        rssi: props.rssi,
-                    });
+                    );
                 }
             }
             adapter.stop_scan().await.ok();
-            let mut map = HashMap::new();
-            for d in out {
-                map.insert(d.id.clone(), d);
-            }
-            let mut list: Vec<_> = map.into_values().collect();
-            list.sort_by(|a, b| a.name.cmp(&b.name));
+            let mut list: Vec<_> = found.into_values().collect();
+            list.sort_by(|a, b| a.display_name().cmp(b.display_name()));
             Ok(list)
         }
 
@@ -293,36 +325,27 @@ mod ble {
                 .await
                 .map_err(|e| Error::transport(format!("BLE peripherals: {e}")))?;
 
-            let mut catalog: Vec<(String, String, Peripheral)> = Vec::new();
+            let mut catalog: Vec<(BleCandidate, Peripheral)> = Vec::new();
             for p in peris {
-                let id = p.id().to_string();
                 let props = p
                     .properties()
                     .await
                     .map_err(|e| Error::transport(format!("BLE properties: {e}")))?;
-                let name = props
-                    .as_ref()
-                    .and_then(|pr| pr.local_name.clone())
-                    .unwrap_or_default();
-                catalog.push((id, name, p));
+                let name = props.as_ref().and_then(|pr| pr.local_name.clone());
+                catalog.push((BleCandidate::new(p.id().to_string(), name), p));
             }
 
-            let pairs: Vec<(String, String)> = catalog
-                .iter()
-                .map(|(id, name, _)| (id.clone(), name.clone()))
-                .collect();
-            let (win_id, win_name) =
-                select_ble_candidate(selector, &pairs, mode).map_err(Error::transport)?;
+            let candidates: Vec<BleCandidate> = catalog.iter().map(|(c, _)| c.clone()).collect();
+            let winner = select_ble_candidate(selector, &candidates, mode)?;
 
             let peripheral = catalog
                 .into_iter()
-                .find(|(id, _, _)| id == &win_id)
-                .map(|(_, _, p)| p)
+                .find(|(c, _)| c.id == winner.id)
+                .map(|(_, p)| p)
                 .ok_or_else(|| Error::transport("internal: matched BLE device vanished"))?;
-            let name = win_name;
 
             info!(
-                name = %if name.is_empty() { "(unknown)" } else { name.as_str() },
+                name = %winner.display_name(),
                 id = %peripheral.id(),
                 ?mode,
                 "connecting"
@@ -520,58 +543,85 @@ pub use ble::{
 mod ble_match_tests {
     use super::*;
 
+    fn named(id: &str, name: &str) -> BleCandidate {
+        BleCandidate::new(id, Some(name.to_string()))
+    }
+
+    fn unnamed(id: &str) -> BleCandidate {
+        BleCandidate::new(id, None)
+    }
+
     #[test]
     fn exact_requires_full_name_or_id() {
-        assert!(score_ble_candidate("b1", "uuid-1", "B1-Kitchen", BleMatchMode::Exact).is_none());
+        let c = named("uuid-1", "B1-Kitchen");
+        assert!(score_ble_candidate("b1", &c, BleMatchMode::Exact).is_none());
         assert_eq!(
-            score_ble_candidate("B1-Kitchen", "uuid-1", "B1-Kitchen", BleMatchMode::Exact),
+            score_ble_candidate("B1-Kitchen", &c, BleMatchMode::Exact),
             Some(900)
         );
         assert_eq!(
-            score_ble_candidate("uuid-1", "uuid-1", "B1-Kitchen", BleMatchMode::Exact),
+            score_ble_candidate("uuid-1", &c, BleMatchMode::Exact),
             Some(1000)
         );
         // Case-insensitive name
         assert_eq!(
-            score_ble_candidate("b1-kitchen", "uuid-1", "B1-Kitchen", BleMatchMode::Exact),
+            score_ble_candidate("b1-kitchen", &c, BleMatchMode::Exact),
             Some(900)
         );
     }
 
     #[test]
     fn fuzzy_allows_substring_but_not_printer_bonus_alone() {
-        assert!(score_ble_candidate("b1", "uuid-1", "B1-Kitchen", BleMatchMode::Fuzzy).is_some());
+        let c = named("uuid-1", "B1-Kitchen");
+        assert!(score_ble_candidate("b1", &c, BleMatchMode::Fuzzy).is_some());
         // Printer-like name without selector hit
-        assert!(score_ble_candidate("xyz", "uuid-1", "B1-Kitchen", BleMatchMode::Fuzzy).is_none());
+        assert!(score_ble_candidate("xyz", &c, BleMatchMode::Fuzzy).is_none());
     }
 
     #[test]
     fn exact_rejects_substring_that_fuzzy_accepts() {
-        let cands = [("id-a".to_string(), "B1-Kitchen".to_string())];
+        let cands = [named("id-a", "B1-Kitchen")];
         assert!(select_ble_candidate("B1", &cands, BleMatchMode::Exact).is_err());
         assert!(select_ble_candidate("B1", &cands, BleMatchMode::Fuzzy).is_ok());
     }
 
     #[test]
     fn ambiguous_fuzzy_errors() {
-        let cands = [
-            ("id-a".to_string(), "B1-One".to_string()),
-            ("id-b".to_string(), "B1-Two".to_string()),
-        ];
+        let cands = [named("id-a", "B1-One"), named("id-b", "B1-Two")];
         let err = select_ble_candidate("B1", &cands, BleMatchMode::Fuzzy).unwrap_err();
-        assert!(err.contains("ambiguous"), "{err}");
+        assert!(err.to_string().contains("ambiguous"), "{err}");
     }
 
     #[test]
     fn exact_picks_unique_name() {
-        let cands = [
-            ("id-a".to_string(), "B1-One".to_string()),
-            ("id-b".to_string(), "B1-Two".to_string()),
-        ];
-        let (id, name) =
-            select_ble_candidate("B1-Two", &cands, BleMatchMode::Exact).expect("exact");
-        assert_eq!(id, "id-b");
-        assert_eq!(name, "B1-Two");
+        let cands = [named("id-a", "B1-One"), named("id-b", "B1-Two")];
+        let win = select_ble_candidate("B1-Two", &cands, BleMatchMode::Exact).expect("exact");
+        assert_eq!(win.id, "id-b");
+        assert_eq!(win.name.as_deref(), Some("B1-Two"));
+    }
+
+    #[test]
+    fn unnamed_device_matches_only_by_id() {
+        let cands = [unnamed("id-a")];
+        // The old "(no name)" sentinel was compared as if it were a real name.
+        assert!(select_ble_candidate("(no name)", &cands, BleMatchMode::Fuzzy).is_err());
+        assert!(select_ble_candidate("id-a", &cands, BleMatchMode::Exact).is_ok());
+    }
+
+    #[test]
+    fn blank_advertising_name_is_normalized_to_none() {
+        assert_eq!(BleCandidate::new("id", Some("   ".into())).name, None);
+        assert_eq!(BleCandidate::new("id", Some(String::new())).name, None);
+    }
+
+    #[test]
+    fn printer_name_heuristic_is_shared() {
+        for n in ["B1-Kitchen", "b21-x", "D110", "NIIMBOT-x", "jc-200"] {
+            assert!(name_looks_like_label_printer(n), "{n}");
+        }
+        for n in ["AirPods", "random-watch", ""] {
+            assert!(!name_looks_like_label_printer(n), "{n}");
+        }
     }
 }
 

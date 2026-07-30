@@ -153,7 +153,12 @@ mod tests {
         let p = wifi_qr_payload("Cafe-Guest", "s3cret!", WifiSecurity::Wpa, false).unwrap();
         assert!(p.starts_with("WIFI:T:WPA;S:Cafe-Guest;P:"));
         assert!(p.contains("P:s3cret!;"));
-        assert!(p.ends_with(";;") || p.ends_with(";"));
+        // `ends_with(";;") || ends_with(";")` was tautological — the second
+        // clause subsumes the first, so it asserted nothing.
+        assert!(
+            p.ends_with(";;"),
+            "payload must be terminated with ';;': {p}"
+        );
     }
 
     #[test]

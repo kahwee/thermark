@@ -6,6 +6,13 @@
 /// Pixels per millimeter (community measurement).
 pub const PX_PER_MM: f64 = 8.0;
 
+/// Printhead widths in pixels. Both [`crate::protocol::Model`] and
+/// [`crate::print_task::PrintTask`] classify devices into one of these, so the
+/// numbers live here once rather than in two parallel tables.
+pub const HEAD_WIDE_PX: u32 = 384;
+/// Narrow head used by the D11 / D110 family (~12 mm media).
+pub const HEAD_NARROW_PX: u32 = 96;
+
 /// Largest label dimension accepted, in mm. Nothing a pocket thermal prints
 /// comes close; the bound exists so pixel math cannot overflow `u32`.
 pub const MAX_DIMENSION_MM: f64 = 1000.0;
@@ -18,7 +25,9 @@ pub fn mm_to_px(mm: f64) -> u32 {
     if !mm.is_finite() {
         return 1;
     }
-    (mm * PX_PER_MM).round().clamp(1.0, MAX_DIMENSION_MM * PX_PER_MM) as u32
+    (mm * PX_PER_MM)
+        .round()
+        .clamp(1.0, MAX_DIMENSION_MM * PX_PER_MM) as u32
 }
 
 /// Convert pixels to millimetres.

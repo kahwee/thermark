@@ -3,9 +3,9 @@
 use super::info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
 use crate::errors::{Error, PrinterErrorCode, Result};
 use crate::geometry::{LabelMm, LabelPx};
-use crate::image_encode;
+use crate::image_encode::{self, Raster};
 use crate::packet::Packet;
-use crate::print_task::PrintTask;
+use crate::print_task::{PrintTask, effective_max_width_px};
 use crate::protocol::{self, Cmd, InfoKey, Model};
 use crate::transport::Transport;
 use crate::types::{Density, Rotation, Threshold};
@@ -13,12 +13,60 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+/// Timing and retry budget for a print job.
+///
+/// Real jobs and tests run the *same* control flow; only the numbers differ, so
+/// a retry path can never be exercised in tests but skipped in production.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pacing {
+    /// Pause after every 8 streamed rows.
+    pub row_batch: Duration,
+    /// Settle time after PageEnd.
+    pub after_page_end: Duration,
+    /// Pause between status polls.
+    pub between_polls: Duration,
+    /// Time to wait for each status-poll reply.
+    pub poll_wait: Duration,
+    /// How many times to retry PrintEnd before giving up.
+    pub end_print_tries: u32,
+    /// Pause between PrintEnd attempts.
+    pub between_end_tries: Duration,
+}
+
+impl Default for Pacing {
+    fn default() -> Self {
+        Self::REAL
+    }
+}
+
+impl Pacing {
+    /// Timings tuned against real B1 hardware.
+    pub const REAL: Self = Self {
+        row_batch: Duration::from_millis(8),
+        after_page_end: Duration::from_millis(200),
+        between_polls: Duration::from_millis(50),
+        poll_wait: Duration::from_millis(100),
+        end_print_tries: 50,
+        between_end_tries: Duration::from_millis(100),
+    };
+
+    /// Same sequence and same retry counts, without the waiting — for tests
+    /// against [`crate::mock::MockTransport`], which replies instantly.
+    pub const INSTANT: Self = Self {
+        row_batch: Duration::ZERO,
+        after_page_end: Duration::ZERO,
+        between_polls: Duration::ZERO,
+        poll_wait: Duration::from_millis(1),
+        end_print_tries: 50,
+        between_end_tries: Duration::ZERO,
+    };
+}
+
 pub struct PrinterClient<T: Transport> {
     transport: T,
     model: Model,
     task: PrintTask,
-    /// When false, skip pacing sleeps (for unit tests).
-    pace: bool,
+    pacing: Pacing,
 }
 
 /// Options for a raster print job.
@@ -61,7 +109,7 @@ impl<T: Transport> PrinterClient<T> {
             transport,
             model,
             task: PrintTask::for_model(model),
-            pace: true,
+            pacing: Pacing::REAL,
         }
     }
 
@@ -79,10 +127,15 @@ impl<T: Transport> PrinterClient<T> {
         self
     }
 
-    /// Disable inter-packet sleeps (unit tests).
-    pub fn with_pace(mut self, pace: bool) -> Self {
-        self.pace = pace;
+    /// Override timings and retry budget (see [`Pacing::INSTANT`] for tests).
+    pub fn with_pacing(mut self, pacing: Pacing) -> Self {
+        self.pacing = pacing;
         self
+    }
+
+    /// Widest raster this client will accept, given both model and print task.
+    pub fn max_width_px(&self) -> u32 {
+        effective_max_width_px(self.model, self.task)
     }
 
     pub fn into_transport(self) -> T {
@@ -115,7 +168,7 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     async fn maybe_sleep(&self, d: Duration) {
-        if self.pace && !d.is_zero() {
+        if !d.is_zero() {
             tokio::time::sleep(d).await;
         }
     }
@@ -291,25 +344,20 @@ impl<T: Transport> PrinterClient<T> {
     /// Core raster job after pixels are already row packets.
     ///
     /// Returns [`Error::PrintNotConfirmed`] if the printer never ACKs PrintEnd.
-    pub async fn print_rows(
-        &mut self,
-        width: u32,
-        height: u32,
-        rows: Vec<Packet>,
-        density: Density,
-    ) -> Result<()> {
+    pub async fn print_raster(&mut self, raster: Raster, density: Density) -> Result<()> {
+        let (width, height) = (raster.width, raster.height);
         info!(
             width,
             height,
             task = %self.task,
             density = density.get(),
-            rows = rows.len(),
+            rows = raster.rows.len(),
             "print job"
         );
 
         let rows_u16 = u16::try_from(height).map_err(|_| Error::ImageTooLarge { width, height })?;
         let cols_u16 = u16::try_from(width).map_err(|_| Error::ImageTooLarge { width, height })?;
-        let max_w = self.model.max_width_px().min(self.task.max_width_px());
+        let max_w = self.max_width_px();
         if width > max_w {
             return Err(Error::ImageTooWide { width, max: max_w });
         }
@@ -353,40 +401,30 @@ impl<T: Transport> PrinterClient<T> {
             Cmd::SetPageSize as u8,
         )?;
 
-        for (i, pkt) in rows.into_iter().enumerate() {
+        for (i, pkt) in raster.rows.into_iter().enumerate() {
             self.send_raw_packet(pkt).await?;
             if i % 8 == 7 {
-                self.maybe_sleep(Duration::from_millis(8)).await;
+                self.maybe_sleep(self.pacing.row_batch).await;
             }
         }
 
         Self::require_ack(self.end_page().await?, "end_page", Cmd::PageEnd as u8)?;
-        self.maybe_sleep(Duration::from_millis(200)).await;
+        self.maybe_sleep(self.pacing.after_page_end).await;
 
-        let polls = if self.pace {
-            self.task.status_polls()
-        } else {
-            1
-        };
-        for _ in 0..polls {
+        for _ in 0..self.task.status_polls() {
             // A missing status reply is normal on some firmware, but if the
             // printer named its fault (cover, paper, …), surface that instead
             // of grinding through end_print retries into PrintNotConfirmed.
             if let Err(e @ Error::Printer(_)) = self
-                .transceive(
-                    protocol::print_status(),
-                    0xb3,
-                    1,
-                    Duration::from_millis(if self.pace { 100 } else { 1 }),
-                )
+                .transceive(protocol::print_status(), 0xb3, 1, self.pacing.poll_wait)
                 .await
             {
                 return Err(e);
             }
-            self.maybe_sleep(Duration::from_millis(50)).await;
+            self.maybe_sleep(self.pacing.between_polls).await;
         }
 
-        let end_tries = if self.pace { 50 } else { 5 };
+        let end_tries = self.pacing.end_print_tries;
         for _ in 0..end_tries {
             match self.end_print().await {
                 Ok(true) => {
@@ -404,7 +442,7 @@ impl<T: Transport> PrinterClient<T> {
                     return Err(e);
                 }
             }
-            self.maybe_sleep(Duration::from_millis(100)).await;
+            self.maybe_sleep(self.pacing.between_end_tries).await;
         }
         warn!("end_print did not confirm success after {end_tries} tries");
         Err(Error::PrintNotConfirmed)
@@ -441,17 +479,10 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn print_image_file_opts(&mut self, path: &Path, opts: PrintOptions) -> Result<()> {
-        let max_w = self.model.max_width_px();
-        let mut img = image::open(path)?;
-
-        if !opts.rotate.is_identity() {
-            img = match opts.rotate {
-                Rotation::Deg0 => img,
-                Rotation::Deg90 => img.rotate90(),
-                Rotation::Deg180 => img.rotate180(),
-                Rotation::Deg270 => img.rotate270(),
-            };
-        }
+        // Size the canvas against the same limit the raster is checked against,
+        // so a mismatched --model/--task fails before encoding, not after.
+        let max_w = self.max_width_px();
+        let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
 
         let label_px: Option<LabelPx> = opts.label.map(|l| l.to_pixels(max_w));
         if let Some(lp) = label_px {
@@ -476,15 +507,14 @@ impl<T: Transport> PrinterClient<T> {
             img = image_encode::fit_width(img, max_w);
         }
 
-        let (width, height, rows) =
-            image_encode::encode_image_opts(img, max_w, 0, opts.threshold.get(), opts.dither)?;
+        let raster = image_encode::encode(img, max_w, opts.threshold.get(), opts.dither)?;
 
         if let Ok(rfid) = self.rfid_info().await {
             info!(%rfid, "RFID");
         }
         self.preflight_ready().await?;
 
-        self.print_rows(width, height, rows, opts.density).await
+        self.print_raster(raster, opts.density).await
     }
 
     /// Print an in-memory grayscale image (dark pixels print).
@@ -493,11 +523,10 @@ impl<T: Transport> PrinterClient<T> {
         gray: &image::GrayImage,
         density: Density,
     ) -> Result<()> {
-        let max_w = self.model.max_width_px().min(self.task.max_width_px());
         let img = image::DynamicImage::ImageLuma8(gray.clone());
-        let (width, height, rows) =
-            image_encode::encode_image(img, max_w, 0, Threshold::DEFAULT.get())?;
-        self.print_rows(width, height, rows, density).await
+        let raster =
+            image_encode::encode(img, self.max_width_px(), Threshold::DEFAULT.get(), false)?;
+        self.print_raster(raster, density).await
     }
 
     pub async fn rfid_info(&mut self) -> Result<RfidInfo> {
@@ -536,7 +565,7 @@ mod tests {
     use image::{GrayImage, Luma};
 
     fn client_b1() -> PrinterClient<MockTransport> {
-        PrinterClient::new(MockTransport::new(), Model::B1).with_pace(false)
+        PrinterClient::new(MockTransport::new(), Model::B1).with_pacing(Pacing::INSTANT)
     }
 
     #[tokio::test]
@@ -576,7 +605,7 @@ mod tests {
     async fn print_start_error_lack_paper() {
         let mut mock = MockTransport::new();
         mock.fail_cmd(0x01, 0x02);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -592,7 +621,7 @@ mod tests {
     async fn print_start_error_cover_open() {
         let mut mock = MockTransport::new();
         mock.fail_cmd(0x01, 0x01);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -608,7 +637,7 @@ mod tests {
     async fn simple_task_uses_short_print_start() {
         let mut c = PrinterClient::new(MockTransport::new(), Model::B1)
             .with_print_task(PrintTask::Simple)
-            .with_pace(false);
+            .with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         c.print_gray_image(&gray, Density::NORMAL).await.unwrap();
         let st = c.transport().first_tx(0x01).unwrap();
@@ -640,7 +669,7 @@ mod tests {
     async fn print_not_confirmed_when_end_print_muted() {
         let mut mock = MockTransport::new();
         mock.mute_cmd(0xf3); // no PrintEnd reply
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -656,7 +685,7 @@ mod tests {
     async fn density_nack_is_hard_error() {
         let mut mock = MockTransport::new();
         mock.reject_cmd(0x21);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -678,7 +707,7 @@ mod tests {
     async fn start_print_nack_is_hard_error() {
         let mut mock = MockTransport::new();
         mock.reject_cmd(0x01);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -700,7 +729,7 @@ mod tests {
     async fn preflight_blocks_open_cover() {
         let mut mock = MockTransport::new();
         mock.heartbeat_not_ready_cover_open();
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let err = c.preflight_ready().await.unwrap_err();
         assert!(
             matches!(err, Error::Printer(PrinterErrorCode::CoverOpen)),
@@ -712,7 +741,7 @@ mod tests {
     async fn preflight_blocks_no_paper() {
         let mut mock = MockTransport::new();
         mock.heartbeat_not_ready_no_paper();
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let err = c.preflight_ready().await.unwrap_err();
         assert!(
             matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
@@ -728,7 +757,7 @@ mod tests {
 
         let mut mock = MockTransport::new();
         mock.heartbeat_not_ready_no_paper();
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let err = c
             .print_image_file_opts(
                 &path,
@@ -758,7 +787,7 @@ mod tests {
         // PrintNotConfirmed after 50 pointless end_print retries.
         let mut mock = MockTransport::new();
         mock.fail_cmd(0xa3, 0x02);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         let err = c
             .print_gray_image(&gray, Density::NORMAL)
@@ -777,7 +806,7 @@ mod tests {
         // A silent status poll is normal on some firmware — it must not abort.
         let mut mock = MockTransport::new();
         mock.mute_cmd(0xa3);
-        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let gray = GrayImage::from_pixel(8, 1, Luma([0]));
         c.print_gray_image(&gray, Density::NORMAL)
             .await
@@ -789,7 +818,14 @@ mod tests {
         let mut c = client_b1();
         // Construct rows for absurd height via print_rows directly
         let err = c
-            .print_rows(8, u32::from(u16::MAX) + 1, vec![], Density::NORMAL)
+            .print_raster(
+                Raster {
+                    width: 8,
+                    height: u32::from(u16::MAX) + 1,
+                    rows: vec![],
+                },
+                Density::NORMAL,
+            )
             .await
             .unwrap_err();
         match err {

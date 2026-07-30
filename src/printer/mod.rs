@@ -3,5 +3,5 @@
 mod client;
 mod info;
 
-pub use client::{PrintOptions, PrinterClient};
+pub use client::{Pacing, PrintOptions, PrinterClient};
 pub use info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
