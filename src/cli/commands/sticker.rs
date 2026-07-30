@@ -8,7 +8,9 @@ use image::GrayImage;
 use std::path::PathBuf;
 use thermark::config::Config;
 use thermark::geometry::{LabelMm, LabelPx};
-use thermark::label::{self, QrLabelOptions, TextSide};
+use thermark::label::{
+    self, QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_text_label,
+};
 use thermark::printer::PrintOptions;
 use thermark::protocol::Model;
 use thermark::types::{Density, Rotation, Threshold};
@@ -76,6 +78,55 @@ async fn save_and_print(
     .await?;
     println!("{success}");
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn text(
+    cfg: &Config,
+    conn: &ConnArgs,
+    task: &TaskArgs,
+    font: &FontArgs,
+    model: Option<Model>,
+    text: &str,
+    align: TextAlign,
+    label: &str,
+    border: bool,
+    density: Density,
+    save: Option<PathBuf>,
+    no_print: bool,
+) -> Result<()> {
+    let (model, label_mm, lp) = label_geometry(cfg, model, label)?;
+    let gray = make_text_label(&TextLabelOptions {
+        text: text.replace("\\n", "\n"),
+        label: lp,
+        align,
+        border,
+        font_path: font.font.clone(),
+        font_name: font.font_name.clone(),
+        font_size: font.font_size,
+    })?;
+    info!(
+        width_px = lp.width_px,
+        height_px = lp.height_px,
+        ?align,
+        font_size = ?font.font_size,
+        "text label"
+    );
+
+    let png_path = save.unwrap_or_else(|| std::env::temp_dir().join("thermark_text_label.png"));
+    save_and_print(
+        cfg,
+        conn,
+        task,
+        model,
+        &gray,
+        &png_path,
+        label_mm,
+        density,
+        no_print,
+        "OK — text label printed",
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]

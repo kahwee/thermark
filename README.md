@@ -27,6 +27,7 @@ Printing isn’t impossible — the pain is **control**:
 | **Guest Wi‑Fi** — SSID clear, password in QR | Vendor app / typing passwords aloud | `thermark wifi --ssid "…" --password "…"` |
 | **Share a URL** on a package or sample | App templates or phone screenshots | `thermark qr --url "https://…"` |
 | **Label bins / cables / samples** | Clunky GUI templates | `thermark qr` with dense side text |
+| **Plain text, no QR** | Opening a design app | `thermark text --text "FRAGILE"` |
 | **Automate / script** | No real CLI | CLI + Rust library, offline |
 
 **One line:** Make pocket thermal printers useful for everyday **physical QR stickers** (starting with guest Wi‑Fi and links) without vendor apps or the cloud.

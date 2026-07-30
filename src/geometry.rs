@@ -102,6 +102,68 @@ impl LabelMm {
     }
 }
 
+/// An axis-aligned rectangle in label pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Per-edge inset where printing is unreliable.
+///
+/// **This is not symmetric.** Measured on B1 hardware with 50×30 media using
+/// `thermark calibrate`: rings at inset 0 print cleanly along the top and both
+/// sides, but the last couple of millimetres at the *feed* (bottom) edge are
+/// lost — the label clears the printhead before the final rows are laid down.
+/// Padding all four edges equally would give away good label area on three
+/// sides to fix a problem on one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SafeArea {
+    pub top: u32,
+    pub bottom: u32,
+    pub left: u32,
+    pub right: u32,
+}
+
+impl SafeArea {
+    /// Measured default for B1-class hardware.
+    pub const B1: Self = Self {
+        top: 8,
+        bottom: 20,
+        left: 8,
+        right: 8,
+    };
+
+    /// No inset — full bleed. Use after confirming with `thermark calibrate`.
+    pub const NONE: Self = Self {
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+    };
+
+    /// The reliably printable rectangle of `label`, or `None` if the insets
+    /// leave nothing.
+    pub fn content(self, label: LabelPx) -> Option<Rect> {
+        let w = label.width_px.checked_sub(self.left + self.right)?;
+        let h = label.height_px.checked_sub(self.top + self.bottom)?;
+        (w > 0 && h > 0).then_some(Rect {
+            x: self.left,
+            y: self.top,
+            w,
+            h,
+        })
+    }
+}
+
+impl Default for SafeArea {
+    fn default() -> Self {
+        Self::B1
+    }
+}
+
 /// Label size in device pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LabelPx {
@@ -186,6 +248,32 @@ mod tests {
             assert!(p.width_px.is_multiple_of(8) && p.width_px <= 384);
             assert!(p.height_px >= 1);
         }
+    }
+
+    #[test]
+    fn safe_area_is_asymmetric_and_insets_correctly() {
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let safe = SafeArea::B1;
+        // Measured: the feed (bottom) edge loses more than the others.
+        assert!(safe.bottom > safe.top);
+        let area = safe.content(lp).unwrap();
+        assert_eq!(area.x, safe.left);
+        assert_eq!(area.y, safe.top);
+        assert_eq!(area.w, lp.width_px - safe.left - safe.right);
+        assert_eq!(area.h, lp.height_px - safe.top - safe.bottom);
+        // Content never runs past the canvas.
+        assert!(area.x + area.w <= lp.width_px);
+        assert!(area.y + area.h <= lp.height_px);
+    }
+
+    #[test]
+    fn safe_area_reports_none_when_it_would_consume_the_label() {
+        let tiny = LabelPx {
+            width_px: 8,
+            height_px: 8,
+        };
+        assert!(SafeArea::B1.content(tiny).is_none());
+        assert!(SafeArea::NONE.content(tiny).is_some());
     }
 
     #[test]

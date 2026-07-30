@@ -2,7 +2,7 @@
 
 use crate::errors::{Error, Result};
 use crate::font::LabelFont;
-use crate::geometry::LabelPx;
+use crate::geometry::{LabelPx, Rect, SafeArea};
 use image::{GrayImage, Luma};
 use qrcode::QrCode;
 
@@ -39,14 +39,16 @@ pub struct QrLabelOptions {
 /// [`make_qr_label_opts`] both read it so they cannot drift apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QrLayout {
-    pub margin: u32,
+    /// The reliably printable box this layout was fitted into.
+    pub area: Rect,
     pub gap: u32,
     pub text_col_w: u32,
     pub qr_side: u32,
 }
 
-/// White space around the label edge, in px.
-const MARGIN: u32 = 6;
+/// Breathing room inside the printable area, in px. Purely aesthetic — the
+/// physically unprintable edges are handled by [`SafeArea`].
+const MARGIN: u32 = 4;
 /// Space between the QR and the text column, in px.
 const GAP: u32 = 8;
 /// Text column is this fraction of the label width…
@@ -57,21 +59,32 @@ const TEXT_COL_MIN: u32 = 64;
 const QR_SIDE_MIN: u32 = 64;
 
 /// Compute the side-by-side layout for a label, or `None` if one does not fit.
+///
+/// Uses the default [`SafeArea`]; see [`qr_layout_in`] to override it.
 pub fn qr_layout(label: LabelPx) -> Option<QrLayout> {
-    let w = label.width_px;
-    let h = label.height_px;
+    qr_layout_in(label, SafeArea::default())
+}
 
-    let ideal = ((w as f64) * TEXT_COL_FRACTION).round() as u32;
+/// Compute the layout inside an explicit safe area.
+pub fn qr_layout_in(label: LabelPx, safe: SafeArea) -> Option<QrLayout> {
+    let area = safe.content(label)?;
+    let inner = Rect {
+        x: area.x + MARGIN,
+        y: area.y + MARGIN,
+        w: area.w.checked_sub(MARGIN * 2)?,
+        h: area.h.checked_sub(MARGIN * 2)?,
+    };
+
+    let ideal = ((label.width_px as f64) * TEXT_COL_FRACTION).round() as u32;
     // `clamp(TEXT_COL_MIN, w / 2)` panics when `w < 2 * TEXT_COL_MIN` (every
     // D11/D110 label). The upper bound is the real constraint, so apply it last.
-    let text_col_w = ideal.max(TEXT_COL_MIN).min(w / 2);
+    let text_col_w = ideal.max(TEXT_COL_MIN).min(inner.w / 2);
 
-    let qr_budget_w = w.saturating_sub(text_col_w + MARGIN * 2 + GAP);
-    let qr_budget_h = h.saturating_sub(MARGIN * 2);
-    let qr_side = qr_budget_w.min(qr_budget_h);
+    let qr_budget_w = inner.w.saturating_sub(text_col_w + GAP);
+    let qr_side = qr_budget_w.min(inner.h);
 
     (qr_side >= QR_SIDE_MIN).then_some(QrLayout {
-        margin: MARGIN,
+        area: inner,
         gap: GAP,
         text_col_w,
         qr_side,
@@ -93,70 +106,169 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
         ))
     })?;
 
-    let font = if let Some(ref p) = opts.font_path {
-        LabelFont::load(p)?
-    } else if let Some(ref n) = opts.font_name {
-        LabelFont::load_named(n)?
-    } else {
-        LabelFont::load_default()?
-    };
+    let font = load_font(opts.font_path.as_deref(), opts.font_name.as_deref())?;
 
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
 
     let QrLayout {
-        margin,
+        area,
         gap,
         text_col_w,
         qr_side,
     } = layout;
 
     let (qr_x, text_x) = match opts.text_side {
-        TextSide::Right => (margin, margin + qr_side + gap),
-        TextSide::Left => (margin + text_col_w + gap, margin),
+        TextSide::Right => (area.x, area.x + qr_side + gap),
+        TextSide::Left => (area.x + text_col_w + gap, area.x),
     };
-    let qr_y = (h.saturating_sub(qr_side)) / 2;
+    // Centre within the printable band, not the raw canvas — otherwise the QR
+    // drifts into the clipped bottom edge.
+    let qr_y = area.y + (area.h.saturating_sub(qr_side)) / 2;
 
     // --- Square QR ---
     let qr_img = render_qr_square(&opts.url, qr_side)?;
     overlay_gray(&mut img, &qr_img, qr_x, qr_y);
 
     // --- Text (system font, left-to-right, top-to-bottom) ---
-    let max_w = text_col_w.saturating_sub(4);
-    let max_h = h.saturating_sub(margin * 2);
-    // Auto-fit unless caller requested an explicit (e.g. small) size.
-    let px = match opts.font_size {
+    draw_text_block(
+        &mut img,
+        &font,
+        &opts.side_text,
+        Rect {
+            x: text_x,
+            y: area.y,
+            w: text_col_w.saturating_sub(4),
+            h: area.h,
+        },
+        TextAlign::Center,
+        opts.font_size,
+    );
+
+    if opts.border {
+        draw_border(&mut img);
+    }
+
+    Ok(img)
+}
+
+/// Horizontal alignment of a text block within its box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum TextAlign {
+    #[value(alias = "l")]
+    Left,
+    #[default]
+    #[value(alias = "c")]
+    Center,
+    #[value(alias = "r")]
+    Right,
+}
+
+/// Wrap, size, and draw `text` inside `bx`. Shared by every label type.
+///
+/// `font_size` of `None` auto-fits the largest size that keeps words whole.
+pub fn draw_text_block(
+    img: &mut GrayImage,
+    font: &LabelFont,
+    text: &str,
+    bx: Rect,
+    align: TextAlign,
+    font_size: Option<f32>,
+) {
+    let px = match font_size {
         Some(s) => s.clamp(6.0, 96.0),
-        None => font.fit_size(&opts.side_text, max_w, max_h),
+        None => font.fit_size(text, bx.w, bx.h),
     };
-    let lines = font.wrap(&opts.side_text, max_w, px);
+    let lines = font.wrap(text, bx.w, px);
     let line_h = font.text_height(px) as i32 + 2;
     let total_h = lines.len() as i32 * line_h;
-    // Small text: top-align so you can see how much fits; large: center.
-    let mut baseline = if opts.font_size.is_some() && px <= 16.0 {
-        margin as i32 + font.text_height(px) as i32
+
+    // Small explicit text: top-align so you can see how much fits. Otherwise
+    // centre the block vertically.
+    let mut baseline = if font_size.is_some() && px <= 16.0 {
+        bx.y as i32 + font.text_height(px) as i32
     } else {
-        margin as i32 + font.text_height(px) as i32 + (max_h as i32 - total_h).max(0) / 2
+        bx.y as i32 + font.text_height(px) as i32 + (bx.h as i32 - total_h).max(0) / 2
     };
 
     for line in &lines {
         let tw = font.text_width(line, px);
-        let tx = text_x as f32 + (max_w.saturating_sub(tw) as f32 / 2.0).max(0.0);
-        font.draw_text(&mut img, tx, baseline as f32, line, px);
+        let free = bx.w.saturating_sub(tw) as f32;
+        let tx = bx.x as f32
+            + match align {
+                TextAlign::Left => 0.0,
+                TextAlign::Center => free / 2.0,
+                TextAlign::Right => free,
+            };
+        font.draw_text(img, tx, baseline as f32, line, px);
         baseline += line_h;
     }
+}
 
-    if opts.border {
-        for x in 0..w {
-            img.put_pixel(x, 0, Luma([0]));
-            img.put_pixel(x, h - 1, Luma([0]));
-        }
-        for y in 0..h {
-            img.put_pixel(0, y, Luma([0]));
-            img.put_pixel(w - 1, y, Luma([0]));
-        }
+fn draw_border(img: &mut GrayImage) {
+    let (w, h) = img.dimensions();
+    for x in 0..w {
+        img.put_pixel(x, 0, Luma([0]));
+        img.put_pixel(x, h - 1, Luma([0]));
+    }
+    for y in 0..h {
+        img.put_pixel(0, y, Luma([0]));
+        img.put_pixel(w - 1, y, Luma([0]));
+    }
+}
+
+/// Options for a text-only sticker.
+#[derive(Debug, Clone)]
+pub struct TextLabelOptions {
+    pub text: String,
+    pub label: LabelPx,
+    pub align: TextAlign,
+    pub border: bool,
+    pub font_path: Option<std::path::PathBuf>,
+    pub font_name: Option<String>,
+    pub font_size: Option<f32>,
+}
+
+/// Render a text-only sticker: no QR, text auto-fitted to fill the label.
+pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
+    if opts.text.trim().is_empty() {
+        return Err(Error::qr("text must not be empty"));
+    }
+    let (w, h) = (opts.label.width_px, opts.label.height_px);
+    if w < 2 * MARGIN + 8 || h < 2 * MARGIN + 8 {
+        return Err(Error::qr(format!(
+            "label {w}x{h}px is too small to hold text with a {MARGIN}px margin"
+        )));
     }
 
+    let font = load_font(opts.font_path.as_deref(), opts.font_name.as_deref())?;
+    let mut img = GrayImage::from_pixel(w, h, Luma([255]));
+    draw_text_block(
+        &mut img,
+        &font,
+        &opts.text,
+        Rect {
+            x: MARGIN,
+            y: MARGIN,
+            w: w.saturating_sub(MARGIN * 2),
+            h: h.saturating_sub(MARGIN * 2),
+        },
+        opts.align,
+        opts.font_size,
+    );
+    if opts.border {
+        draw_border(&mut img);
+    }
     Ok(img)
+}
+
+/// Load an explicit path, then a named font, then the system default.
+fn load_font(path: Option<&std::path::Path>, name: Option<&str>) -> Result<LabelFont> {
+    match (path, name) {
+        (Some(p), _) => LabelFont::load(p),
+        (None, Some(n)) => LabelFont::load_named(n),
+        (None, None) => LabelFont::load_default(),
+    }
 }
 
 /// Convenience wrapper.
@@ -284,7 +396,8 @@ mod tests {
         let layout = qr_layout(lp).expect("50x30 fits");
         assert_eq!(max_qr_side(lp), layout.qr_side);
         assert!(layout.text_col_w <= lp.width_px / 2);
-        assert!(layout.qr_side + layout.text_col_w + layout.margin * 2 + layout.gap <= lp.width_px);
+        assert!(layout.qr_side + layout.text_col_w + layout.gap <= layout.area.w);
+        assert!(layout.area.y + layout.area.h <= lp.height_px);
     }
 
     #[test]
@@ -297,10 +410,64 @@ mod tests {
                 };
                 if let Some(l) = qr_layout(lp) {
                     assert!(l.qr_side >= QR_SIDE_MIN);
-                    assert!(l.qr_side <= h.saturating_sub(l.margin * 2));
+                    assert!(l.qr_side <= l.area.h);
                 }
             }
         }
+    }
+
+    #[test]
+    fn qr_stays_clear_of_the_clipped_bottom_edge() {
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let layout = qr_layout(lp).unwrap();
+        let safe = SafeArea::default();
+        // The QR must end above the band the printer cannot reach.
+        let qr_bottom = layout.area.y + (layout.area.h + layout.qr_side) / 2;
+        assert!(
+            qr_bottom <= lp.height_px - safe.bottom,
+            "QR reaches {qr_bottom}, clipped band starts at {}",
+            lp.height_px - safe.bottom
+        );
+    }
+
+    #[test]
+    fn text_label_renders_and_stays_in_the_safe_area() {
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let Ok(img) = make_text_label(&TextLabelOptions {
+            text: "HELLO\nWORLD".into(),
+            label: lp,
+            align: TextAlign::Center,
+            border: false,
+            font_path: None,
+            font_name: None,
+            font_size: None,
+        }) else {
+            return; // no system font on this host
+        };
+        assert_eq!(img.dimensions(), (lp.width_px, lp.height_px));
+        let safe = SafeArea::default();
+        for y in (lp.height_px - safe.bottom)..lp.height_px {
+            for x in 0..lp.width_px {
+                assert_eq!(img.get_pixel(x, y)[0], 255, "ink at ({x},{y}) is clipped");
+            }
+        }
+    }
+
+    #[test]
+    fn text_label_rejects_empty_text() {
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        assert!(
+            make_text_label(&TextLabelOptions {
+                text: "   ".into(),
+                label: lp,
+                align: TextAlign::Center,
+                border: false,
+                font_path: None,
+                font_name: None,
+                font_size: None,
+            })
+            .is_err()
+        );
     }
 
     #[test]

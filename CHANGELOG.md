@@ -10,6 +10,54 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-30
+
+Driven by printing on real B1 hardware and reading the results.
+
+### Added
+
+- **`thermark text`** — a text-only sticker. Previously the only way to print
+  words was `qr`, which always draws a QR beside them, so "just print this
+  text" was not expressible. Supports `--align left|center|right` and the same
+  font, label, and density flags as the other sticker commands.
+- **`geometry::SafeArea`** — per-edge printable insets, and deliberately *not*
+  symmetric. Calibration on B1 with 50×30 media shows rings at inset 0 printing
+  cleanly along the top and both sides, while the last ~2 mm at the feed
+  (bottom) edge is lost: the label clears the printhead before the final rows
+  are laid down. Padding all four edges equally would give away good label area
+  on three sides to fix a problem on one. QR, text, and Wi-Fi labels now lay
+  out inside this area.
+- **`examples/bulldozer.rs`** — a line-art sticker built from signed-distance
+  primitives. Outlines rather than fills: large solid areas bleed on thermal
+  paper, drain the battery, and read as a blob.
+
+### Changed
+
+- **`thermark calibrate` is now a measuring instrument.** It draws six
+  concentric rings 0.5 mm apart plus a thick box showing the *configured* safe
+  area, and prints a legend explaining how to read them. One print answers "is
+  my safe area actually inside the printable region?" — the old single border
+  could only say that something clipped, never how much.
+- `image_encode::calibration_pattern_with` takes an optional `SafeArea` to
+  outline; `calibration_pattern` uses the default.
+- `QrLayout` exposes the `Rect` it was fitted into instead of a bare `margin`,
+  and centres the QR within the printable band rather than the raw canvas.
+- `label::draw_text_block`, `TextAlign`, and `geometry::Rect` are public, shared
+  by the QR, text, and Wi-Fi label paths.
+
+### Fixed
+
+- **Auto-fitted text split words mid-way.** `fit_size` chose purely on whether
+  the wrapped lines fit — but a hard-broken line *does* fit, so `THERMARK`
+  rendered as `THER` / `MARK` at a large size instead of staying whole at a
+  smaller one. It now prefers the largest size at which every word fits
+  intact, falling back to splitting only when even `MIN_FONT_PX` cannot hold
+  the longest word. Confirmed on a printed label.
+- **A full-height QR clipped at the bottom edge**, losing roughly 1% of the
+  code. Layouts now respect the measured `SafeArea`.
+- `Model`, `PrintTask`, `SupportStatus`, and `ConnPref` `Display` impls use
+  `f.pad`, so `{:<10}` actually aligns them.
+
 ## [0.3.0] - 2026-07-30
 
 Reliability of the BLE link. No API breaks, but the on-wire behaviour changes:
@@ -144,7 +192,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kahwee/thermark/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kahwee/thermark/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kahwee/thermark/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kahwee/thermark/releases/tag/v0.1.0

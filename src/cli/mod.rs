@@ -62,6 +62,26 @@ pub async fn run(cli: Cli) -> Result<i32> {
             density,
         } => commands::print::calibrate(&cfg, &conn, &task, model, &label, density).await?,
 
+        Commands::Text {
+            conn,
+            task,
+            font,
+            model,
+            text,
+            align,
+            label,
+            border,
+            density,
+            save,
+            no_print,
+        } => {
+            commands::sticker::text(
+                &cfg, &conn, &task, &font, model, &text, align, &label, border, density, save,
+                no_print,
+            )
+            .await?
+        }
+
         Commands::Qr {
             conn,
             task,

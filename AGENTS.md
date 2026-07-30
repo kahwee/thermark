@@ -43,8 +43,11 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
   --label 50x30 --no-fill --margin 0 -d 4
 ./target/release/thermark qr --url "https://example.com/o/1042" \
   --text $'ORDER #1042\nShip by Fri\nPriority' --font-name helvetica --label 50x30
-./target/release/thermark calibrate --label 50x30
+./target/release/thermark text --text $'FRAGILE\nthis way up' --label 50x30
+./target/release/thermark calibrate --label 50x30   # rings + safe-area box
 ```
+
+Artwork demo: `cargo run --example bulldozer -- local/prints/bulldozer.png`
 
 Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
@@ -102,6 +105,9 @@ Wiki: the protocol notes in src/protocol.rs
 ## Geometry & fonts
 
 - **8 px/mm**; max width **384**
+- Printable area is **not symmetric**: top/left/right reach the edge, the
+  bottom (feed) edge loses ~2 mm. See `geometry::SafeArea`; re-measure with
+  `thermark calibrate`
 - Always use `--label` for full-size media
 - Prefer system fonts (`--font-name helvetica|times|arial`) over bitmap fallback
 - Default no decorative border; QR is square beside text column

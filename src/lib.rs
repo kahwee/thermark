@@ -37,6 +37,7 @@ pub use config::{Config, ConnPref};
 pub use errors::{Error, PrinterErrorCode, Result};
 pub use geometry::{DEFAULT_B1_LABEL, HEAD_NARROW_PX, HEAD_WIDE_PX, LabelMm, LabelPx, PX_PER_MM};
 pub use image_encode::Raster;
+pub use label::{TextAlign, TextLabelOptions, TextSide, make_qr_label_opts, make_text_label};
 pub use mock::MockTransport;
 pub use packet::Packet;
 pub use print_task::{PrintTask, SupportStatus, effective_max_width_px, hardware_matrix};

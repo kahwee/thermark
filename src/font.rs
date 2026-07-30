@@ -304,15 +304,23 @@ impl LabelFont {
 
     /// Pick the largest px height that fits all lines in the box.
     ///
-    /// Falls back to [`MIN_FONT_PX`] when even the smallest size overflows —
-    /// the text will clip, but returning anything larger would clip *more*.
+    /// Prefers sizes at which no word has to be split mid-way: a hard break
+    /// technically "fits", so choosing purely on fit renders `THERMARK` as
+    /// `THER` / `MARK` at a large size instead of keeping it whole at a
+    /// smaller one. Only when even [`MIN_FONT_PX`] cannot hold the longest
+    /// word does splitting become acceptable.
     pub fn fit_size(&self, text: &str, max_w: u32, max_h: u32) -> f32 {
         let lo = MIN_FONT_PX as u32;
         let hi = MAX_FONT_PX as u32;
-        for size in (lo..=hi).rev() {
-            let ph = size as f32;
-            if self.fits(text, max_w, max_h, ph) {
-                return ph;
+        for require_whole_words in [true, false] {
+            for size in (lo..=hi).rev() {
+                let ph = size as f32;
+                if !self.fits(text, max_w, max_h, ph) {
+                    continue;
+                }
+                if !require_whole_words || self.longest_word_width(text, ph) <= max_w {
+                    return ph;
+                }
             }
         }
         MIN_FONT_PX
@@ -328,6 +336,17 @@ impl LabelFont {
             .max()
             .unwrap_or(0);
         need <= max_h && widest <= max_w
+    }
+
+    /// Width of the widest whitespace-delimited word at this size.
+    ///
+    /// A word wider than the column is the only thing that forces
+    /// [`Self::wrap`] to break mid-word.
+    pub fn longest_word_width(&self, text: &str, px_height: f32) -> u32 {
+        text.split_whitespace()
+            .map(|w| self.text_width(w, px_height))
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -370,6 +389,35 @@ mod tests {
                 "{px} was not the largest fitting size"
             );
         }
+    }
+
+    #[test]
+    fn fit_size_keeps_words_whole_instead_of_splitting_them() {
+        let Ok(f) = LabelFont::load_default() else {
+            return;
+        };
+        // The real case: a 127px text column beside a QR. Picking purely on
+        // "does it fit" rendered THERMARK as THER / MARK, because the
+        // hard-broken lines do fit. A smaller size keeps the word intact.
+        let (w, h) = (127, 228);
+        let text = "THERMARK\nv0.3.0\nQR test";
+        let px = f.fit_size(text, w, h);
+        assert!(
+            f.longest_word_width(text, px) <= w,
+            "{px}px still splits a word"
+        );
+        assert!(f.wrap(text, w, px).iter().any(|l| l == "THERMARK"));
+    }
+
+    #[test]
+    fn fit_size_still_splits_when_a_word_can_never_fit() {
+        let Ok(f) = LabelFont::load_default() else {
+            return;
+        };
+        // A single token far wider than the column: splitting is the only
+        // option, so the whole-word preference must not deadlock.
+        let px = f.fit_size("SUPERCALIFRAGILISTIC", 40, 200);
+        assert!(px >= MIN_FONT_PX);
     }
 
     #[test]

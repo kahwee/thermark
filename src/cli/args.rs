@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use thermark::config::{Config, ConnPref};
-use thermark::label::TextSide;
+use thermark::label::{TextAlign, TextSide};
 use thermark::print_task::PrintTask;
 use thermark::protocol::Model;
 use thermark::transport::BleMatchMode;
@@ -188,6 +188,39 @@ pub enum Commands {
         /// Density 1..=5 (default 4 = darker for full-bleed calibration)
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
         density: Density,
+    },
+    /// Print a text-only sticker (no QR) — auto-fitted to fill the label
+    Text {
+        #[command(flatten)]
+        conn: ConnArgs,
+        #[command(flatten)]
+        task: TaskArgs,
+        #[command(flatten)]
+        font: FontArgs,
+        /// Printer model (default: config or b1)
+        #[arg(short, long, value_enum)]
+        model: Option<Model>,
+        /// Text to print (use \\n for new lines)
+        #[arg(long)]
+        text: String,
+        /// Horizontal alignment: left, center (default), right
+        #[arg(long, value_enum, default_value_t = TextAlign::Center)]
+        align: TextAlign,
+        /// Label size mm, e.g. 50x30
+        #[arg(long, default_value = "50x30")]
+        label: String,
+        /// Draw a 1px outer border
+        #[arg(long, default_value_t = false)]
+        border: bool,
+        /// Density 1..=5 (default 4 = darker for crisp text)
+        #[arg(short, long, default_value = "4", value_parser = parse_density)]
+        density: Density,
+        /// Also save PNG to this path
+        #[arg(long)]
+        save: Option<PathBuf>,
+        /// Only generate PNG, do not print
+        #[arg(long, default_value_t = false)]
+        no_print: bool,
     },
     /// Design + print a square QR with side text (fills the label)
     Qr {

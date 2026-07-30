@@ -60,6 +60,34 @@ pub async fn print(
     Ok(())
 }
 
+/// Explain how to read the pattern, so a re-run needs no other reference.
+fn print_calibration_legend(lp: thermark::geometry::LabelPx) {
+    use thermark::geometry::SafeArea;
+    use thermark::image_encode::{CALIBRATION_RING_STEP_PX, CALIBRATION_RINGS};
+
+    let safe = SafeArea::default();
+    let step_mm = CALIBRATION_RING_STEP_PX as f64 / thermark::geometry::PX_PER_MM;
+    println!();
+    println!("How to read it:");
+    println!(
+        "  THICK box  = the configured safe area (top {} / bottom {} / left {} / right {} px).",
+        safe.top, safe.bottom, safe.left, safe.right
+    );
+    println!("               If it printed complete on all 4 sides, you are good.");
+    println!(
+        "  THIN rings = {CALIBRATION_RINGS} rings, {step_mm} mm apart, outermost at the very edge."
+    );
+    println!("               Count how many are complete on each edge:");
+    println!("               ring N complete  ->  that edge needs {step_mm} mm x N of margin.");
+    println!("  Diagonals  = skew check; the X should meet exactly at the centre cross.");
+    println!();
+    println!(
+        "Canvas {}x{} px. Re-run any time:",
+        lp.width_px, lp.height_px
+    );
+    println!("  thermark calibrate --label 50x30");
+}
+
 pub async fn calibrate(
     cfg: &Config,
     conn: &ConnArgs,
@@ -94,5 +122,6 @@ pub async fn calibrate(
     };
     print_file(cfg, conn, task, model, &tmp, opts).await?;
     println!("OK — calibration printed ({label})");
+    print_calibration_legend(lp);
     Ok(())
 }
