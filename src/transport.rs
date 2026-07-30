@@ -25,7 +25,7 @@ pub trait Transport: Send {
         packet: &Packet,
     ) -> impl std::future::Future<Output = Result<()>> + Send {
         async {
-            let bytes = packet.encode();
+            let bytes = packet.encode()?;
             debug!(bytes = %hex::encode(&bytes), "TX");
             self.send_raw(&bytes).await
         }

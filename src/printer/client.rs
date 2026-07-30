@@ -315,14 +315,19 @@ impl<T: Transport> PrinterClient<T> {
         }
 
         if self.task.uses_print_clear() {
-            let _ = self
+            // Optional step: a missing reply is fine, but a reported fault is
+            // not — only `Error::Printer` aborts.
+            if let Err(e @ Error::Printer(_)) = self
                 .transceive(
                     protocol::pkt(Cmd::PrintClear, vec![0x01]),
                     0x30,
                     4,
                     Duration::from_millis(100),
                 )
-                .await;
+                .await
+            {
+                return Err(e);
+            }
         }
 
         // Soft NACKs (Ok(false)) are hard failures — do not stream rows after a reject.
@@ -364,14 +369,20 @@ impl<T: Transport> PrinterClient<T> {
             1
         };
         for _ in 0..polls {
-            let _ = self
+            // A missing status reply is normal on some firmware, but if the
+            // printer named its fault (cover, paper, …), surface that instead
+            // of grinding through end_print retries into PrintNotConfirmed.
+            if let Err(e @ Error::Printer(_)) = self
                 .transceive(
                     protocol::print_status(),
                     0xb3,
                     1,
                     Duration::from_millis(if self.pace { 100 } else { 1 }),
                 )
-                .await;
+                .await
+            {
+                return Err(e);
+            }
             self.maybe_sleep(Duration::from_millis(50)).await;
         }
 
@@ -738,6 +749,39 @@ mod tests {
             !cmds.contains(&0x01),
             "print start should not run: {cmds:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn mid_job_printer_error_surfaces_instead_of_print_not_confirmed() {
+        // The printer reports "out of paper" via 0xDB on the status poll. That
+        // result used to be dropped with `let _ =`, so the user got the useless
+        // PrintNotConfirmed after 50 pointless end_print retries.
+        let mut mock = MockTransport::new();
+        mock.fail_cmd(0xa3, 0x02);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            "expected the printer's own reason, got {err:?}"
+        );
+        // And it stopped there rather than pressing on to PrintEnd.
+        assert!(!c.transport().tx_cmds().contains(&0xf3));
+    }
+
+    #[tokio::test]
+    async fn missing_status_reply_still_completes() {
+        // A silent status poll is normal on some firmware — it must not abort.
+        let mut mock = MockTransport::new();
+        mock.mute_cmd(0xa3);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pace(false);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        c.print_gray_image(&gray, Density::NORMAL)
+            .await
+            .expect("print should finish without a status reply");
     }
 
     #[tokio::test]

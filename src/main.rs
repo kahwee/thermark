@@ -888,8 +888,9 @@ async fn run() -> Result<()> {
             } else {
                 hex::decode(data.trim_start_matches("0x")).context("data must be hex")?
             };
-            let pkt = thermark::Packet::new(cmd, data);
-            println!("{}", hex::encode(pkt.encode()));
+            let pkt = thermark::Packet::try_new(cmd, data)
+                .context("data too long for one packet")?;
+            println!("{}", hex::encode(pkt.encode()?));
         }
     }
 

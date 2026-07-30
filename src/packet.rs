@@ -11,6 +11,9 @@ use thiserror::Error;
 pub const HEAD: [u8; 2] = [0x55, 0x55];
 pub const TAIL: [u8; 2] = [0xAA, 0xAA];
 
+/// Largest payload the single-byte `LEN` field can describe.
+pub const MAX_DATA_LEN: usize = u8::MAX as usize;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet {
     pub cmd: u8,
@@ -29,9 +32,17 @@ pub enum PacketError {
     BadLength { claimed: usize },
     #[error("checksum mismatch: got {got:#04x}, expected {expected:#04x}")]
     BadChecksum { got: u8, expected: u8 },
+    #[error("data is {len} bytes; the LEN field allows at most {MAX_DATA_LEN}")]
+    DataTooLong { len: usize },
 }
 
 impl Packet {
+    /// Build a packet without checking the payload length.
+    ///
+    /// Kept infallible for the fixed-size [`crate::protocol`] helpers, whose
+    /// payloads are statically well under [`MAX_DATA_LEN`]. Any over-long
+    /// payload is rejected later by [`Packet::encode`] rather than silently
+    /// truncated — use [`Packet::try_new`] to reject it at the input boundary.
     pub fn new(cmd: u8, data: impl Into<Vec<u8>>) -> Self {
         Self {
             cmd,
@@ -39,8 +50,23 @@ impl Packet {
         }
     }
 
-    pub fn checksum(cmd: u8, data: &[u8]) -> u8 {
-        let mut c = cmd ^ (data.len() as u8);
+    /// Build a packet, rejecting payloads the `LEN` field cannot describe.
+    ///
+    /// Prefer this for data of unbounded or caller-supplied length.
+    pub fn try_new(cmd: u8, data: impl Into<Vec<u8>>) -> Result<Self, PacketError> {
+        let data = data.into();
+        if data.len() > MAX_DATA_LEN {
+            return Err(PacketError::DataTooLong { len: data.len() });
+        }
+        Ok(Self { cmd, data })
+    }
+
+    /// XOR of `CMD`, `LEN`, and every data byte.
+    ///
+    /// Takes `len` explicitly so the checksum can never be computed over a
+    /// length that disagrees with the one written to the wire.
+    pub fn checksum(cmd: u8, len: u8, data: &[u8]) -> u8 {
+        let mut c = cmd ^ len;
         for b in data {
             c ^= *b;
         }
@@ -48,9 +74,14 @@ impl Packet {
     }
 
     /// Encode to on-wire bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        let len = self.data.len() as u8;
-        let sum = Self::checksum(self.cmd, &self.data);
+    ///
+    /// Fails with [`PacketError::DataTooLong`] rather than truncating the
+    /// length field and emitting an undecodable frame.
+    pub fn encode(&self) -> Result<Vec<u8>, PacketError> {
+        let len = u8::try_from(self.data.len()).map_err(|_| PacketError::DataTooLong {
+            len: self.data.len(),
+        })?;
+        let sum = Self::checksum(self.cmd, len, &self.data);
         let mut out = Vec::with_capacity(7 + self.data.len());
         out.extend_from_slice(&HEAD);
         out.push(self.cmd);
@@ -58,7 +89,7 @@ impl Packet {
         out.extend_from_slice(&self.data);
         out.push(sum);
         out.extend_from_slice(&TAIL);
-        out
+        Ok(out)
     }
 
     /// Decode a single complete packet from `buf`.
@@ -80,7 +111,8 @@ impl Packet {
         }
         let data = buf[4..4 + len].to_vec();
         let got = buf[4 + len];
-        let expected = Self::checksum(cmd, &data);
+        // `len` came from a single byte, so the cast back is lossless.
+        let expected = Self::checksum(cmd, len as u8, &data);
         if got != expected {
             return Err(PacketError::BadChecksum { got, expected });
         }
@@ -132,21 +164,21 @@ mod tests {
     fn encode_simple_rfid() {
         // 55 55 1a 01 01 1a aa aa
         let p = Packet::new(0x1a, vec![0x01]);
-        assert_eq!(p.encode(), hex::decode("55551a01011aaaaa").unwrap());
+        assert_eq!(p.encode().unwrap(), hex::decode("55551a01011aaaaa").unwrap());
     }
 
     #[test]
     fn roundtrip() {
         let p = Packet::new(0x40, vec![0x0b]);
-        let enc = p.encode();
+        let enc = p.encode().unwrap();
         let d = Packet::decode(&enc).unwrap();
         assert_eq!(d, p);
     }
 
     #[test]
     fn drain_fragmented() {
-        let a = Packet::new(0x1a, vec![0x01]).encode();
-        let b = Packet::new(0x40, vec![0x0b]).encode();
+        let a = Packet::new(0x1a, vec![0x01]).encode().unwrap();
+        let b = Packet::new(0x40, vec![0x0b]).encode().unwrap();
         let mut buf = Vec::new();
         buf.extend_from_slice(&a[..4]);
         assert!(Packet::drain_buffer(&mut buf).is_empty());
@@ -164,7 +196,7 @@ mod tests {
         // B1 PrintStart payload from community wiki
         let data = [0x00u8, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
         let p = Packet::new(0x01, data);
-        let enc = p.encode();
+        let enc = p.encode().unwrap();
         assert_eq!(&enc[..2], &[0x55, 0x55]);
         assert_eq!(enc[2], 0x01);
         assert_eq!(enc[3], 7);
@@ -180,9 +212,32 @@ mod tests {
         data.extend_from_slice(&384u16.to_be_bytes());
         data.extend_from_slice(&1u16.to_be_bytes());
         let p = Packet::new(0x13, data);
-        let enc = p.encode();
+        let enc = p.encode().unwrap();
         assert_eq!(enc[3], 6);
         assert_eq!(Packet::decode(&enc).unwrap().data.len(), 6);
+    }
+
+    #[test]
+    fn oversized_payload_is_rejected_not_truncated() {
+        // 300 bytes used to encode with LEN=44 and a checksum over the wrong
+        // length, producing a frame no receiver could decode.
+        let p = Packet::new(0x85, vec![0xAB; 300]);
+        assert!(matches!(
+            p.encode(),
+            Err(PacketError::DataTooLong { len: 300 })
+        ));
+        assert!(matches!(
+            Packet::try_new(0x85, vec![0xAB; 300]),
+            Err(PacketError::DataTooLong { len: 300 })
+        ));
+    }
+
+    #[test]
+    fn max_length_payload_still_roundtrips() {
+        let p = Packet::try_new(0x85, vec![0xAB; MAX_DATA_LEN]).expect("255 bytes fits");
+        let enc = p.encode().unwrap();
+        assert_eq!(enc[3] as usize, MAX_DATA_LEN);
+        assert_eq!(Packet::decode(&enc).unwrap(), p);
     }
 
     #[test]
@@ -196,7 +251,7 @@ mod tests {
 
     #[test]
     fn drain_recovers_valid_after_noise() {
-        let good = Packet::new(0x1a, vec![0x01]).encode();
+        let good = Packet::new(0x1a, vec![0x01]).encode().unwrap();
         let mut buf = vec![0xDE, 0xAD, 0xBE, 0xEF];
         buf.extend_from_slice(&good);
         let pkts = Packet::drain_buffer(&mut buf);
@@ -207,7 +262,7 @@ mod tests {
 
     #[test]
     fn drain_bad_checksum_skips_and_continues() {
-        let good = Packet::new(0x40, vec![0x0b]).encode();
+        let good = Packet::new(0x40, vec![0x0b]).encode().unwrap();
         let mut bad = good.clone();
         // Flip checksum byte (second-to-last before tail)
         let cs = bad.len() - 3;
@@ -227,7 +282,7 @@ mod tests {
             let mut buf = noise;
             let pkts = Packet::drain_buffer(&mut buf);
             for p in pkts {
-                let enc = p.encode();
+                let enc = p.encode().unwrap();
                 let dec = Packet::decode(&enc).expect("roundtrip after drain");
                 prop_assert_eq!(dec, p);
             }
@@ -252,7 +307,7 @@ mod tests {
             suffix in noise,
         )| {
             let p = Packet::new(cmd, data);
-            let enc = p.encode();
+            let enc = p.encode().unwrap();
             let mut buf = prefix;
             buf.extend_from_slice(&enc);
             buf.extend_from_slice(&suffix);

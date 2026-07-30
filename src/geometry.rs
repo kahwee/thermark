@@ -6,9 +6,19 @@
 /// Pixels per millimeter (community measurement).
 pub const PX_PER_MM: f64 = 8.0;
 
-/// Convert millimetres to pixels (rounded).
+/// Largest label dimension accepted, in mm. Nothing a pocket thermal prints
+/// comes close; the bound exists so pixel math cannot overflow `u32`.
+pub const MAX_DIMENSION_MM: f64 = 1000.0;
+
+/// Convert millimetres to pixels (rounded, clamped to a sane range).
+///
+/// Non-finite input yields 1 px; validate with [`LabelMm::parse`] to get an
+/// error instead.
 pub fn mm_to_px(mm: f64) -> u32 {
-    (mm * PX_PER_MM).round().max(1.0) as u32
+    if !mm.is_finite() {
+        return 1;
+    }
+    (mm * PX_PER_MM).round().clamp(1.0, MAX_DIMENSION_MM * PX_PER_MM) as u32
 }
 
 /// Convert pixels to millimetres.
@@ -50,8 +60,19 @@ impl LabelMm {
             .ok_or_else(|| {
                 Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30"))
             })?;
-        if w <= 0.0 || h <= 0.0 {
-            return Err(Error::invalid_label("label dimensions must be positive"));
+        // `nan` and `inf` both parse as f64, and NaN fails every comparison —
+        // so `value <= 0.0` alone would let them through into the pixel math.
+        for (value, axis) in [(w, "width"), (h, "height")] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(Error::invalid_label(format!(
+                    "label {axis} must be a positive number of mm, got '{value}'"
+                )));
+            }
+            if value > MAX_DIMENSION_MM {
+                return Err(Error::invalid_label(format!(
+                    "label {axis} {value} mm exceeds the {MAX_DIMENSION_MM} mm limit"
+                )));
+            }
         }
         Ok(Self::new(w, h))
     }
@@ -128,6 +149,34 @@ mod tests {
         assert!(LabelMm::parse("abc").is_err());
         assert!(LabelMm::parse("0x30").is_err());
         assert!(LabelMm::parse("-10x20").is_err());
+    }
+
+    #[test]
+    fn reject_non_finite_dimensions() {
+        // Both parse as f64. `inf` overflowed the multiply in `to_pixels`;
+        // `nan` slipped past `<= 0.0` and produced an 8px label.
+        for s in ["infx30", "50xinf", "nanx30", "50xnan", "-infx30"] {
+            assert!(LabelMm::parse(s).is_err(), "should reject '{s}'");
+        }
+    }
+
+    #[test]
+    fn reject_absurdly_large_dimensions() {
+        assert!(LabelMm::parse("1e9x30").is_err());
+        assert!(LabelMm::parse("50x1e9").is_err());
+        // Just inside the limit still works.
+        assert!(LabelMm::parse("999x999").is_ok());
+    }
+
+    #[test]
+    fn to_pixels_cannot_overflow_for_any_input() {
+        // `LabelMm::new` is public and unvalidated, so the pixel math must be
+        // total on its own.
+        for mm in [f64::INFINITY, f64::NAN, f64::MAX, 1e300, -1.0] {
+            let p = LabelMm::new(mm, mm).to_pixels(384);
+            assert!(p.width_px.is_multiple_of(8) && p.width_px <= 384);
+            assert!(p.height_px >= 1);
+        }
     }
 
     #[test]

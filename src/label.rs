@@ -33,6 +33,51 @@ pub struct QrLabelOptions {
     pub font_size: Option<f32>,
 }
 
+/// Placement of the QR and text column on a label canvas.
+///
+/// Single source of truth for the side-by-side geometry — [`max_qr_side`] and
+/// [`make_qr_label_opts`] both read it so they cannot drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QrLayout {
+    pub margin: u32,
+    pub gap: u32,
+    pub text_col_w: u32,
+    pub qr_side: u32,
+}
+
+/// White space around the label edge, in px.
+const MARGIN: u32 = 6;
+/// Space between the QR and the text column, in px.
+const GAP: u32 = 8;
+/// Text column is this fraction of the label width…
+const TEXT_COL_FRACTION: f64 = 0.34;
+/// …but at least this many px, unless that would take over half the label.
+const TEXT_COL_MIN: u32 = 64;
+/// Below this, a QR holds too few modules to survive thermal printing.
+const QR_SIDE_MIN: u32 = 64;
+
+/// Compute the side-by-side layout for a label, or `None` if one does not fit.
+pub fn qr_layout(label: LabelPx) -> Option<QrLayout> {
+    let w = label.width_px;
+    let h = label.height_px;
+
+    let ideal = ((w as f64) * TEXT_COL_FRACTION).round() as u32;
+    // `clamp(TEXT_COL_MIN, w / 2)` panics when `w < 2 * TEXT_COL_MIN` (every
+    // D11/D110 label). The upper bound is the real constraint, so apply it last.
+    let text_col_w = ideal.max(TEXT_COL_MIN).min(w / 2);
+
+    let qr_budget_w = w.saturating_sub(text_col_w + MARGIN * 2 + GAP);
+    let qr_budget_h = h.saturating_sub(MARGIN * 2);
+    let qr_side = qr_budget_w.min(qr_budget_h);
+
+    (qr_side >= QR_SIDE_MIN).then_some(QrLayout {
+        margin: MARGIN,
+        gap: GAP,
+        text_col_w,
+        qr_side,
+    })
+}
+
 /// Build a label: **square** QR + readable side text using a system TTF font.
 pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
     if opts.url.is_empty() {
@@ -40,9 +85,13 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
     }
     let w = opts.label.width_px;
     let h = opts.label.height_px;
-    if w < 32 || h < 32 {
-        return Err(Error::qr(format!("label too small: {w}x{h}")));
-    }
+    let layout = qr_layout(opts.label).ok_or_else(|| {
+        Error::qr(format!(
+            "label {w}x{h}px is too small for a QR beside text \
+             (need at least {QR_SIDE_MIN}px of QR after margins). \
+             Use a wider label, or a model with a wider printhead."
+        ))
+    })?;
 
     let font = if let Some(ref p) = opts.font_path {
         LabelFont::load(p)?
@@ -54,15 +103,12 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
 
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
 
-    let margin = 6u32;
-    let gap = 8u32;
-    // Text column ~ 34% of width
-    let text_col_w = ((w as f64) * 0.34).round() as u32;
-    let text_col_w = text_col_w.clamp(64, w / 2);
-
-    let qr_budget_w = w.saturating_sub(text_col_w + margin * 2 + gap);
-    let qr_budget_h = h.saturating_sub(margin * 2);
-    let qr_side = qr_budget_w.min(qr_budget_h).max(16);
+    let QrLayout {
+        margin,
+        gap,
+        text_col_w,
+        qr_side,
+    } = layout;
 
     let (qr_x, text_x) = match opts.text_side {
         TextSide::Right => (margin, margin + qr_side + gap),
@@ -177,14 +223,9 @@ fn overlay_gray(dst: &mut GrayImage, src: &GrayImage, x0: u32, y0: u32) {
     }
 }
 
+/// QR edge length [`make_qr_label_opts`] will use, or 0 when none fits.
 pub fn max_qr_side(label: LabelPx) -> u32 {
-    let margin = 6u32;
-    let gap = 8u32;
-    let text_col_w =
-        (((label.width_px as f64) * 0.34).round() as u32).clamp(64, label.width_px / 2);
-    let qr_budget_w = label.width_px.saturating_sub(text_col_w + margin * 2 + gap);
-    let qr_budget_h = label.height_px.saturating_sub(margin * 2);
-    qr_budget_w.min(qr_budget_h).max(16)
+    qr_layout(label).map_or(0, |l| l.qr_side)
 }
 
 #[cfg(test)]
@@ -219,6 +260,47 @@ mod tests {
         }
         assert!(count > 50, "expected text ink, got {count}");
         assert!(max_x > min_x + 15, "ABC should span horizontally");
+    }
+
+    #[test]
+    fn narrow_label_errors_instead_of_panicking() {
+        // D11/D110 printheads are 96px, so `text_col_w.clamp(64, w / 2)` was
+        // clamp(64, 48) — an unconditional panic for every QR on those models.
+        let lp = LabelPx {
+            width_px: 96,
+            height_px: 240,
+        };
+        assert_eq!(max_qr_side(lp), 0);
+        let err = make_qr_label("https://example.com", "HI", lp, TextSide::Right)
+            .expect_err("96px label cannot fit QR + text");
+        assert!(err.to_string().contains("too small"), "{err}");
+    }
+
+    #[test]
+    fn qr_layout_is_the_only_source_of_layout_math() {
+        // `max_qr_side` must report exactly what the renderer uses, or the two
+        // copies of this math drift.
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let layout = qr_layout(lp).expect("50x30 fits");
+        assert_eq!(max_qr_side(lp), layout.qr_side);
+        assert!(layout.text_col_w <= lp.width_px / 2);
+        assert!(layout.qr_side + layout.text_col_w + layout.margin * 2 + layout.gap <= lp.width_px);
+    }
+
+    #[test]
+    fn qr_layout_never_panics_across_label_sizes() {
+        for w in (8..=384).step_by(8) {
+            for h in [8u32, 32, 96, 240, 800] {
+                let lp = LabelPx {
+                    width_px: w,
+                    height_px: h,
+                };
+                if let Some(l) = qr_layout(lp) {
+                    assert!(l.qr_side >= QR_SIDE_MIN);
+                    assert!(l.qr_side <= h.saturating_sub(l.margin * 2));
+                }
+            }
+        }
     }
 
     #[test]

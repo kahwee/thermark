@@ -12,7 +12,7 @@ fn b1_print_start_roundtrip() {
     assert_eq!(p.cmd, 0x01);
     assert_eq!(p.data.len(), 7);
     assert_eq!(&p.data[0..2], &1u16.to_be_bytes());
-    let enc = p.encode();
+    let enc = p.encode().unwrap();
     let dec = Packet::decode(&enc).unwrap();
     assert_eq!(dec, p);
 }
@@ -31,15 +31,15 @@ fn b1_page_size_matches_50x30() {
     assert_eq!(rows, 240);
     assert_eq!(cols, 384);
     assert_eq!(copies, 1);
-    Packet::decode(&p.encode()).unwrap();
+    Packet::decode(&p.encode().unwrap()).unwrap();
 }
 
 #[test]
 fn density_and_label_type_packets() {
     let d = protocol::set_density(4);
-    assert_eq!(d.encode()[2], 0x21);
+    assert_eq!(d.encode().unwrap()[2], 0x21);
     let t = protocol::set_label_type(1);
-    assert_eq!(t.encode()[2], 0x23);
+    assert_eq!(t.encode().unwrap()[2], 0x23);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn px_per_mm_constant() {
 
 #[test]
 fn packet_buffer_resync() {
-    let good = Packet::new(0x40, vec![0x0b]).encode();
+    let good = Packet::new(0x40, vec![0x0b]).encode().unwrap();
     let mut buf = vec![0x00, 0xFF];
     buf.extend_from_slice(&good);
     let pkts = Packet::drain_buffer(&mut buf);
