@@ -25,6 +25,8 @@ pub struct MockTransport {
     reject: HashSet<u8>,
     /// Commands that get no auto-reply (timeouts).
     mute: HashSet<u8>,
+    /// cmd → remaining sends to swallow entirely (simulated lost writes).
+    drop_writes: HashMap<u8, u32>,
     /// If true, auto-generate success replies (default).
     auto_reply: bool,
     /// Override 13-byte heartbeat payload (closing, power, paper, rfid at 9..=12).
@@ -46,6 +48,7 @@ impl MockTransport {
             fail_on: HashMap::new(),
             reject: HashSet::new(),
             mute: HashSet::new(),
+            drop_writes: HashMap::new(),
             auto_reply: true,
             heartbeat: None,
         }
@@ -66,6 +69,16 @@ impl MockTransport {
     /// Do not auto-reply to `cmd` (simulates missing ACK / timeout).
     pub fn mute_cmd(&mut self, cmd: u8) -> &mut Self {
         self.mute.insert(cmd);
+        self
+    }
+
+    /// Swallow the first `n` sends of `cmd`, then behave normally.
+    ///
+    /// Simulates a lost BLE write: the printer never saw the request, so only a
+    /// resend can recover it. The frame is still recorded in [`Self::tx`], so
+    /// tests can assert how many attempts went out.
+    pub fn drop_first_writes(&mut self, cmd: u8, n: u32) -> &mut Self {
+        self.drop_writes.insert(cmd, n);
         self
     }
 
@@ -172,6 +185,14 @@ impl Transport for MockTransport {
         let cmd = pkt.cmd;
         let pdata = pkt.data.clone();
         self.tx_packets.push(pkt);
+
+        // A lost write: recorded as sent, but the printer never sees it.
+        if let Some(remaining) = self.drop_writes.get_mut(&cmd) {
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Ok(());
+            }
+        }
 
         if let Some(code) = self.fail_on.get(&cmd).copied() {
             self.rx_queue.push(Packet::new(0xdb, vec![code]));

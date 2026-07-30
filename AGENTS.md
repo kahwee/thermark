@@ -113,7 +113,9 @@ Wiki: the protocol notes in src/protocol.rs
 
 1. BLE address match is **exact** by default (full advertising name or id). Short selectors no longer substring-match; use full name from `scan`, or pass `--fuzzy` only if intentional  
 2. Require real printer GATT UUID; no random characteristic fallback  
-3. Stuck CLI holds BLE lock  
+3. Stuck CLI holds BLE lock — mostly addressed: Ctrl-C cancels the job and
+   `BleTransport::drop` blocks until disconnect on a multi-threaded runtime.
+   `SIGKILL` still leaves the link held until the printer times out  
 4. Tiny prints = missing `--label` / wrong canvas, not “broken printer”  
 5. Bitmap 5×7 font had mirrored text bugs — do not use for user labels  
 

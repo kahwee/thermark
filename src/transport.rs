@@ -217,6 +217,7 @@ mod ble {
     use btleplug::platform::{Adapter, Manager, Peripheral};
     use futures::stream::StreamExt;
     use std::collections::HashMap;
+    use tokio::runtime::RuntimeFlavor;
     use tokio::sync::mpsc;
     use tokio::time::{sleep, timeout};
     use tracing::{debug, info};
@@ -422,6 +423,14 @@ mod ble {
     }
 
     impl Drop for BleTransport {
+        /// Backstop teardown for paths that skip [`BleTransport::disconnect`]
+        /// — a mid-job error, or the whole future being dropped on Ctrl-C.
+        ///
+        /// This *blocks* on a multi-threaded runtime rather than spawning a
+        /// detached task. A detached task is not guaranteed to run at all: the
+        /// common case is `main` returning right after an error, which shuts
+        /// the runtime down before the task is ever polled, leaving the printer
+        /// connected and holding the single-client BLE lock.
         fn drop(&mut self) {
             if self.closed {
                 return;
@@ -430,13 +439,35 @@ mod ble {
             if let Some(task) = self.notify_task.take() {
                 task.abort();
             }
-            // Prefer async disconnect on the current runtime so mid-error paths
-            // (e.g. print failure without Session::finish) still free the link.
+
+            let Ok(handle) = tokio::runtime::Handle::try_current() else {
+                // No runtime left to drive the disconnect; the OS tears the
+                // link down when the process exits.
+                debug!("BLE transport dropped outside a runtime");
+                return;
+            };
             let peripheral = self.peripheral.clone();
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    let _ = peripheral.disconnect().await;
-                });
+
+            match handle.runtime_flavor() {
+                RuntimeFlavor::MultiThread => {
+                    // `block_in_place` moves this off the async worker so the
+                    // runtime stays live while we wait for the disconnect.
+                    tokio::task::block_in_place(|| {
+                        handle.block_on(async {
+                            match peripheral.disconnect().await {
+                                Ok(()) => debug!("BLE disconnected on drop"),
+                                Err(e) => debug!(error = %e, "BLE disconnect on drop (ignored)"),
+                            }
+                        });
+                    });
+                }
+                // Single-threaded runtimes (e.g. `#[tokio::test]`) cannot block
+                // without deadlocking, so best-effort is all that is available.
+                _ => {
+                    handle.spawn(async move {
+                        let _ = peripheral.disconnect().await;
+                    });
+                }
             }
         }
     }

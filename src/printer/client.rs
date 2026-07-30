@@ -62,6 +62,29 @@ impl Pacing {
     };
 }
 
+/// What to do when a request gets no reply within the wait window.
+///
+/// BLE writes are unacknowledged, so a lost request looks exactly like a slow
+/// printer. Waiting longer cannot recover a write that never arrived — only
+/// resending can. But a resend is unsafe when the *reply* was the thing lost:
+/// the printer already acted, and a second `PrintStart` would start a second
+/// job. So this is chosen per command rather than globally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnTimeout {
+    /// Keep waiting; send the request exactly once.
+    ///
+    /// Correct for commands that advance printer state — `PrintStart`,
+    /// `PageStart`, `SetPageSize`, `PageEnd`, `PrintEnd`.
+    #[default]
+    WaitOnly,
+    /// Resend the request on each attempt.
+    ///
+    /// Only for commands where acting twice equals acting once: reads
+    /// (`PrinterInfo`, `Heartbeat`, `RfidInfo`, `PrintStatus`) and idempotent
+    /// settings (`SetDensity`, `SetLabelType`, `PrintClear`).
+    Resend,
+}
+
 pub struct PrinterClient<T: Transport> {
     transport: T,
     model: Model,
@@ -208,6 +231,9 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Send a request and wait for a matching response command.
+    ///
+    /// Uses [`OnTimeout::WaitOnly`] — safe for any command. Prefer
+    /// [`Self::transceive_with`] and [`OnTimeout::Resend`] for reads.
     pub async fn transceive(
         &mut self,
         request: Packet,
@@ -215,11 +241,36 @@ impl<T: Transport> PrinterClient<T> {
         attempts: u32,
         wait: Duration,
     ) -> Result<Packet> {
+        self.transceive_with(request, response_cmd, attempts, wait, OnTimeout::WaitOnly)
+            .await
+    }
+
+    /// Send a request and wait for a matching response, with an explicit
+    /// policy for what to do when a reply does not arrive in time.
+    pub async fn transceive_with(
+        &mut self,
+        request: Packet,
+        response_cmd: u8,
+        attempts: u32,
+        wait: Duration,
+        on_timeout: OnTimeout,
+    ) -> Result<Packet> {
         let req_cmd = request.cmd;
-        self.send_pkt(&request).await?;
-        for i in 0..attempts {
-            let packets = self.recv_pkts(wait).await?;
-            for p in packets {
+        for attempt in 0..attempts {
+            // BLE writes go out unacknowledged (`WriteType::WithoutResponse`),
+            // so a lost request is indistinguishable from a slow printer and no
+            // amount of extra waiting recovers it — only a resend does.
+            if attempt == 0 || on_timeout == OnTimeout::Resend {
+                if attempt > 0 {
+                    debug!(
+                        cmd = format_args!("{req_cmd:#04x}"),
+                        attempt, "resending request"
+                    );
+                }
+                self.send_pkt(&request).await?;
+            }
+
+            for p in self.recv_pkts(wait).await? {
                 if p.cmd == 0xdb {
                     let code = p.data.first().copied().unwrap_or(0);
                     return Err(Error::Printer(PrinterErrorCode::from_u8(code)));
@@ -233,12 +284,6 @@ impl<T: Transport> PrinterClient<T> {
                     "ignoring pkt while waiting for response"
                 );
             }
-            if i + 1 < attempts {
-                debug!(
-                    expected = format_args!("{response_cmd:#04x}"),
-                    "retry wait for response"
-                );
-            }
         }
         Err(Error::Timeout {
             expected: response_cmd,
@@ -247,10 +292,16 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Response offset style used by the simple print-task form (resp = req + offset).
-    async fn transceive_offset(&mut self, cmd: u8, data: Vec<u8>, offset: u8) -> Result<Packet> {
+    async fn transceive_offset(
+        &mut self,
+        cmd: u8,
+        data: Vec<u8>,
+        offset: u8,
+        on_timeout: OnTimeout,
+    ) -> Result<Packet> {
         let req = Packet::new(cmd, data);
         let resp = cmd.wrapping_add(offset);
-        self.transceive(req, resp, 8, Duration::from_millis(150))
+        self.transceive_with(req, resp, 8, Duration::from_millis(150), on_timeout)
             .await
     }
 
@@ -258,14 +309,20 @@ impl<T: Transport> PrinterClient<T> {
         let req = protocol::info(key);
         let resp_cmd = (Cmd::PrinterInfo as u8).wrapping_add(key as u8);
         let pkt = self
-            .transceive(req, resp_cmd, 8, Duration::from_millis(200))
+            .transceive_with(
+                req,
+                resp_cmd,
+                8,
+                Duration::from_millis(200),
+                OnTimeout::Resend,
+            )
             .await?;
         Ok(InfoValue::parse(key, &pkt.data))
     }
 
     pub async fn heartbeat(&mut self) -> Result<Heartbeat> {
         if let Ok(pkt) = self
-            .transceive_offset(Cmd::Heartbeat as u8, vec![0x01], 1)
+            .transceive_offset(Cmd::Heartbeat as u8, vec![0x01], 1, OnTimeout::Resend)
             .await
         {
             return Ok(Heartbeat::parse(&pkt.data));
@@ -282,14 +339,19 @@ impl<T: Transport> PrinterClient<T> {
 
     pub async fn set_label_type(&mut self, t: u8) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::SetLabelType as u8, vec![t], 0x10)
+            .transceive_offset(Cmd::SetLabelType as u8, vec![t], 0x10, OnTimeout::Resend)
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
 
     pub async fn set_density(&mut self, level: Density) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::SetDensity as u8, vec![level.get()], 0x10)
+            .transceive_offset(
+                Cmd::SetDensity as u8,
+                vec![level.get()],
+                0x10,
+                OnTimeout::Resend,
+            )
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
@@ -309,21 +371,21 @@ impl<T: Transport> PrinterClient<T> {
 
     pub async fn end_print(&mut self) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::PrintEnd as u8, vec![0x01], 1)
+            .transceive_offset(Cmd::PrintEnd as u8, vec![0x01], 1, OnTimeout::WaitOnly)
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
 
     pub async fn start_page(&mut self) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::PageStart as u8, vec![0x01], 1)
+            .transceive_offset(Cmd::PageStart as u8, vec![0x01], 1, OnTimeout::WaitOnly)
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
 
     pub async fn end_page(&mut self) -> Result<bool> {
         let pkt = self
-            .transceive_offset(Cmd::PageEnd as u8, vec![0x01], 1)
+            .transceive_offset(Cmd::PageEnd as u8, vec![0x01], 1, OnTimeout::WaitOnly)
             .await?;
         Ok(pkt.data.first().copied().unwrap_or(0) != 0)
     }
@@ -366,11 +428,12 @@ impl<T: Transport> PrinterClient<T> {
             // Optional step: a missing reply is fine, but a reported fault is
             // not — only `Error::Printer` aborts.
             if let Err(e @ Error::Printer(_)) = self
-                .transceive(
+                .transceive_with(
                     protocol::pkt(Cmd::PrintClear, vec![0x01]),
                     0x30,
                     4,
                     Duration::from_millis(100),
+                    OnTimeout::Resend,
                 )
                 .await
             {
@@ -416,7 +479,13 @@ impl<T: Transport> PrinterClient<T> {
             // printer named its fault (cover, paper, …), surface that instead
             // of grinding through end_print retries into PrintNotConfirmed.
             if let Err(e @ Error::Printer(_)) = self
-                .transceive(protocol::print_status(), 0xb3, 1, self.pacing.poll_wait)
+                .transceive_with(
+                    protocol::print_status(),
+                    0xb3,
+                    1,
+                    self.pacing.poll_wait,
+                    OnTimeout::Resend,
+                )
                 .await
             {
                 return Err(e);
@@ -531,7 +600,13 @@ impl<T: Transport> PrinterClient<T> {
 
     pub async fn rfid_info(&mut self) -> Result<RfidInfo> {
         let pkt = self
-            .transceive(protocol::rfid(), 0x1b, 8, Duration::from_millis(250))
+            .transceive_with(
+                protocol::rfid(),
+                0x1b,
+                8,
+                Duration::from_millis(250),
+                OnTimeout::Resend,
+            )
             .await?;
         Ok(RfidInfo::parse(&pkt.data))
     }
@@ -778,6 +853,66 @@ mod tests {
             !cmds.contains(&0x01),
             "print start should not run: {cmds:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn lost_write_is_recovered_by_resending_a_read() {
+        // BLE writes are unacknowledged, so a dropped request can only be
+        // recovered by sending it again — waiting longer never helps.
+        let mut mock = MockTransport::new();
+        mock.drop_first_writes(0x40, 2);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+        let info = c
+            .get_info(InfoKey::DeviceSerial)
+            .await
+            .expect("resend should recover the lost writes");
+        assert_eq!(info.to_string(), "TESTMOCK01");
+
+        let sends = c
+            .transport()
+            .tx_cmds()
+            .iter()
+            .filter(|c| **c == 0x40)
+            .count();
+        assert_eq!(sends, 3, "two dropped writes plus the one that landed");
+    }
+
+    #[tokio::test]
+    async fn state_advancing_commands_are_never_resent() {
+        // Resending PrintStart after a lost *reply* would start a second job,
+        // so it must go out exactly once no matter how long the reply takes.
+        let mut mock = MockTransport::new();
+        mock.mute_cmd(0x01);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+        let err = c.start_print().await.unwrap_err();
+        assert!(matches!(err, Error::Timeout { .. }), "got {err:?}");
+
+        let sends = c
+            .transport()
+            .tx_cmds()
+            .iter()
+            .filter(|c| **c == 0x01)
+            .count();
+        assert_eq!(sends, 1, "PrintStart must not be retransmitted");
+    }
+
+    #[tokio::test]
+    async fn idempotent_settings_are_resent() {
+        // SetDensity twice equals SetDensity once, so recovery is safe.
+        let mut mock = MockTransport::new();
+        mock.drop_first_writes(0x21, 1);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+        assert!(c.set_density(Density::DARK).await.unwrap());
+        let sends = c
+            .transport()
+            .tx_cmds()
+            .iter()
+            .filter(|c| **c == 0x21)
+            .count();
+        assert_eq!(sends, 2);
     }
 
     #[tokio::test]

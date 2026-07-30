@@ -10,6 +10,48 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-30
+
+Reliability of the BLE link. No API breaks, but the on-wire behaviour changes:
+the printer now sees repeat reads when a request goes unanswered, so this is a
+minor rather than a patch release.
+
+### Fixed
+
+- **An interrupted or failed job could leave the printer connected.**
+  `BleTransport`'s `Drop` spawned a *detached* task to disconnect, which is not
+  guaranteed to run — and the common case is `main` returning right after an
+  error, shutting the runtime down before that task is ever polled. The printer
+  then stays connected, holding the single-client BLE lock until it times out.
+  On a multi-threaded runtime `Drop` now blocks until the disconnect completes;
+  on a single-threaded one (`#[tokio::test]`) it stays best-effort, since
+  blocking there would deadlock.
+- **Ctrl-C left the link held.** `SIGINT` now cancels the in-flight command and
+  drops the open session — which, with the fix above, disconnects the printer
+  before exiting `130`. Previously the process exited from under the session.
+- **A lost BLE write was unrecoverable.** `transceive`'s `attempts` controlled
+  how many times it *waited*, but the request was sent exactly once — and BLE
+  writes go out unacknowledged (`WriteType::WithoutResponse`), so a dropped
+  request is indistinguishable from a slow printer and no amount of waiting
+  recovers it. Reads and idempotent settings now resend on each attempt.
+
+### Added
+
+- `printer::OnTimeout` and `PrinterClient::transceive_with`, selecting resend
+  behaviour per command. `OnTimeout::Resend` is used only where acting twice
+  equals acting once — `PrinterInfo`, `Heartbeat`, `RfidInfo`, `PrintStatus`,
+  `SetDensity`, `SetLabelType`, `PrintClear`. The state-advancing steps
+  (`PrintStart`, `PageStart`, `SetPageSize`, `PageEnd`, `PrintEnd`) remain
+  single-send: if the *reply* was what got lost, the printer already acted, and
+  a second `PrintStart` would start a second job.
+- `MockTransport::drop_first_writes(cmd, n)` to simulate lost writes in tests.
+- `tokio`'s `signal` feature, for the Ctrl-C handler.
+
+### Unchanged
+
+`PrinterClient::transceive` keeps its signature and its single-send semantics
+(`OnTimeout::WaitOnly`), so existing callers are unaffected.
+
 ## [0.2.0] - 2026-07-30
 
 First release with a stable module layout. Two of the fixes below are crashes
@@ -102,6 +144,7 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kahwee/thermark/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kahwee/thermark/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kahwee/thermark/releases/tag/v0.1.0
