@@ -130,15 +130,29 @@ pub struct SafeArea {
 impl SafeArea {
     /// Measured default for B1-class hardware with 50x30 media.
     ///
-    /// The bottom figure comes from `thermark calibrate`: the feed ruler stops
-    /// around the 25 mm mark on a 30 mm label, so the last ~5 mm never reaches
-    /// the paper. Your media may differ — re-measure and save it with
-    /// `thermark config safe-area --bottom <mm>`.
+    /// From `thermark calibrate` with the feed ruler, photographed flat:
+    ///
+    /// | Edge   | Observed                                        |
+    /// |--------|-------------------------------------------------|
+    /// | top    | ~2.4 mm of label before the first printed row    |
+    /// | band   | ~25.3 mm printed, ruler ticks evenly spaced      |
+    /// | bottom | ~2.3 mm of label after the last printed row      |
+    ///
+    /// Tick spacing is uniform, so the image is **not** scaled — rows past the
+    /// window are simply dropped. The printer begins its window a little after
+    /// the label's leading edge, so canvas row 0 already lands inside the
+    /// printable band and `top` is 0; the last ~40 rows never reach paper.
+    ///
+    /// The ~2.3 mm at the very bottom, and the 2 mm across (48 mm head on a
+    /// 50 mm label), are hardware limits — no software setting fills them.
+    ///
+    /// Different media will differ. Re-measure with `thermark calibrate` and
+    /// save it: `thermark config safe-area --last-tick <mm> --label 50x30`.
     pub const B1: Self = Self {
-        top: 8,
+        top: 0,
         bottom: 40,
-        left: 8,
-        right: 8,
+        left: 0,
+        right: 0,
     };
 
     /// No inset — full bleed. Use after confirming with `thermark calibrate`.

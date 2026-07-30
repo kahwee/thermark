@@ -84,6 +84,14 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
     println!("               label  ->  bottom inset needs ~5 mm (40 px).");
     println!("  Diagonals  = skew check; the X should meet exactly at the centre cross.");
     println!();
+    println!("Some white border is physical, not a bug:");
+    println!("  Across: the printhead is 48 mm; a 50 mm label keeps ~2 mm.");
+    println!("          If it is lopsided, re-centre the roll with the guide.");
+    println!("  Feed:   the printer starts a little after the label's leading");
+    println!("          edge and stops before its trailing edge (~2 mm each on");
+    println!("          B1 + 50x30). No setting fills those; the inset below");
+    println!("          just stops content being silently dropped there.");
+    println!();
     println!(
         "Canvas {}x{} px. Re-run any time:",
         lp.width_px, lp.height_px

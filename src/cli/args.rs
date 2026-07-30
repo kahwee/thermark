@@ -376,6 +376,13 @@ pub enum ConfigCmd {
     /// Values are millimetres from each edge. Omitted edges keep their current
     /// value. The feed (bottom) edge is usually the only non-zero one.
     SafeArea {
+        /// Millimetre mark of the LAST ruler tick that printed, from
+        /// `thermark calibrate`. Sets the bottom inset for you.
+        #[arg(long)]
+        last_tick: Option<f64>,
+        /// Label size the reading came from (needed with --last-tick)
+        #[arg(long, default_value = "50x30")]
+        label: String,
         #[arg(long)]
         top: Option<f64>,
         #[arg(long)]

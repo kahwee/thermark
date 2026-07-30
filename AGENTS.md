@@ -105,9 +105,12 @@ Wiki: the protocol notes in src/protocol.rs
 ## Geometry & fonts
 
 - **8 px/mm**; max width **384**
-- Printable area is **not symmetric**: top/left/right reach the edge, the
-  bottom (feed) edge loses ~2 mm. See `geometry::SafeArea`; re-measure with
-  `thermark calibrate`
+- Printable window on B1 + 50x30 is **~48 x 25.3 mm** of a 50 x 30 label,
+  measured with `thermark calibrate`. The printer starts a little after the
+  leading edge and stops before the trailing edge; rows past the window are
+  dropped, not scaled. `SafeArea::B1` = top 0 / bottom 40 / left 0 / right 0.
+  The residual white at the feed edges (~2 mm) and across (48 mm head on a
+  50 mm label) is physical — do not try to fix it in software
 - Always use `--label` for full-size media
 - Prefer system fonts (`--font-name helvetica|times|arial`) over bitmap fallback
 - Default no decorative border; QR is square beside text column

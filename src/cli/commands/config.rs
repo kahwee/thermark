@@ -17,12 +17,14 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             scan_secs,
         } => set(&addr, conn, model, scan_secs)?,
         ConfigCmd::SafeArea {
+            last_tick,
+            label,
             top,
             bottom,
             left,
             right,
             reset,
-        } => safe_area(top, bottom, left, right, reset)?,
+        } => safe_area(last_tick, &label, top, bottom, left, right, reset)?,
         ConfigCmd::Clear => clear()?,
     }
     Ok(())
@@ -86,14 +88,17 @@ fn set(addr: &str, conn: ConnPref, model: Option<Model>, scan_secs: Option<u64>)
 }
 
 /// Update the saved printable insets. Millimetres in, pixels stored.
+#[allow(clippy::too_many_arguments)]
 fn safe_area(
+    last_tick: Option<f64>,
+    label: &str,
     top: Option<f64>,
     bottom: Option<f64>,
     left: Option<f64>,
     right: Option<f64>,
     reset: bool,
 ) -> Result<()> {
-    use thermark::geometry::{PX_PER_MM, SafeArea};
+    use thermark::geometry::{LabelMm, PX_PER_MM, SafeArea};
 
     let mut cfg = Config::load().unwrap_or_default();
     if reset {
@@ -102,6 +107,20 @@ fn safe_area(
         println!("safe area reset to the built-in default");
         return Ok(());
     }
+
+    // A ruler reading is easier to report than an inset: the last tick that
+    // printed tells us how much of the label the printer actually reaches.
+    let bottom = match (last_tick, bottom) {
+        (Some(tick), _) => {
+            let height_mm = LabelMm::parse(label)?.height_mm;
+            let lost = (height_mm - tick).max(0.0);
+            println!(
+                "last tick {tick} mm on a {height_mm} mm label -> {lost} mm unreachable at the feed edge"
+            );
+            Some(lost)
+        }
+        (None, b) => b,
+    };
 
     let current = cfg.resolve_safe_area();
     let px = |mm: Option<f64>, fallback: u32| {

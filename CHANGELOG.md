@@ -10,6 +10,44 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-30
+
+Measured the B1's real printable window instead of guessing at it.
+
+### Measurement
+
+`thermark calibrate` with the feed ruler, photographed flat, on B1 + 50x30:
+
+| Edge   | Observed                                       |
+|--------|------------------------------------------------|
+| top    | ~2.4 mm of label before the first printed row  |
+| band   | ~25.3 mm printed                               |
+| bottom | ~2.3 mm of label after the last printed row    |
+
+Ruler ticks are **evenly spaced**, so the image is not scaled or compressed —
+rows past the window are simply dropped. The printer begins its window a little
+after the label's leading edge, which is why canvas row 0 already lands inside
+the printed band while the last ~40 rows never reach paper.
+
+Two of these are hardware limits that no setting can fill: the ~2 mm at the
+feed edges, and the 2 mm across (a 48 mm printhead on a 50 mm label). A
+lopsided left/right border means the roll is off-centre in the paper guide.
+
+### Changed
+
+- `SafeArea::B1` is now `top: 0, bottom: 40, left: 0, right: 0`. The previous
+  value inset all four edges, which shrank artwork on three edges that print
+  fine — the loss is at the feed edge only, and the top needs no inset at all
+  because the printer's own offset already places row 0 inside the window.
+- The `calibrate` legend now says which white borders are physical, so this
+  does not get chased as a bug again.
+
+### Added
+
+- `thermark config safe-area --last-tick <mm> --label 50x30` — report the last
+  ruler tick that printed and it computes the inset for you, rather than
+  making you do the arithmetic.
+
 ## [0.5.0] - 2026-07-30
 
 Makes the printable-area problem measurable and configurable instead of
@@ -235,7 +273,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kahwee/thermark/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kahwee/thermark/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/kahwee/thermark/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kahwee/thermark/compare/v0.2.0...v0.3.0
