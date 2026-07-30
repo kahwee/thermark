@@ -146,6 +146,38 @@ fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
     out
 }
 
+/// Crop uniform white space from the edges of an image.
+///
+/// Artwork usually carries its own margin. Placing it on a label without
+/// trimming means that margin is *added* to the label's own unprintable
+/// inset, so the drawing ends up far smaller than the media allows — a
+/// bulldozer with a 35 px built-in margin lost another 29 rows to it after
+/// scaling, on top of the 40 reserved rows.
+///
+/// Returns the image unchanged when it is blank or already tight.
+pub fn trim_white(img: DynamicImage, threshold: u8) -> DynamicImage {
+    let gray = img.to_luma8();
+    let (w, h) = gray.dimensions();
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    for (x, y, p) in gray.enumerate_pixels() {
+        if p[0] <= threshold {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+    }
+    if x0 == u32::MAX {
+        return img; // nothing but background
+    }
+    if x0 == 0 && y0 == 0 && x1 == w - 1 && y1 == h - 1 {
+        return img; // already tight
+    }
+    DynamicImage::ImageRgba8(
+        imageops::crop_imm(&img.to_rgba8(), x0, y0, x1 - x0 + 1, y1 - y0 + 1).to_image(),
+    )
+}
+
 /// Resize preserving aspect to fit within max width (height free).
 pub fn fit_width(img: DynamicImage, max_width: u32) -> DynamicImage {
     let (w, h) = img.dimensions();
@@ -507,6 +539,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn trim_removes_the_artwork_s_own_margin() {
+        // 100x100 canvas with a 20x20 mark at (40,40): 40px of margin all round.
+        let mut g = GrayImage::from_pixel(100, 100, Luma([255]));
+        for y in 40..60 {
+            for x in 40..60 {
+                g.put_pixel(x, y, Luma([0]));
+            }
+        }
+        let out = trim_white(DynamicImage::ImageLuma8(g), 127);
+        assert_eq!(out.dimensions(), (20, 20));
+    }
+
+    #[test]
+    fn trim_leaves_blank_and_already_tight_images_alone() {
+        let blank = DynamicImage::ImageLuma8(GrayImage::from_pixel(40, 20, Luma([255])));
+        assert_eq!(trim_white(blank, 127).dimensions(), (40, 20));
+        let full = DynamicImage::ImageLuma8(GrayImage::from_pixel(40, 20, Luma([0])));
+        assert_eq!(trim_white(full, 127).dimensions(), (40, 20));
+    }
+
+    #[test]
+    fn trimmed_art_fills_the_printable_band() {
+        // The bug this pins: the artwork's own margin was *added* to the
+        // label's inset, so the drawing came out far smaller than the media.
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let safe = SafeArea::B1;
+        let mut g = GrayImage::from_pixel(384, 240, Luma([255]));
+        for y in 60..180 {
+            for x in 90..300 {
+                g.put_pixel(x, y, Luma([0]));
+            }
+        }
+        let art = trim_white(DynamicImage::ImageLuma8(g), 127);
+        let placed = contain_label_in(art, lp, safe, 0).to_luma8();
+
+        let usable = lp.height_px - safe.bottom;
+        let mut lowest = 0;
+        for (_, y, p) in placed.enumerate_pixels() {
+            if p[0] < 128 {
+                lowest = lowest.max(y);
+            }
+        }
+        assert!(lowest < usable, "ink at {lowest} is unprintable");
+        assert!(
+            lowest + 8 >= usable,
+            "only reached row {lowest} of a {usable}-row band — not filling it"
+        );
     }
 
     #[test]

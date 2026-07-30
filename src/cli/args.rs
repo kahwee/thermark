@@ -172,6 +172,10 @@ pub enum Commands {
         /// Floyd–Steinberg dither instead of hard B/W (recommended for photographs)
         #[arg(long, default_value_t = false)]
         dither: bool,
+        /// Keep the image's own white border instead of cropping it.
+        /// By default it is trimmed so the artwork fills the label.
+        #[arg(long, default_value_t = false)]
+        no_trim: bool,
         /// Ignore the measured printable area and use the whole canvas.
         /// Content near the feed edge will be clipped by the printer.
         #[arg(long, default_value_t = false)]

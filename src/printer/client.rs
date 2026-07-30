@@ -102,6 +102,9 @@ pub fn compose_for_label(
     max_width_px: u32,
 ) -> Result<image::DynamicImage> {
     let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
+    if opts.trim {
+        img = image_encode::trim_white(img, opts.threshold.get());
+    }
 
     match opts.label.map(|l| l.to_pixels(max_width_px)) {
         Some(lp) => {
@@ -151,6 +154,9 @@ pub struct PrintOptions {
     /// the band the printer cannot reach. Use [`SafeArea::NONE`] for content
     /// that already accounts for it (rendered stickers, calibration patterns).
     pub safe: SafeArea,
+    /// Crop the source image's own white border before placing it, so the
+    /// artwork's margin is not added to the label's.
+    pub trim: bool,
 }
 
 impl Default for PrintOptions {
@@ -165,6 +171,7 @@ impl Default for PrintOptions {
             margin_px: 0,
             dither: false,
             safe: SafeArea::default(),
+            trim: true,
         }
     }
 }
@@ -586,6 +593,7 @@ impl<T: Transport> PrinterClient<T> {
                 margin_px: 0,
                 dither: false,
                 safe: SafeArea::default(),
+                trim: true,
             },
         )
         .await

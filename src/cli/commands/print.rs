@@ -29,6 +29,7 @@ pub async fn print(
     no_fill: bool,
     margin: u32,
     dither: bool,
+    no_trim: bool,
     full_bleed: bool,
     preview: Option<PathBuf>,
 ) -> Result<()> {
@@ -60,6 +61,7 @@ pub async fn print(
         } else {
             cfg.resolve_safe_area()
         },
+        trim: !no_trim,
     };
     if let Some(out) = preview {
         // Compose through the exact same path a real print uses, then stop.
@@ -152,8 +154,9 @@ pub async fn calibrate(
         margin_px: 0,
         dither: false,
         // Full bleed on purpose: this pattern exists to find the true edges,
-        // so it must not be inset by the value it is measuring.
+        // so it must not be inset by the value it is measuring, nor trimmed.
         safe: thermark::geometry::SafeArea::NONE,
+        trim: false,
     };
     print_file(cfg, conn, task, model, &tmp, opts).await?;
     println!("OK — calibration printed ({label})");

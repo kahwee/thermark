@@ -47,6 +47,9 @@ fn sticker_print_options(label: LabelMm, density: Density) -> PrintOptions {
         // The rendered sticker already lays out inside the printable area;
         // insetting again here would shrink it twice.
         safe: thermark::geometry::SafeArea::NONE,
+        // The sticker canvas *is* the layout; cropping it would re-scale and
+        // undo the deliberate placement.
+        trim: false,
     }
 }
 

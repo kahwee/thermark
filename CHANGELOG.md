@@ -10,6 +10,39 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-30
+
+Artwork now fills the label instead of floating in it.
+
+### Fixed
+
+- **Source images kept their own white border, which was added to the label's
+  inset.** A drawing carrying a 35 px margin lost another ~29 rows to it after
+  scaling, on top of the 40 rows reserved at the feed edge — so the bulldozer
+  occupied 167 of 200 usable rows and looked like it had been cut short, even
+  though nothing was clipped. `thermark print` now trims uniform background
+  from the source before placing it. The same artwork now spans rows 0–199 of
+  the 200-row band.
+
+  Measured on the exact bitmaps sent to the printer, not inferred from a photo:
+
+  | | ink rows | white below |
+  |---|---|---|
+  | before | 4–170 | 69 |
+  | after  | 0–199 | 1  |
+
+### Added
+
+- `image_encode::trim_white`, and `thermark print --no-trim` to keep the
+  border when it is deliberate.
+
+### Notes
+
+Trimming is off for rendered stickers and the calibration pattern: their canvas
+*is* the layout, and cropping would rescale and undo the placement. The
+calibration pattern in particular must stay full-bleed and untrimmed, since it
+is the instrument that measures the edges.
+
 ## [0.8.0] - 2026-07-30
 
 Calibration validated against hardware; the printable area is now confirmed
@@ -343,7 +376,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/kahwee/thermark/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/kahwee/thermark/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kahwee/thermark/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kahwee/thermark/compare/v0.5.0...v0.6.0
