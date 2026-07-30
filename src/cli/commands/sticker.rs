@@ -153,11 +153,12 @@ pub async fn qr(
     no_print: bool,
 ) -> Result<()> {
     let (model, label_mm, lp) = label_geometry(cfg, model, label)?;
+    let safe = cfg.resolve_safe_area();
     let gray = label::make_qr_label_opts(&QrLabelOptions {
         url: url.to_string(),
         side_text: text.replace("\\n", "\n"),
         label: lp,
-        safe: cfg.resolve_safe_area(),
+        safe,
         text_side,
         border,
         font_path: font.font.clone(),
@@ -167,7 +168,8 @@ pub async fn qr(
     info!(
         width_px = lp.width_px,
         height_px = lp.height_px,
-        qr_side = label::max_qr_side(lp),
+        // Same `safe` the render used, so the log cannot disagree with the label.
+        qr_side = label::max_qr_side(lp, safe),
         ?text_side,
         font_size = ?font.font_size,
         "qr label"

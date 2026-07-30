@@ -60,23 +60,29 @@ const TEXT_COL_FRACTION: f64 = 0.34;
 const TEXT_COL_MIN: u32 = 64;
 /// Below this, a QR holds too few modules to survive thermal printing.
 const QR_SIDE_MIN: u32 = 64;
+/// Smallest box worth laying text into, on either axis.
+const MIN_TEXT_BOX_PX: u32 = 16;
 
-/// Compute the side-by-side layout for a label, or `None` if one does not fit.
+/// The box every label type composes into: the printable area, inset by the
+/// cosmetic [`MARGIN`].
 ///
-/// Uses the default [`SafeArea`]; see [`qr_layout_in`] to override it.
-pub fn qr_layout(label: LabelPx) -> Option<QrLayout> {
-    qr_layout_in(label, SafeArea::default())
-}
-
-/// Compute the layout inside an explicit safe area.
-pub fn qr_layout_in(label: LabelPx, safe: SafeArea) -> Option<QrLayout> {
+/// **One owner for this calculation.** It was previously computed separately in
+/// `qr_layout` and `make_text_label`, and the two drifted: the text path was
+/// left laying out on the raw label, giving a box 232 rows tall on 50x30 media
+/// instead of 184, so text was sized for space the printer cannot reach.
+pub fn content_box(label: LabelPx, safe: SafeArea) -> Option<Rect> {
     let area = safe.content(label)?;
-    let inner = Rect {
+    Some(Rect {
         x: area.x + MARGIN,
         y: area.y + MARGIN,
         w: area.w.checked_sub(MARGIN * 2)?,
         h: area.h.checked_sub(MARGIN * 2)?,
-    };
+    })
+}
+
+/// Compute the side-by-side layout inside the printable area of `label`.
+pub fn qr_layout(label: LabelPx, safe: SafeArea) -> Option<QrLayout> {
+    let inner = content_box(label, safe)?;
 
     let ideal = ((label.width_px as f64) * TEXT_COL_FRACTION).round() as u32;
     // `clamp(TEXT_COL_MIN, w / 2)` panics when `w < 2 * TEXT_COL_MIN` (every
@@ -101,7 +107,7 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
     }
     let w = opts.label.width_px;
     let h = opts.label.height_px;
-    let layout = qr_layout_in(opts.label, opts.safe).ok_or_else(|| {
+    let layout = qr_layout(opts.label, opts.safe).ok_or_else(|| {
         Error::qr(format!(
             "label {w}x{h}px is too small for a QR beside text \
              (need at least {QR_SIDE_MIN}px of QR after margins). \
@@ -236,7 +242,7 @@ fn draw_border(img: &mut GrayImage) {
 pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImage> {
     use crate::geometry::PX_PER_MM;
 
-    let mut img = crate::image_encode::calibration_pattern_with(label, Some(safe));
+    let mut img = crate::image_encode::calibration_pattern(label, Some(safe));
     let font = match load_font(None, None) {
         Ok(f) => f,
         // No system font: the geometric pattern is still perfectly usable.
@@ -245,6 +251,10 @@ pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImag
 
     let px_per_mm = PX_PER_MM as u32;
     let size = 13.0f32;
+    // Clear of the ruler ticks, derived from their length rather than a second
+    // constant that has to be kept in agreement by hand.
+    let inset = crate::image_encode::CALIBRATION_RULER_MAJOR_PX + 4;
+
     for mm in (0..=(label.height_px / px_per_mm)).step_by(5) {
         let y = mm * px_per_mm;
         if y >= label.height_px {
@@ -252,14 +262,17 @@ pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImag
         }
         let text = mm.to_string();
         let w = font.text_width(&text, size);
+        if inset + w >= label.width_px - inset {
+            break; // too narrow to letter without colliding
+        }
         // Baseline sits just ABOVE its tick. Below the tick, the last numeral
-        // falls past the printable band and the most important reading is the
-        // one you lose.
+        // falls past the printable band — and that is the reading that matters
+        // most, so it is exactly the one you must not lose.
         let baseline = y.max(size as u32) as f32 - 1.0;
-        font.draw_text(&mut img, 30.0, baseline, &text, size);
+        font.draw_text(&mut img, inset as f32, baseline, &text, size);
         font.draw_text(
             &mut img,
-            (label.width_px - 30 - w) as f32,
+            (label.width_px - inset - w) as f32,
             baseline,
             &text,
             size,
@@ -287,13 +300,8 @@ pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
         return Err(Error::qr("text must not be empty"));
     }
     let (w, h) = (opts.label.width_px, opts.label.height_px);
-    // Lay out inside the *printable* area, not the raw label. Using the label
-    // gave a box 232 rows tall on 50x30 media instead of 184, so text was
-    // sized for space the printer cannot reach and the last line fell off.
-    let area = opts
-        .safe
-        .content(opts.label)
-        .filter(|a| a.w > 2 * MARGIN + 8 && a.h > 2 * MARGIN + 8)
+    let area = content_box(opts.label, opts.safe)
+        .filter(|a| a.w >= MIN_TEXT_BOX_PX && a.h >= MIN_TEXT_BOX_PX)
         .ok_or_else(|| {
             Error::qr(format!(
                 "label {w}x{h}px leaves no printable room for text after insets"
@@ -306,12 +314,7 @@ pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
         &mut img,
         &font,
         &opts.text,
-        Rect {
-            x: area.x + MARGIN,
-            y: area.y + MARGIN,
-            w: area.w.saturating_sub(MARGIN * 2),
-            h: area.h.saturating_sub(MARGIN * 2),
-        },
+        area,
         opts.align,
         opts.font_size,
     );
@@ -396,8 +399,12 @@ fn overlay_gray(dst: &mut GrayImage, src: &GrayImage, x0: u32, y0: u32) {
 }
 
 /// QR edge length [`make_qr_label_opts`] will use, or 0 when none fits.
-pub fn max_qr_side(label: LabelPx) -> u32 {
-    qr_layout(label).map_or(0, |l| l.qr_side)
+///
+/// Takes the same `safe` the renderer will: reporting against the default
+/// while the caller renders with a configured one prints a number that does
+/// not match the label.
+pub fn max_qr_side(label: LabelPx, safe: SafeArea) -> u32 {
+    qr_layout(label, safe).map_or(0, |l| l.qr_side)
 }
 
 #[cfg(test)]
@@ -442,7 +449,7 @@ mod tests {
             width_px: 96,
             height_px: 240,
         };
-        assert_eq!(max_qr_side(lp), 0);
+        assert_eq!(max_qr_side(lp, SafeArea::default()), 0);
         let err = make_qr_label("https://example.com", "HI", lp, TextSide::Right)
             .expect_err("96px label cannot fit QR + text");
         assert!(err.to_string().contains("too small"), "{err}");
@@ -453,8 +460,8 @@ mod tests {
         // `max_qr_side` must report exactly what the renderer uses, or the two
         // copies of this math drift.
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
-        let layout = qr_layout(lp).expect("50x30 fits");
-        assert_eq!(max_qr_side(lp), layout.qr_side);
+        let layout = qr_layout(lp, SafeArea::default()).expect("50x30 fits");
+        assert_eq!(max_qr_side(lp, SafeArea::default()), layout.qr_side);
         assert!(layout.text_col_w <= lp.width_px / 2);
         assert!(layout.qr_side + layout.text_col_w + layout.gap <= layout.area.w);
         assert!(layout.area.y + layout.area.h <= lp.height_px);
@@ -468,7 +475,7 @@ mod tests {
                     width_px: w,
                     height_px: h,
                 };
-                if let Some(l) = qr_layout(lp) {
+                if let Some(l) = qr_layout(lp, SafeArea::default()) {
                     assert!(l.qr_side >= QR_SIDE_MIN);
                     assert!(l.qr_side <= l.area.h);
                 }
@@ -479,7 +486,7 @@ mod tests {
     #[test]
     fn qr_stays_clear_of_the_clipped_bottom_edge() {
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
-        let layout = qr_layout(lp).unwrap();
+        let layout = qr_layout(lp, SafeArea::default()).unwrap();
         let safe = SafeArea::default();
         // The QR must end above the band the printer cannot reach.
         let qr_bottom = layout.area.y + (layout.area.h + layout.qr_side) / 2;

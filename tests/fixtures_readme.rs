@@ -243,7 +243,7 @@ fn link_sticker_layout_is_full_canvas_square_qr() {
     });
     if let Ok(img) = img {
         assert_eq!(img.dimensions(), (W, H));
-        let side = thermark::label::max_qr_side(lp);
+        let side = thermark::label::max_qr_side(lp, thermark::geometry::SafeArea::default());
         assert_eq!(side, side.min(lp.height_px));
         let fix = open_gray("sticker_link.png");
         assert_eq!(fix.dimensions(), (W, H));
@@ -304,7 +304,7 @@ async fn wifi_fixture_mock_print_streams_rows() {
 #[ignore = "writes fixtures/sticker_calibrate.png"]
 fn regenerate_calibrate() {
     let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W);
-    let img = image_encode::calibration_pattern(lp);
+    let img = image_encode::calibration_pattern(lp, None);
     let path = fixtures_dir().join("sticker_calibrate.png");
     img.save(&path).unwrap();
     println!("wrote {}", path.display());

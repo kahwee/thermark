@@ -70,7 +70,7 @@ fn qr_label_exact_canvas_and_square_qr() {
     // the feed edge loses a few mm (see `SafeArea`).
     let safe = thermark::geometry::SafeArea::default();
     let printable_h = lp.height_px - safe.top - safe.bottom;
-    let side = max_qr_side(lp);
+    let side = max_qr_side(lp, safe);
     assert!(
         side >= printable_h - 16,
         "QR should use most of the printable height {printable_h}, got {side}"

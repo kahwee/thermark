@@ -10,6 +10,45 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-30
+
+Consolidation of the layout code, after a run of bugs that all traced to the
+same shape: two places computing the same geometry, and one of them drifting.
+No behaviour change intended — `thermark text` renders byte-identically before
+and after.
+
+### Changed
+
+- **One owner for the content box.** `label::content_box(label, safe)` returns
+  the printable area inset by the cosmetic margin. `qr_layout` and
+  `make_text_label` both call it; previously each computed it, and the text
+  path silently drifted onto the raw label.
+- **`max_qr_side` takes a `SafeArea`.** It used the default while the caller
+  rendered with a configured one, so `thermark qr` could log a QR size that did
+  not match the label it printed.
+- **`qr_layout` takes a `SafeArea`** (the `qr_layout_in` split is gone).
+- **One name per placement operation.** `fill_label` and `contain_label` now
+  take a `SafeArea` directly; the `_in` variants and the wrappers
+  `fill_label_with_margin`, `pad_to_label` are removed. Two names for the same
+  operation is how the `contain_label` centring fix got applied to the wrapper
+  nobody called.
+- **`calibration_pattern` takes the `SafeArea`** rather than having a second
+  `_with` entry point.
+
+### Added
+
+- `image_encode::CALIBRATION_RULER_MAJOR_PX` / `_MINOR_PX`. The calibration
+  numerals were positioned at a hardcoded x=30 chosen to clear ticks of length
+  26 — two constants that had to agree by hand. The numerals now derive their
+  inset from the tick length, and skip lettering entirely on labels too narrow
+  to fit them without collision.
+
+### Removed
+
+- `image_encode::pad_to_label`, `fill_label_with_margin`, `fill_label_in`,
+  `contain_label_in`, `calibration_pattern_with`, `label::qr_layout_in` — dead
+  or duplicate entry points.
+
 ## [0.11.0] - 2026-07-30
 
 ### Fixed
@@ -429,7 +468,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/kahwee/thermark/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kahwee/thermark/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kahwee/thermark/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kahwee/thermark/compare/v0.8.0...v0.9.0

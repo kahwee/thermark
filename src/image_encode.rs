@@ -193,14 +193,6 @@ pub fn fit_width(img: DynamicImage, max_width: u32) -> DynamicImage {
     ))
 }
 
-/// Scale image to fill the label canvas (cover), then center-crop to exact size.
-///
-/// This makes content as large as possible on the physical label. Optional
-/// `margin` keeps a white border so heat/ink is less likely to run to the edge.
-pub fn fill_label(img: DynamicImage, label: LabelPx) -> DynamicImage {
-    fill_label_with_margin(img, label, 0)
-}
-
 /// The drawable area of a label once the margin is inset.
 ///
 /// The requested margin is capped at a quarter of each axis so a large
@@ -254,18 +246,12 @@ fn scaled_dimensions(img: &DynamicImage, scale: f64) -> (u32, u32) {
     )
 }
 
-/// Like [`fill_label`] with a white inset margin (pixels on each side).
-pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    fill_label_in(img, label, SafeArea::NONE, margin)
-}
-
-/// Cover-fit `img` into the printable area of `label`, on a full-size canvas.
-pub fn fill_label_in(
-    img: DynamicImage,
-    label: LabelPx,
-    safe: SafeArea,
-    margin: u32,
-) -> DynamicImage {
+/// Cover-fit `img` into the printable area of `label`, cropping overflow.
+///
+/// Makes content as large as the media allows; `margin` keeps a white border
+/// so heat is less likely to run to the edge. Pass [`SafeArea::NONE`] for full
+/// bleed. Returns a full-size canvas with the image placed inside `safe`.
+pub fn fill_label(img: DynamicImage, label: LabelPx, safe: SafeArea, margin: u32) -> DynamicImage {
     let area = safe.content(label).unwrap_or(Rect {
         x: 0,
         y: 0,
@@ -298,16 +284,11 @@ pub fn fill_label_in(
     DynamicImage::ImageRgba8(canvas)
 }
 
-/// Scale image to **fit entirely** inside the label (contain), centered on white.
+/// Scale `img` to **fit entirely** inside the printable area, centred there.
 ///
-/// Prefer this for photographs so nothing is cropped and content sits in the
-/// middle of the label with clean margins.
-pub fn contain_label(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    contain_label_in(img, label, SafeArea::NONE, margin)
-}
-
-/// Contain-fit `img` inside the printable area of `label`, centred there.
-pub fn contain_label_in(
+/// Prefer this for photographs so nothing is cropped. Pass [`SafeArea::NONE`]
+/// to use the whole canvas.
+pub fn contain_label(
     img: DynamicImage,
     label: LabelPx,
     safe: SafeArea,
@@ -337,23 +318,15 @@ pub fn contain_label_in(
     DynamicImage::ImageRgba8(canvas)
 }
 
-/// Pad (or center) an image onto a full label canvas with white background.
-/// Does **not** upscale — use [`fill_label`] / [`contain_label`] to scale.
-pub fn pad_to_label(img: DynamicImage, label: LabelPx) -> DynamicImage {
-    let (iw, ih) = img.dimensions();
-    let tw = label.width_px;
-    let th = label.height_px;
-    let mut canvas = RgbaImage::from_pixel(tw, th, image::Rgba([255, 255, 255, 255]));
-    let x0 = tw.saturating_sub(iw) / 2;
-    let y0 = th.saturating_sub(ih) / 2;
-    imageops::overlay(&mut canvas, &img.to_rgba8(), x0 as i64, y0 as i64);
-    DynamicImage::ImageRgba8(canvas)
-}
-
 /// Spacing between calibration rings, in px (0.5 mm at 8 px/mm).
 pub const CALIBRATION_RING_STEP_PX: u32 = 4;
 /// How many rings the calibration pattern draws.
 pub const CALIBRATION_RINGS: u32 = 6;
+/// Length of a major (5 mm) feed-ruler tick, in px. Numerals are placed clear
+/// of this — see [`crate::label::make_calibration_label`].
+pub const CALIBRATION_RULER_MAJOR_PX: u32 = 26;
+/// Length of a minor (1 mm) feed-ruler tick, in px.
+pub const CALIBRATION_RULER_MINOR_PX: u32 = 12;
 
 /// Calibration pattern: concentric rings at known insets, plus diagonals and a
 /// centre cross.
@@ -363,17 +336,13 @@ pub const CALIBRATION_RINGS: u32 = 6;
 /// sides**, and the first complete ring's inset is the safe margin for that
 /// media. A single border only tells you *that* something clipped; the rings
 /// tell you *how much*.
-pub fn calibration_pattern(label: LabelPx) -> GrayImage {
-    calibration_pattern_with(label, Some(SafeArea::default()))
-}
-
-/// Calibration pattern, additionally outlining `safe` as a thick rectangle.
+/// Additionally outlines `safe` as a thick rectangle.
 ///
 /// The thick box is the pass/fail test: if it prints complete on all four
 /// sides, the configured [`SafeArea`] is inside the real printable region and
 /// labels will not clip. The thin rings around it measure how much headroom
 /// (or shortfall) there is.
-pub fn calibration_pattern_with(label: LabelPx, safe: Option<SafeArea>) -> GrayImage {
+pub fn calibration_pattern(label: LabelPx, safe: Option<SafeArea>) -> GrayImage {
     let w = label.width_px;
     let h = label.height_px;
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
@@ -423,7 +392,11 @@ pub fn calibration_pattern_with(label: LabelPx, safe: Option<SafeArea>) -> GrayI
             break;
         }
         let major = mm % 5 == 0;
-        let len = if major { 26 } else { 12 };
+        let len = if major {
+            CALIBRATION_RULER_MAJOR_PX
+        } else {
+            CALIBRATION_RULER_MINOR_PX
+        };
         let thick = if major { 3 } else { 1 };
         for t in 0..thick {
             let yy = (y + t).min(h - 1);
@@ -480,7 +453,7 @@ mod tests {
     fn fill_label_exact_size() {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(50, 50, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
-        let out = fill_label(src, lp);
+        let out = fill_label(src, lp, SafeArea::NONE, 0);
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
     }
 
@@ -489,7 +462,7 @@ mod tests {
         // Tall image → letterbox left/right on a wide label.
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(40, 80, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
-        let out = contain_label(src, lp, 0).to_luma8();
+        let out = contain_label(src, lp, SafeArea::NONE, 0).to_luma8();
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
         // Corners of canvas should stay white (letterbox / padding).
         assert_eq!(out.get_pixel(0, 0)[0], 255);
@@ -505,7 +478,7 @@ mod tests {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(200, 200, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
         let margin = 16u32;
-        let out = contain_label(src, lp, margin).to_luma8();
+        let out = contain_label(src, lp, SafeArea::NONE, margin).to_luma8();
         // Outer margin ring must be white.
         for x in 0..lp.width_px {
             assert_eq!(out.get_pixel(x, 0)[0], 255);
@@ -523,8 +496,8 @@ mod tests {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
 
         for placed in [
-            fill_label_in(src.clone(), lp, safe, 0),
-            contain_label_in(src.clone(), lp, safe, 0),
+            fill_label(src.clone(), lp, safe, 0),
+            contain_label(src.clone(), lp, safe, 0),
         ] {
             let g = placed.to_luma8();
             assert_eq!(g.dimensions(), (lp.width_px, lp.height_px));
@@ -575,7 +548,7 @@ mod tests {
             }
         }
         let art = trim_white(DynamicImage::ImageLuma8(g), 127);
-        let placed = contain_label_in(art, lp, safe, 0).to_luma8();
+        let placed = contain_label(art, lp, safe, 0).to_luma8();
 
         let usable = lp.height_px - safe.bottom;
         let mut lowest = 0;
@@ -596,7 +569,7 @@ mod tests {
         // Calibration depends on this: it must reach the true edges.
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
-        let g = fill_label_in(src, lp, SafeArea::NONE, 0).to_luma8();
+        let g = fill_label(src, lp, SafeArea::NONE, 0).to_luma8();
         assert_eq!(g.get_pixel(0, 0)[0], 0);
         assert_eq!(g.get_pixel(lp.width_px - 1, lp.height_px - 1)[0], 0);
     }

@@ -121,10 +121,10 @@ pub fn compose_for_label(
                 "label canvas"
             );
             img = if opts.fill {
-                image_encode::fill_label_in(img, lp, opts.safe, opts.margin_px)
+                image_encode::fill_label(img, lp, opts.safe, opts.margin_px)
             } else {
                 // Contain + center: whole photo visible, white margins, no crop.
-                image_encode::contain_label_in(img, lp, opts.safe, opts.margin_px)
+                image_encode::contain_label(img, lp, opts.safe, opts.margin_px)
             };
         }
         None if opts.fit => img = image_encode::fit_width(img, max_width_px),

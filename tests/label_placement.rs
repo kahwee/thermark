@@ -133,7 +133,7 @@ fn text_is_optically_centred_in_the_printable_area() {
 
 #[test]
 fn trimmed_artwork_stays_inside_the_printable_area() {
-    use thermark::image_encode::{contain_label_in, fill_label_in, trim_white};
+    use thermark::image_encode::{contain_label, fill_label, trim_white};
     let lp = label();
     let safe = SafeArea::default();
 
@@ -150,8 +150,8 @@ fn trimmed_artwork_stays_inside_the_printable_area() {
     let art = trim_white(image::DynamicImage::ImageLuma8(g), 127);
 
     for (mode, placed) in [
-        ("contain", contain_label_in(art.clone(), lp, safe, 0)),
-        ("fill", fill_label_in(art, lp, safe, 0)),
+        ("contain", contain_label(art.clone(), lp, safe, 0)),
+        ("fill", fill_label(art, lp, safe, 0)),
     ] {
         assert_inside_safe_area(&placed.to_luma8(), lp, safe, mode);
     }
