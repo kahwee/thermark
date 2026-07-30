@@ -46,10 +46,12 @@ pub async fn run(cli: Cli) -> Result<i32> {
             no_fill,
             margin,
             dither,
+            full_bleed,
+            preview,
         } => {
             commands::print::print(
                 &cfg, &conn, &task, &image, model, density, rotate, threshold, fit, label, fill,
-                no_fill, margin, dither,
+                no_fill, margin, dither, full_bleed, preview,
             )
             .await?
         }

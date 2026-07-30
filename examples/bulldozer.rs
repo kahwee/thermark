@@ -5,6 +5,9 @@
 //! thermark print -i local/prints/bulldozer.png --label 50x30 --no-fill -d 4
 //! ```
 //!
+//! Draws on the full canvas. `thermark print` places the result inside the
+//! printable area, so there is no need to pre-inset the artwork here.
+//!
 //! Deliberately outlines rather than fills: large solid areas bleed on thermal
 //! paper, drain the battery, and read as a blob instead of a drawing.
 

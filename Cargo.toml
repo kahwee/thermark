@@ -1,6 +1,6 @@
 [package]
 name = "thermark"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.87"
 description = "Local sticker printing for pocket thermal printers over BLE/USB — QR links, inventory tags, badges, photos; no vendor app"

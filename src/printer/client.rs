@@ -2,7 +2,7 @@
 
 use super::info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
 use crate::errors::{Error, PrinterErrorCode, Result};
-use crate::geometry::{LabelMm, LabelPx};
+use crate::geometry::{LabelMm, SafeArea};
 use crate::image_encode::{self, Raster};
 use crate::packet::Packet;
 use crate::print_task::{PrintTask, effective_max_width_px};
@@ -92,6 +92,44 @@ pub struct PrinterClient<T: Transport> {
     pacing: Pacing,
 }
 
+/// Lay an image out on its label canvas exactly as printing would.
+///
+/// Split out from the print path so a preview can be produced without a
+/// printer — `thermark print --preview out.png` renders through this.
+pub fn compose_for_label(
+    path: &Path,
+    opts: &PrintOptions,
+    max_width_px: u32,
+) -> Result<image::DynamicImage> {
+    let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
+
+    match opts.label.map(|l| l.to_pixels(max_width_px)) {
+        Some(lp) => {
+            info!(
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = lp.mm().width_mm,
+                height_mm = lp.mm().height_mm,
+                max_w = max_width_px,
+                fill = opts.fill,
+                margin_px = opts.margin_px,
+                dither = opts.dither,
+                safe_bottom = opts.safe.bottom,
+                "label canvas"
+            );
+            img = if opts.fill {
+                image_encode::fill_label_in(img, lp, opts.safe, opts.margin_px)
+            } else {
+                // Contain + center: whole photo visible, white margins, no crop.
+                image_encode::contain_label_in(img, lp, opts.safe, opts.margin_px)
+            };
+        }
+        None if opts.fit => img = image_encode::fit_width(img, max_width_px),
+        None => {}
+    }
+    Ok(img)
+}
+
 /// Options for a raster print job.
 #[derive(Debug, Clone)]
 pub struct PrintOptions {
@@ -109,6 +147,10 @@ pub struct PrintOptions {
     pub margin_px: u32,
     /// Floyd–Steinberg dither instead of hard B/W threshold (photos).
     pub dither: bool,
+    /// Printable insets. Raw images are placed inside this so nothing lands in
+    /// the band the printer cannot reach. Use [`SafeArea::NONE`] for content
+    /// that already accounts for it (rendered stickers, calibration patterns).
+    pub safe: SafeArea,
 }
 
 impl Default for PrintOptions {
@@ -122,6 +164,7 @@ impl Default for PrintOptions {
             fill: true,
             margin_px: 0,
             dither: false,
+            safe: SafeArea::default(),
         }
     }
 }
@@ -542,6 +585,7 @@ impl<T: Transport> PrinterClient<T> {
                 fill: false,
                 margin_px: 0,
                 dither: false,
+                safe: SafeArea::default(),
             },
         )
         .await
@@ -551,31 +595,7 @@ impl<T: Transport> PrinterClient<T> {
         // Size the canvas against the same limit the raster is checked against,
         // so a mismatched --model/--task fails before encoding, not after.
         let max_w = self.max_width_px();
-        let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
-
-        let label_px: Option<LabelPx> = opts.label.map(|l| l.to_pixels(max_w));
-        if let Some(lp) = label_px {
-            info!(
-                width_px = lp.width_px,
-                height_px = lp.height_px,
-                width_mm = lp.mm().width_mm,
-                height_mm = lp.mm().height_mm,
-                max_w,
-                fill = opts.fill,
-                margin_px = opts.margin_px,
-                dither = opts.dither,
-                "label canvas"
-            );
-            img = if opts.fill {
-                image_encode::fill_label_with_margin(img, lp, opts.margin_px)
-            } else {
-                // Contain + center: whole photo visible, white margins, no crop.
-                image_encode::contain_label(img, lp, opts.margin_px)
-            };
-        } else if opts.fit {
-            img = image_encode::fit_width(img, max_w);
-        }
-
+        let img = compose_for_label(path, &opts, max_w)?;
         let raster = image_encode::encode(img, max_w, opts.threshold.get(), opts.dither)?;
 
         if let Ok(rfid) = self.rfid_info().await {

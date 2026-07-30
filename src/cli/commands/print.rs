@@ -1,6 +1,6 @@
 //! Raster printing: `print` and `calibrate`.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use thermark::config::Config;
 use thermark::geometry::LabelMm;
@@ -30,6 +30,8 @@ pub async fn print(
     no_fill: bool,
     margin: u32,
     dither: bool,
+    full_bleed: bool,
+    preview: Option<PathBuf>,
 ) -> Result<()> {
     if !image.exists() {
         bail!(
@@ -54,7 +56,27 @@ pub async fn print(
         fill: use_fill,
         margin_px: margin,
         dither,
+        safe: if full_bleed {
+            thermark::geometry::SafeArea::NONE
+        } else {
+            cfg.resolve_safe_area()
+        },
     };
+    if let Some(out) = preview {
+        // Compose through the exact same path a real print uses, then stop.
+        let max_w = thermark::print_task::effective_max_width_px(
+            model,
+            crate::cli::session::resolve_task(model, task)?,
+        );
+        let composed = thermark::printer::compose_for_label(image, &opts, max_w)?;
+        composed
+            .to_luma8()
+            .save(&out)
+            .with_context(|| format!("save {}", out.display()))?;
+        println!("preview written to {} (nothing printed)", out.display());
+        return Ok(());
+    }
+
     print_file(cfg, conn, task, model, image, opts).await?;
     println!("OK — sent print job");
     Ok(())
@@ -130,6 +152,9 @@ pub async fn calibrate(
         fill: true,
         margin_px: 0,
         dither: false,
+        // Full bleed on purpose: this pattern exists to find the true edges,
+        // so it must not be inset by the value it is measuring.
+        safe: thermark::geometry::SafeArea::NONE,
     };
     print_file(cfg, conn, task, model, &tmp, opts).await?;
     println!("OK — calibration printed ({label})");

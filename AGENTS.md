@@ -49,6 +49,8 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
 
 Artwork demo: `cargo run --example bulldozer -- local/prints/bulldozer.png`
 
+Check placement without a printer: `thermark print -i art.png --label 50x30 --preview out.png`
+
 Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
 Experimental print tasks need `--allow-experimental`.

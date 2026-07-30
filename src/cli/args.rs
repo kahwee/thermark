@@ -172,6 +172,14 @@ pub enum Commands {
         /// Floyd–Steinberg dither instead of hard B/W (recommended for photographs)
         #[arg(long, default_value_t = false)]
         dither: bool,
+        /// Ignore the measured printable area and use the whole canvas.
+        /// Content near the feed edge will be clipped by the printer.
+        #[arg(long, default_value_t = false)]
+        full_bleed: bool,
+        /// Write exactly what would be sent to this PNG and do not print.
+        /// Lets you check placement without a printer or a wasted label.
+        #[arg(long)]
+        preview: Option<PathBuf>,
     },
     /// Print a full-bleed calibration pattern for a label size (find true print area)
     Calibrate {

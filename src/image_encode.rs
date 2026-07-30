@@ -1,7 +1,7 @@
 //! Rasterize images into NIIMBOT 1-bit row packets.
 
 use crate::errors::{Error, Result};
-use crate::geometry::{LabelPx, SafeArea};
+use crate::geometry::{LabelPx, Rect, SafeArea};
 use crate::packet::Packet;
 use crate::protocol;
 use crate::types::Rotation;
@@ -177,22 +177,30 @@ pub fn fill_label(img: DynamicImage, label: LabelPx) -> DynamicImage {
 struct ContentBox {
     canvas_w: u32,
     canvas_h: u32,
+    /// Top-left of the content box on the full canvas.
+    origin_x: u32,
+    origin_y: u32,
     margin: u32,
     width: u32,
     height: u32,
 }
 
 impl ContentBox {
-    fn new(label: LabelPx, margin: u32) -> Self {
+    /// Content box for `area` within a full `label` canvas.
+    fn in_rect(label: LabelPx, area: Rect, margin: u32) -> Self {
         let canvas_w = label.width_px.max(1);
         let canvas_h = label.height_px.max(1);
-        let margin = margin.min(canvas_w / 4).min(canvas_h / 4);
+        let aw = area.w.max(1);
+        let ah = area.h.max(1);
+        let margin = margin.min(aw / 4).min(ah / 4);
         Self {
             canvas_w,
             canvas_h,
+            origin_x: area.x + margin,
+            origin_y: area.y + margin,
             margin,
-            width: canvas_w.saturating_sub(margin * 2).max(1),
-            height: canvas_h.saturating_sub(margin * 2).max(1),
+            width: aw.saturating_sub(margin * 2).max(1),
+            height: ah.saturating_sub(margin * 2).max(1),
         }
     }
 
@@ -216,7 +224,23 @@ fn scaled_dimensions(img: &DynamicImage, scale: f64) -> (u32, u32) {
 
 /// Like [`fill_label`] with a white inset margin (pixels on each side).
 pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    let bx = ContentBox::new(label, margin);
+    fill_label_in(img, label, SafeArea::NONE, margin)
+}
+
+/// Cover-fit `img` into the printable area of `label`, on a full-size canvas.
+pub fn fill_label_in(
+    img: DynamicImage,
+    label: LabelPx,
+    safe: SafeArea,
+    margin: u32,
+) -> DynamicImage {
+    let area = safe.content(label).unwrap_or(Rect {
+        x: 0,
+        y: 0,
+        w: label.width_px,
+        h: label.height_px,
+    });
+    let bx = ContentBox::in_rect(label, area, margin);
     let (iw, ih) = img.dimensions();
     // Scale so both dimensions cover the content box (may overflow one axis).
     let scale = f64::max(bx.width as f64 / iw as f64, bx.height as f64 / ih as f64);
@@ -233,7 +257,12 @@ pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) ->
     .to_image();
 
     let mut canvas = bx.white_canvas();
-    imageops::overlay(&mut canvas, &cropped, bx.margin as i64, bx.margin as i64);
+    imageops::overlay(
+        &mut canvas,
+        &cropped,
+        bx.origin_x as i64,
+        bx.origin_y as i64,
+    );
     DynamicImage::ImageRgba8(canvas)
 }
 
@@ -242,19 +271,36 @@ pub fn fill_label_with_margin(img: DynamicImage, label: LabelPx, margin: u32) ->
 /// Prefer this for photographs so nothing is cropped and content sits in the
 /// middle of the label with clean margins.
 pub fn contain_label(img: DynamicImage, label: LabelPx, margin: u32) -> DynamicImage {
-    let bx = ContentBox::new(label, margin);
+    contain_label_in(img, label, SafeArea::NONE, margin)
+}
+
+/// Contain-fit `img` inside the printable area of `label`, centred there.
+pub fn contain_label_in(
+    img: DynamicImage,
+    label: LabelPx,
+    safe: SafeArea,
+    margin: u32,
+) -> DynamicImage {
+    let area = safe.content(label).unwrap_or(Rect {
+        x: 0,
+        y: 0,
+        w: label.width_px,
+        h: label.height_px,
+    });
+    let bx = ContentBox::in_rect(label, area, margin);
     let (iw, ih) = img.dimensions();
     let scale = f64::min(bx.width as f64 / iw as f64, bx.height as f64 / ih as f64);
     let (nw, nh) = scaled_dimensions(&img, scale);
 
     let resized = imageops::resize(&img, nw, nh, imageops::FilterType::CatmullRom);
     let mut canvas = bx.white_canvas();
-    // Center within the full canvas (margin is already baked into max size).
+    // Centre within the content box, not the raw canvas — centring on the
+    // canvas pushes content into the band the printer cannot reach.
     imageops::overlay(
         &mut canvas,
         &resized,
-        (bx.canvas_w.saturating_sub(nw) / 2) as i64,
-        (bx.canvas_h.saturating_sub(nh) / 2) as i64,
+        (bx.origin_x + bx.width.saturating_sub(nw) / 2) as i64,
+        (bx.origin_y + bx.height.saturating_sub(nh) / 2) as i64,
     );
     DynamicImage::ImageRgba8(canvas)
 }
@@ -433,6 +479,44 @@ mod tests {
             assert_eq!(out.get_pixel(x, 0)[0], 255);
             assert_eq!(out.get_pixel(x, margin - 1)[0], 255);
         }
+    }
+
+    #[test]
+    fn raw_images_are_kept_out_of_the_unprintable_band() {
+        // The bug this pins: `thermark print` scaled images across the whole
+        // canvas, so the bottom rows landed in the band the printer never
+        // reaches and were silently lost.
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let safe = SafeArea::B1;
+        let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
+
+        for placed in [
+            fill_label_in(src.clone(), lp, safe, 0),
+            contain_label_in(src.clone(), lp, safe, 0),
+        ] {
+            let g = placed.to_luma8();
+            assert_eq!(g.dimensions(), (lp.width_px, lp.height_px));
+            for y in (lp.height_px - safe.bottom)..lp.height_px {
+                for x in 0..lp.width_px {
+                    assert_eq!(g.get_pixel(x, y)[0], 255, "ink at ({x},{y}) is unprintable");
+                }
+            }
+            for y in 0..safe.top {
+                for x in 0..lp.width_px {
+                    assert_eq!(g.get_pixel(x, y)[0], 255, "ink at ({x},{y}) is unprintable");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn safe_area_none_still_fills_the_whole_canvas() {
+        // Calibration depends on this: it must reach the true edges.
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
+        let g = fill_label_in(src, lp, SafeArea::NONE, 0).to_luma8();
+        assert_eq!(g.get_pixel(0, 0)[0], 0);
+        assert_eq!(g.get_pixel(lp.width_px - 1, lp.height_px - 1)[0], 0);
     }
 
     #[test]

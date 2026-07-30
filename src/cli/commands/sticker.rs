@@ -44,6 +44,9 @@ fn sticker_print_options(label: LabelMm, density: Density) -> PrintOptions {
         fill: false,
         margin_px: 0,
         dither: false,
+        // The rendered sticker already lays out inside the printable area;
+        // insetting again here would shrink it twice.
+        safe: thermark::geometry::SafeArea::NONE,
     }
 }
 

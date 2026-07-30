@@ -10,6 +10,43 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-30
+
+### Fixed
+
+- **`thermark print` ignored the printable area entirely.** Only `qr`, `text`,
+  and `wifi` respected `SafeArea`; raw images were scaled across the whole
+  240-row canvas, so anything in the bottom ~40 rows went straight into the
+  band the printer never reaches and was silently lost. This is why a sticker
+  could still come out clipped after the safe area was measured and saved —
+  the setting simply was not consulted on that path.
+- **`contain_label` centred on the raw canvas rather than the printable box**,
+  which pushed content toward the feed edge even once the area was known.
+
+Neither is a protocol problem, which is where I had been looking. A regression
+test now asserts that no ink lands outside the printable area for either
+placement mode, and that `SafeArea::NONE` still reaches the true edges (the
+calibration pattern depends on that).
+
+### Added
+
+- **`thermark print --preview <png>`** — writes exactly what would be sent and
+  prints nothing. Composition runs through the same `compose_for_label` the
+  real print path uses, so placement can be checked without a printer or a
+  wasted label.
+- **`thermark print --full-bleed`** — opt out of the inset and use the whole
+  canvas, for media whose feed edge really is printable.
+- `printer::compose_for_label`, `image_encode::fill_label_in` /
+  `contain_label_in` taking an explicit `SafeArea`.
+
+### Changed
+
+- Rendered stickers and the calibration pattern now pass `SafeArea::NONE` when
+  they hand their PNG to the print path: they have already laid out inside the
+  printable area, and insetting a second time would shrink them twice. The
+  calibration pattern in particular must stay full-bleed — it is the
+  instrument that measures those edges.
+
 ## [0.6.0] - 2026-07-30
 
 Measured the B1's real printable window instead of guessing at it.
@@ -273,7 +310,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kahwee/thermark/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kahwee/thermark/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kahwee/thermark/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/kahwee/thermark/compare/v0.3.0...v0.4.0
