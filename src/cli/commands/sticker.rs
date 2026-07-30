@@ -99,6 +99,7 @@ pub async fn text(
     let gray = make_text_label(&TextLabelOptions {
         text: text.replace("\\n", "\n"),
         label: lp,
+        safe: cfg.resolve_safe_area(),
         align,
         border,
         font_path: font.font.clone(),
@@ -150,6 +151,7 @@ pub async fn qr(
         url: url.to_string(),
         side_text: text.replace("\\n", "\n"),
         label: lp,
+        safe: cfg.resolve_safe_area(),
         text_side,
         border,
         font_path: font.font.clone(),
@@ -215,6 +217,7 @@ pub async fn wifi(
         hidden,
         show_password,
         label: lp,
+        safe: cfg.resolve_safe_area(),
         text_side,
         font_path: font.font.clone(),
         font_name: font.font_name.clone(),

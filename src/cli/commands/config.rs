@@ -16,6 +16,13 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             model,
             scan_secs,
         } => set(&addr, conn, model, scan_secs)?,
+        ConfigCmd::SafeArea {
+            top,
+            bottom,
+            left,
+            right,
+            reset,
+        } => safe_area(top, bottom, left, right, reset)?,
         ConfigCmd::Clear => clear()?,
     }
     Ok(())
@@ -36,7 +43,7 @@ fn show(json: bool) -> Result<()> {
         return Ok(());
     }
     // field, value, what applies when unset
-    let rows: [(&str, Option<String>, &str); 4] = [
+    let rows: [(&str, Option<String>, &str); 5] = [
         ("addr", cfg.addr.clone(), "(unset)"),
         (
             "connection",
@@ -48,6 +55,16 @@ fn show(json: bool) -> Result<()> {
             "scan_secs",
             cfg.scan_secs.map(|n| n.to_string()),
             "(default 4)",
+        ),
+        (
+            "safe_area",
+            cfg.safe_area.map(|s| {
+                format!(
+                    "top {} / bottom {} / left {} / right {} px",
+                    s.top, s.bottom, s.left, s.right
+                )
+            }),
+            "(measured default)",
         ),
     ];
     for (name, value, fallback) in rows {
@@ -65,6 +82,54 @@ fn set(addr: &str, conn: ConnPref, model: Option<Model>, scan_secs: Option<u64>)
     println!("  file:       {}", path.display());
     println!("Now you can run: thermark info   (no -a needed)");
     println!("JSON view:       thermark config show --json");
+    Ok(())
+}
+
+/// Update the saved printable insets. Millimetres in, pixels stored.
+fn safe_area(
+    top: Option<f64>,
+    bottom: Option<f64>,
+    left: Option<f64>,
+    right: Option<f64>,
+    reset: bool,
+) -> Result<()> {
+    use thermark::geometry::{PX_PER_MM, SafeArea};
+
+    let mut cfg = Config::load().unwrap_or_default();
+    if reset {
+        cfg.safe_area = None;
+        cfg.save()?;
+        println!("safe area reset to the built-in default");
+        return Ok(());
+    }
+
+    let current = cfg.resolve_safe_area();
+    let px = |mm: Option<f64>, fallback: u32| {
+        mm.map(|v| (v.max(0.0) * PX_PER_MM).round() as u32)
+            .unwrap_or(fallback)
+    };
+    let updated = SafeArea {
+        top: px(top, current.top),
+        bottom: px(bottom, current.bottom),
+        left: px(left, current.left),
+        right: px(right, current.right),
+    };
+    cfg.safe_area = Some(updated);
+    let path = cfg.save()?;
+    let mm = |v: u32| v as f64 / PX_PER_MM;
+    println!(
+        "safe area: top {:.1}mm  bottom {:.1}mm  left {:.1}mm  right {:.1}mm",
+        mm(updated.top),
+        mm(updated.bottom),
+        mm(updated.left),
+        mm(updated.right)
+    );
+    println!(
+        "  ({} / {} / {} / {} px)",
+        updated.top, updated.bottom, updated.left, updated.right
+    );
+    println!("  file: {}", path.display());
+    println!("Confirm with: thermark calibrate --label 50x30");
     Ok(())
 }
 

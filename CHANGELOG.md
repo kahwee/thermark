@@ -10,6 +10,49 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-30
+
+Makes the printable-area problem measurable and configurable instead of
+hard-coded, after a 5 mm bottom inset still clipped on real hardware.
+
+### Added
+
+- **`thermark config safe-area --top/--bottom/--left/--right <mm>`** — save the
+  insets measured with `thermark calibrate`. Values are millimetres in, pixels
+  stored; omitted edges keep their current value; `--reset` returns to the
+  built-in default. Shown by `thermark config show` and used by the `qr`,
+  `text`, and `wifi` label paths, so a measurement no longer needs a rebuild.
+- **A feed ruler on the calibration pattern** — a tick every 1 mm down both
+  edges, long every 5 mm. The rings only resolve 0.5 mm near the very edge;
+  the ruler tells you exactly which row the print stops at, which is the
+  number needed to size the bottom inset.
+- `SafeArea::from_mm`, and serde support so it round-trips through
+  `config.json`.
+
+### Changed
+
+- `QrLabelOptions`, `TextLabelOptions`, and `WifiLabelOptions` take a `safe:
+  SafeArea` field rather than reading a global default, so the CLI can pass the
+  configured value.
+- `SafeArea::B1`'s bottom inset is 40 px (5 mm), up from 20 px, per the
+  calibration ruler. **This is provisional** — see the note below.
+
+### Fixed
+
+- The calibration legend printed the *default* safe area while the pattern drew
+  the *configured* one: a `let safe = SafeArea::default()` shadowed the
+  function parameter, so the legend could contradict the label in your hand.
+
+### Known issue
+
+The bottom edge can still clip. Research points at a registration problem
+rather than an unprintable margin: community reports reports the printer
+starting to print before the label's leading edge, so the leading rows land on
+the gap between labels and the trailing rows fall off the end. If that is what
+is happening here, shrinking the content (what `SafeArea` does) is the wrong
+remedy — the content needs to be *offset*, not made smaller. The feed ruler
+added here is what distinguishes the two.
+
 ## [0.4.0] - 2026-07-30
 
 Driven by printing on real B1 hardware and reading the results.
@@ -192,7 +235,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kahwee/thermark/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/kahwee/thermark/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kahwee/thermark/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kahwee/thermark/compare/v0.1.0...v0.2.0

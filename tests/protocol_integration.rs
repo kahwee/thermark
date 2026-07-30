@@ -66,10 +66,18 @@ fn qr_label_exact_canvas_and_square_qr() {
         make_qr_label("https://www.youtube.com", "ABC\n123", lp, TextSide::Right).expect("layout");
     assert_eq!(img.dimensions(), (384, 240));
 
+    // The QR fills the *printable* band, which is shorter than the canvas:
+    // the feed edge loses a few mm (see `SafeArea`).
+    let safe = thermark::geometry::SafeArea::default();
+    let printable_h = lp.height_px - safe.top - safe.bottom;
     let side = max_qr_side(lp);
     assert!(
-        side >= 200,
-        "QR should use most of label height, got {side}"
+        side >= printable_h - 16,
+        "QR should use most of the printable height {printable_h}, got {side}"
+    );
+    assert!(
+        side <= printable_h,
+        "QR {side} must not exceed the printable height {printable_h}"
     );
     let qr = render_qr_square("https://example.com", side).unwrap();
     assert_eq!(qr.dimensions(), (side, side));

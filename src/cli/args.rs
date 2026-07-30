@@ -371,6 +371,23 @@ pub enum ConfigCmd {
         #[arg(long)]
         scan_secs: Option<u64>,
     },
+    /// Save the printable insets measured with `thermark calibrate`
+    ///
+    /// Values are millimetres from each edge. Omitted edges keep their current
+    /// value. The feed (bottom) edge is usually the only non-zero one.
+    SafeArea {
+        #[arg(long)]
+        top: Option<f64>,
+        #[arg(long)]
+        bottom: Option<f64>,
+        #[arg(long)]
+        left: Option<f64>,
+        #[arg(long)]
+        right: Option<f64>,
+        /// Forget the saved value and use the built-in default
+        #[arg(long, default_value_t = false)]
+        reset: bool,
+    },
     /// Remove the config file
     Clear,
 }

@@ -13,6 +13,7 @@
 //! 3. `addr` in this config file
 
 use crate::errors::{Error, Result};
+use crate::geometry::SafeArea;
 use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -69,6 +70,10 @@ pub struct Config {
     /// Default BLE scan seconds before connect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan_secs: Option<u64>,
+    /// Measured printable insets for this printer + media, in pixels.
+    /// Set it from `thermark calibrate`; see `thermark config safe-area`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_area: Option<SafeArea>,
 }
 
 impl Config {
@@ -83,6 +88,7 @@ impl Config {
             && self.connection.is_none()
             && self.model.is_none()
             && self.scan_secs.is_none()
+            && self.safe_area.is_none()
     }
 
     /// Config directory (platform standard).
@@ -216,6 +222,11 @@ impl Config {
         cli.or(self.model).unwrap_or_default()
     }
 
+    /// Measured safe area if one was saved, else the built-in default.
+    pub fn resolve_safe_area(&self) -> SafeArea {
+        self.safe_area.unwrap_or_default()
+    }
+
     /// Prefer CLI scan seconds when provided; else config; else 4.
     pub fn resolve_scan_secs(&self, cli: Option<u64>) -> u64 {
         cli.or(self.scan_secs).unwrap_or(4).max(1)
@@ -248,6 +259,7 @@ mod tests {
             connection: Some(ConnPref::Ble),
             model: Some(Model::B1),
             scan_secs: Some(6),
+            safe_area: None,
         };
         cfg.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -281,6 +293,7 @@ mod tests {
             connection: Some(ConnPref::Usb),
             model: Some(Model::B21),
             scan_secs: Some(9),
+            safe_area: None,
         };
         cfg.apply_set("B1-New", ConnPref::Ble, None, None);
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));

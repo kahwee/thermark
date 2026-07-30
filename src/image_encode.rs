@@ -335,6 +335,27 @@ pub fn calibration_pattern_with(label: LabelPx, safe: Option<SafeArea>) -> GrayI
         }
     }
 
+    // Feed ruler down both sides: a minor tick every 1 mm, a long major tick
+    // every 5 mm. Read off where the print stops to get the exact loss at the
+    // feed edge — the rings only resolve 0.5 mm near the very edge.
+    let px_per_mm = crate::geometry::PX_PER_MM as u32;
+    for mm in 0..=(h / px_per_mm) {
+        let y = mm * px_per_mm;
+        if y >= h {
+            break;
+        }
+        let major = mm % 5 == 0;
+        let len = if major { 26 } else { 12 };
+        let thick = if major { 3 } else { 1 };
+        for t in 0..thick {
+            let yy = (y + t).min(h - 1);
+            for x in 0..len.min(w) {
+                img.put_pixel(x, yy, Luma([0]));
+                img.put_pixel(w - 1 - x, yy, Luma([0]));
+            }
+        }
+    }
+
     // The safe-area box, drawn thick so it is unmistakable next to the rings.
     if let Some(area) = safe.and_then(|s| s.content(label)) {
         let t = 3i64;

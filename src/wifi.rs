@@ -8,7 +8,7 @@
 //! the password stays in the QR (optional cleartext with care).
 
 use crate::errors::{Error, Result};
-use crate::geometry::LabelPx;
+use crate::geometry::{LabelPx, SafeArea};
 use crate::label::{QrLabelOptions, TextSide, make_qr_label_opts};
 use image::GrayImage;
 
@@ -117,6 +117,7 @@ pub struct WifiLabelOptions {
     /// If true, print password in cleartext under the SSID (less secure).
     pub show_password: bool,
     pub label: LabelPx,
+    pub safe: SafeArea,
     pub text_side: TextSide,
     pub font_path: Option<std::path::PathBuf>,
     pub font_name: Option<String>,
@@ -136,6 +137,7 @@ pub fn make_wifi_label(opts: &WifiLabelOptions) -> Result<GrayImage> {
         url: payload,
         side_text: side,
         label: opts.label,
+        safe: opts.safe,
         text_side: opts.text_side,
         border: opts.border,
         font_path: opts.font_path.clone(),

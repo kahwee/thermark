@@ -22,6 +22,9 @@ pub struct QrLabelOptions {
     pub url: String,
     pub side_text: String,
     pub label: LabelPx,
+    /// Printable insets for this printer/media. `SafeArea::default()` is the
+    /// measured B1 value; override from `Config::resolve_safe_area`.
+    pub safe: SafeArea,
     pub text_side: TextSide,
     /// Draw a 1px outer border (off by default — not needed for printing).
     pub border: bool,
@@ -98,7 +101,7 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
     }
     let w = opts.label.width_px;
     let h = opts.label.height_px;
-    let layout = qr_layout(opts.label).ok_or_else(|| {
+    let layout = qr_layout_in(opts.label, opts.safe).ok_or_else(|| {
         Error::qr(format!(
             "label {w}x{h}px is too small for a QR beside text \
              (need at least {QR_SIDE_MIN}px of QR after margins). \
@@ -222,6 +225,7 @@ fn draw_border(img: &mut GrayImage) {
 pub struct TextLabelOptions {
     pub text: String,
     pub label: LabelPx,
+    pub safe: SafeArea,
     pub align: TextAlign,
     pub border: bool,
     pub font_path: Option<std::path::PathBuf>,
@@ -282,6 +286,7 @@ pub fn make_qr_label(
         url: url.into(),
         side_text: side_text.into(),
         label,
+        safe: SafeArea::default(),
         text_side,
         border: false,
         font_path: None,
@@ -436,6 +441,7 @@ mod tests {
         let Ok(img) = make_text_label(&TextLabelOptions {
             text: "HELLO\nWORLD".into(),
             label: lp,
+            safe: SafeArea::default(),
             align: TextAlign::Center,
             border: false,
             font_path: None,
@@ -460,6 +466,7 @@ mod tests {
             make_text_label(&TextLabelOptions {
                 text: "   ".into(),
                 label: lp,
+                safe: SafeArea::default(),
                 align: TextAlign::Center,
                 border: false,
                 font_path: None,

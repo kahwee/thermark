@@ -61,11 +61,9 @@ pub async fn print(
 }
 
 /// Explain how to read the pattern, so a re-run needs no other reference.
-fn print_calibration_legend(lp: thermark::geometry::LabelPx) {
-    use thermark::geometry::SafeArea;
+fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geometry::SafeArea) {
     use thermark::image_encode::{CALIBRATION_RING_STEP_PX, CALIBRATION_RINGS};
 
-    let safe = SafeArea::default();
     let step_mm = CALIBRATION_RING_STEP_PX as f64 / thermark::geometry::PX_PER_MM;
     println!();
     println!("How to read it:");
@@ -79,6 +77,11 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx) {
     );
     println!("               Count how many are complete on each edge:");
     println!("               ring N complete  ->  that edge needs {step_mm} mm x N of margin.");
+    println!("  SIDE ticks = a feed ruler from the top edge: short = 1 mm,");
+    println!("               long = 5 mm. Read off the LAST tick that printed —");
+    println!("               that is your usable height; the rest is lost at the");
+    println!("               feed edge. e.g. last long tick at 25 mm on a 30 mm");
+    println!("               label  ->  bottom inset needs ~5 mm (40 px).");
     println!("  Diagonals  = skew check; the X should meet exactly at the centre cross.");
     println!();
     println!(
@@ -108,7 +111,7 @@ pub async fn calibrate(
     );
 
     let tmp: PathBuf = std::env::temp_dir().join("thermark_calibrate.png");
-    image_encode::calibration_pattern(lp).save(&tmp)?;
+    image_encode::calibration_pattern_with(lp, Some(cfg.resolve_safe_area())).save(&tmp)?;
 
     let opts = PrintOptions {
         density,
@@ -122,6 +125,6 @@ pub async fn calibrate(
     };
     print_file(cfg, conn, task, model, &tmp, opts).await?;
     println!("OK — calibration printed ({label})");
-    print_calibration_legend(lp);
+    print_calibration_legend(lp, cfg.resolve_safe_area());
     Ok(())
 }

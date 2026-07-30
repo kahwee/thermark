@@ -119,7 +119,7 @@ pub struct Rect {
 /// lost — the label clears the printhead before the final rows are laid down.
 /// Padding all four edges equally would give away good label area on three
 /// sides to fix a problem on one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SafeArea {
     pub top: u32,
     pub bottom: u32,
@@ -128,10 +128,15 @@ pub struct SafeArea {
 }
 
 impl SafeArea {
-    /// Measured default for B1-class hardware.
+    /// Measured default for B1-class hardware with 50x30 media.
+    ///
+    /// The bottom figure comes from `thermark calibrate`: the feed ruler stops
+    /// around the 25 mm mark on a 30 mm label, so the last ~5 mm never reaches
+    /// the paper. Your media may differ — re-measure and save it with
+    /// `thermark config safe-area --bottom <mm>`.
     pub const B1: Self = Self {
         top: 8,
-        bottom: 20,
+        bottom: 40,
         left: 8,
         right: 8,
     };
@@ -143,6 +148,17 @@ impl SafeArea {
         left: 0,
         right: 0,
     };
+
+    /// Build from millimetres (what `thermark calibrate`'s ruler reads out).
+    pub fn from_mm(top: f64, bottom: f64, left: f64, right: f64) -> Self {
+        let px = |mm: f64| (mm.max(0.0) * PX_PER_MM).round() as u32;
+        Self {
+            top: px(top),
+            bottom: px(bottom),
+            left: px(left),
+            right: px(right),
+        }
+    }
 
     /// The reliably printable rectangle of `label`, or `None` if the insets
     /// leave nothing.
