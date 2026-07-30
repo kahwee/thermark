@@ -107,7 +107,11 @@ Wiki: the protocol notes in src/protocol.rs
 ## Geometry & fonts
 
 - **8 px/mm**; max width **384**
-- Printable window on B1 + 50x30 is **~48 x 25.3 mm** of a 50 x 30 label,
+- Printable window on B1 + 50x30 is **48 x 25 mm** of a 50 x 30 label,
+  confirmed against hardware (the safe-area box prints complete on all four
+  sides). The remaining white is physical: ~4.6 mm at the feed edge, and 2 mm
+  across because the head is 48 mm. If the left/right white is lopsided the
+  roll is off-centre in the guide — not a software problem. Older note:
   measured with `thermark calibrate`. The printer starts a little after the
   leading edge and stops before the trailing edge; rows past the window are
   dropped, not scaled. `SafeArea::B1` = top 0 / bottom 40 / left 0 / right 0.

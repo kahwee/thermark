@@ -10,6 +10,39 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-30
+
+Calibration validated against hardware; the printable area is now confirmed
+rather than estimated.
+
+### Measurement
+
+Flat photo of the numbered calibration, using the printed numerals as scale:
+
+- The **safe-area box printed complete on all four sides**, so the 5 mm bottom
+  inset is correct. Blank label below it measures ~5.4 mm, which *is* that
+  inset — the printer itself stops around row 203 of 240, leaving ~4.6 mm
+  unreachable. Setting and hardware agree to within half a millimetre.
+- Horizontally the print is **not centred on the label**: ~2.4 mm of white on
+  the left, flush on the right. The printhead is 48 mm on a 50 mm label, so
+  2 mm is always unprintable — but all of it is currently on one side, which
+  means the roll is sitting off-centre in the paper guide. No software setting
+  moves it; the head window is fixed and the canvas already spans all 384 dots.
+
+### Added
+
+- `thermark calibrate` prints millimetre **numerals** down both rulers, so a
+  photo is self-describing — read the last number rather than counting ticks
+  from an edge that may itself be clipped.
+- It also reports the **usable print area in mm**, which is what artwork should
+  be designed against rather than the label's nominal size.
+
+### Fixed
+
+- Numerals sat *below* their tick, so the most important reading — the last one
+  before the printable band ends — was the one guaranteed to be cut off. They
+  now sit above the tick.
+
 ## [0.7.0] - 2026-07-30
 
 ### Fixed
@@ -310,7 +343,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/kahwee/thermark/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kahwee/thermark/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kahwee/thermark/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kahwee/thermark/compare/v0.4.0...v0.5.0

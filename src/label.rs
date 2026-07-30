@@ -220,6 +220,47 @@ fn draw_border(img: &mut GrayImage) {
     }
 }
 
+/// Calibration pattern with printed millimetre numbers down the feed ruler.
+///
+/// The geometry comes from [`crate::image_encode::calibration_pattern_with`];
+/// this adds the numerals, which need font access. Numbers make the photo
+/// self-describing: read the last one that printed rather than counting ticks
+/// from an edge that may itself be cut off.
+pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImage> {
+    use crate::geometry::PX_PER_MM;
+
+    let mut img = crate::image_encode::calibration_pattern_with(label, Some(safe));
+    let font = match load_font(None, None) {
+        Ok(f) => f,
+        // No system font: the geometric pattern is still perfectly usable.
+        Err(_) => return Ok(img),
+    };
+
+    let px_per_mm = PX_PER_MM as u32;
+    let size = 13.0f32;
+    for mm in (0..=(label.height_px / px_per_mm)).step_by(5) {
+        let y = mm * px_per_mm;
+        if y >= label.height_px {
+            break;
+        }
+        let text = mm.to_string();
+        let w = font.text_width(&text, size);
+        // Baseline sits just ABOVE its tick. Below the tick, the last numeral
+        // falls past the printable band and the most important reading is the
+        // one you lose.
+        let baseline = y.max(size as u32) as f32 - 1.0;
+        font.draw_text(&mut img, 30.0, baseline, &text, size);
+        font.draw_text(
+            &mut img,
+            (label.width_px - 30 - w) as f32,
+            baseline,
+            &text,
+            size,
+        );
+    }
+    Ok(img)
+}
+
 /// Options for a text-only sticker.
 #[derive(Debug, Clone)]
 pub struct TextLabelOptions {

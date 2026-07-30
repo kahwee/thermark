@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use thermark::config::Config;
 use thermark::geometry::LabelMm;
-use thermark::image_encode;
 use thermark::printer::PrintOptions;
 use thermark::protocol::Model;
 use thermark::types::{Density, Rotation, Threshold};
@@ -141,7 +140,7 @@ pub async fn calibrate(
     );
 
     let tmp: PathBuf = std::env::temp_dir().join("thermark_calibrate.png");
-    image_encode::calibration_pattern_with(lp, Some(cfg.resolve_safe_area())).save(&tmp)?;
+    thermark::label::make_calibration_label(lp, cfg.resolve_safe_area())?.save(&tmp)?;
 
     let opts = PrintOptions {
         density,
