@@ -10,6 +10,35 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-30
+
+Audited every path that places content on a label, instead of fixing them one
+print at a time. The audit found two more bugs immediately.
+
+### Fixed
+
+- **Text labels overflowed the printable area.** `LabelFont::text_height`
+  returns the whole line box (ascent + descent + line gap), but
+  `draw_text_block` used it as the offset to the *first baseline*, which should
+  only be the ascent. Every line sat a descender too low and the last one ran
+  past the bottom of its box — measured at row 212 of a band ending at 200, so
+  the final line of text was being clipped on real prints. Adds
+  `LabelFont::ascent`.
+- **Artwork clipped at the very top.** `SafeArea::B1.top` was 0 on the evidence
+  that rings at inset 0 print. They do, but only just: once trimming made
+  artwork's topmost ink land exactly on row 0, a printed circle came back with
+  its top shaved flat. Registration varies by a fraction of a millimetre
+  label-to-label, so ink does not belong on the extreme edge even where that
+  edge nominally prints. Now 8 px (1 mm).
+
+### Added
+
+- `tests/label_placement.rs` — asserts that **every** label path (qr, text,
+  wifi, and trimmed raw artwork in both fit modes) keeps its ink inside the
+  printable band. Both bugs above were caught by this on first run, without
+  hardware. Previously each placement path was verified only by printing it,
+  which is how they escaped one at a time.
+
 ## [0.9.0] - 2026-07-30
 
 Artwork now fills the label instead of floating in it.
@@ -376,7 +405,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/kahwee/thermark/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kahwee/thermark/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/kahwee/thermark/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kahwee/thermark/compare/v0.6.0...v0.7.0

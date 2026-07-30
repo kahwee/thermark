@@ -189,9 +189,9 @@ pub fn draw_text_block(
     // Small explicit text: top-align so you can see how much fits. Otherwise
     // centre the block vertically.
     let mut baseline = if font_size.is_some() && px <= 16.0 {
-        bx.y as i32 + font.text_height(px) as i32
+        bx.y as i32 + font.ascent(px) as i32
     } else {
-        bx.y as i32 + font.text_height(px) as i32 + (bx.h as i32 - total_h).max(0) / 2
+        bx.y as i32 + font.ascent(px) as i32 + (bx.h as i32 - total_h).max(0) / 2
     };
 
     for line in &lines {

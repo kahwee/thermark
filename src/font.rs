@@ -211,6 +211,18 @@ impl LabelFont {
         w.ceil().max(0.0) as u32
     }
 
+    /// Distance from the top of a line to its baseline.
+    ///
+    /// This — not [`Self::text_height`] — is where the first baseline goes.
+    /// `text_height` is the whole line box (ascent + descent + gap); using it
+    /// as a baseline offset drops every line by a descender, so the last line
+    /// overflows the bottom of its box.
+    pub fn ascent(&self, px_height: f32) -> u32 {
+        let font = self.font();
+        let sf = font.as_scaled(PxScale::from(px_height));
+        sf.ascent().ceil().max(1.0) as u32
+    }
+
     pub fn text_height(&self, px_height: f32) -> u32 {
         let font = self.font();
         let scale = PxScale::from(px_height);

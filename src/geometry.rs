@@ -149,7 +149,12 @@ impl SafeArea {
     /// Different media will differ. Re-measure with `thermark calibrate` and
     /// save it: `thermark config safe-area --last-tick <mm> --label 50x30`.
     pub const B1: Self = Self {
-        top: 0,
+        // 1 mm. Measured registration reaches row 0, but only just: with
+        // trimming, artwork's topmost ink lands exactly on row 0 and a printed
+        // circle came back with its top shaved flat. Label-to-label
+        // registration varies by a fraction of a millimetre, so ink does not
+        // belong on the extreme edge even when that edge nominally prints.
+        top: 8,
         bottom: 40,
         left: 0,
         right: 0,
