@@ -266,6 +266,46 @@ impl LabelFont {
         }
     }
 
+    /// Vertical extent of the *ink* in a wrapped block, relative to the first
+    /// baseline, in pixels.
+    ///
+    /// Font metrics describe the line box, not the marks in it: `ascent`
+    /// reserves room above cap height that most glyphs never use, so centring
+    /// on metrics leaves more space above the text than below. Measuring the
+    /// glyph outlines instead centres what the eye actually sees.
+    ///
+    /// Returns `(top, bottom)` — `top` is normally negative, since ink rises
+    /// above the baseline. `None` when the text draws nothing (blank lines,
+    /// whitespace, or glyphs the font lacks).
+    pub fn block_ink_bounds(
+        &self,
+        lines: &[String],
+        px_height: f32,
+        line_h: f32,
+    ) -> Option<(f32, f32)> {
+        let font = self.font();
+        let scale = PxScale::from(px_height);
+        let sf = font.as_scaled(scale);
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+
+        for (i, line) in lines.iter().enumerate() {
+            let baseline = i as f32 * line_h;
+            let mut caret = 0.0f32;
+            for ch in line.chars() {
+                let gid = font.glyph_id(ch);
+                let glyph = gid.with_scale_and_position(scale, ab_glyph::point(caret, baseline));
+                if let Some(outlined) = font.outline_glyph(glyph) {
+                    let b = outlined.px_bounds();
+                    min_y = min_y.min(b.min.y);
+                    max_y = max_y.max(b.max.y);
+                }
+                caret += sf.h_advance(gid);
+            }
+        }
+        (min_y.is_finite() && max_y.is_finite()).then_some((min_y, max_y))
+    }
+
     /// Wrap text to fit max_width_px.
     pub fn wrap(&self, text: &str, max_width_px: u32, px_height: f32) -> Vec<String> {
         let mut lines = Vec::new();

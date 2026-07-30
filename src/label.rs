@@ -183,15 +183,22 @@ pub fn draw_text_block(
         None => font.fit_size(text, bx.w, bx.h),
     };
     let lines = font.wrap(text, bx.w, px);
-    let line_h = font.text_height(px) as i32 + 2;
-    let total_h = lines.len() as i32 * line_h;
+    let line_h = font.text_height(px) as f32 + 2.0;
+    let top_align = font_size.is_some() && px <= 16.0;
 
-    // Small explicit text: top-align so you can see how much fits. Otherwise
-    // centre the block vertically.
-    let mut baseline = if font_size.is_some() && px <= 16.0 {
-        bx.y as i32 + font.ascent(px) as i32
-    } else {
-        bx.y as i32 + font.ascent(px) as i32 + (bx.h as i32 - total_h).max(0) / 2
+    // Place by measured ink, not by font metrics — see `block_ink_bounds`.
+    let mut baseline = match font.block_ink_bounds(&lines, px, line_h) {
+        Some((ink_top, ink_bottom)) => {
+            let ink_h = ink_bottom - ink_top;
+            let offset = if top_align {
+                0.0
+            } else {
+                ((bx.h as f32 - ink_h) / 2.0).max(0.0)
+            };
+            bx.y as f32 + offset - ink_top
+        }
+        // Nothing to measure (blank text): fall back to metrics.
+        None => bx.y as f32 + font.ascent(px) as f32,
     };
 
     for line in &lines {
@@ -203,7 +210,7 @@ pub fn draw_text_block(
                 TextAlign::Center => free / 2.0,
                 TextAlign::Right => free,
             };
-        font.draw_text(img, tx, baseline as f32, line, px);
+        font.draw_text(img, tx, baseline, line, px);
         baseline += line_h;
     }
 }
@@ -280,11 +287,18 @@ pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
         return Err(Error::qr("text must not be empty"));
     }
     let (w, h) = (opts.label.width_px, opts.label.height_px);
-    if w < 2 * MARGIN + 8 || h < 2 * MARGIN + 8 {
-        return Err(Error::qr(format!(
-            "label {w}x{h}px is too small to hold text with a {MARGIN}px margin"
-        )));
-    }
+    // Lay out inside the *printable* area, not the raw label. Using the label
+    // gave a box 232 rows tall on 50x30 media instead of 184, so text was
+    // sized for space the printer cannot reach and the last line fell off.
+    let area = opts
+        .safe
+        .content(opts.label)
+        .filter(|a| a.w > 2 * MARGIN + 8 && a.h > 2 * MARGIN + 8)
+        .ok_or_else(|| {
+            Error::qr(format!(
+                "label {w}x{h}px leaves no printable room for text after insets"
+            ))
+        })?;
 
     let font = load_font(opts.font_path.as_deref(), opts.font_name.as_deref())?;
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
@@ -293,10 +307,10 @@ pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
         &font,
         &opts.text,
         Rect {
-            x: MARGIN,
-            y: MARGIN,
-            w: w.saturating_sub(MARGIN * 2),
-            h: h.saturating_sub(MARGIN * 2),
+            x: area.x + MARGIN,
+            y: area.y + MARGIN,
+            w: area.w.saturating_sub(MARGIN * 2),
+            h: area.h.saturating_sub(MARGIN * 2),
         },
         opts.align,
         opts.font_size,

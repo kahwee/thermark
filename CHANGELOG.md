@@ -10,6 +10,30 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-30
+
+### Fixed
+
+- **`make_text_label` never used the safe area.** It laid text out on the raw
+  label with only the cosmetic margin, giving a 232-row box on 50x30 media
+  instead of 184 — so text was sized for space the printer cannot reach. An
+  earlier patch meant to fix this silently failed to apply, and the placement
+  test passed anyway because metric centring happened to leave the ink one row
+  inside the band. Optical centring shifted it two rows out and exposed the
+  real bug underneath.
+- **Text was centred on font metrics rather than on its ink.** `ascent`
+  reserves room above cap height that most glyphs never occupy, so a centred
+  block sat low: 27 rows of slack above and 1 below. Placement now measures the
+  rendered glyph outlines (`LabelFont::block_ink_bounds`) and centres those —
+  16 above, 17 below on the same label.
+
+### Added
+
+- `LabelFont::block_ink_bounds` — vertical ink extent of a wrapped block
+  relative to its first baseline, from glyph outlines rather than metrics.
+- A test asserting text is optically centred, not merely inside the band. The
+  band check alone could not tell "correct" from "one row lucky".
+
 ## [0.10.0] - 2026-07-30
 
 Audited every path that places content on a label, instead of fixing them one
@@ -405,7 +429,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/kahwee/thermark/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kahwee/thermark/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kahwee/thermark/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/kahwee/thermark/compare/v0.7.0...v0.8.0

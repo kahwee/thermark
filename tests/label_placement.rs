@@ -98,6 +98,40 @@ fn wifi_label_stays_inside_the_printable_area() {
 }
 
 #[test]
+fn text_is_optically_centred_in_the_printable_area() {
+    let lp = label();
+    let safe = SafeArea::default();
+    let Ok(img) = make_text_label(&TextLabelOptions {
+        text: "THERMARK\nbulldozer crew\n#1".into(),
+        label: lp,
+        safe,
+        align: TextAlign::Center,
+        border: false,
+        font_path: None,
+        font_name: None,
+        font_size: None,
+    }) else {
+        return;
+    };
+
+    let (mut top, mut bottom) = (u32::MAX, 0u32);
+    for (_, y, p) in img.enumerate_pixels() {
+        if p[0] < 128 {
+            top = top.min(y);
+            bottom = bottom.max(y);
+        }
+    }
+    let above = top - safe.top;
+    let below = (lp.height_px - safe.bottom) - bottom;
+    // Centring on font metrics left 27 above and 1 below, because `ascent`
+    // reserves space above cap height that the glyphs never use.
+    assert!(
+        above.abs_diff(below) <= 4,
+        "text is not optically centred: {above} above, {below} below"
+    );
+}
+
+#[test]
 fn trimmed_artwork_stays_inside_the_printable_area() {
     use thermark::image_encode::{contain_label_in, fill_label_in, trim_white};
     let lp = label();
