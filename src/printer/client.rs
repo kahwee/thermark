@@ -1,6 +1,6 @@
 //! High-level printer client (protocol state machine / print jobs).
 
-use super::info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
+use super::info::{Heartbeat, InfoValue, PrintStatus, PrinterSummary, RfidInfo};
 use crate::errors::{Error, PrinterErrorCode, Result};
 use crate::geometry::{LabelMm, SafeArea};
 use crate::image_encode::{self, Raster};
@@ -575,11 +575,16 @@ impl<T: Transport> PrinterClient<T> {
         Self::require_ack(self.end_page().await?, "end_page", Cmd::PageEnd as u8)?;
         self.maybe_sleep(self.pacing.after_page_end).await;
 
+        // Poll until the page reports fully imaged *and* fully fed, keeping the
+        // last reading. The payload used to be discarded, which is why a page
+        // that died at 73 % from a sagging battery was indistinguishable from
+        // one that finished — the reply arrived either way.
+        let mut last_status: Option<PrintStatus> = None;
         for _ in 0..self.task.status_polls() {
             // A missing status reply is normal on some firmware, but if the
             // printer named its fault (cover, paper, …), surface that instead
             // of grinding through end_print retries into PrintNotConfirmed.
-            if let Err(e @ Error::Printer(_)) = self
+            match self
                 .transceive_with(
                     protocol::print_status(),
                     0xb3,
@@ -589,9 +594,30 @@ impl<T: Transport> PrinterClient<T> {
                 )
                 .await
             {
-                return Err(e);
+                Err(e @ Error::Printer(_)) => return Err(e),
+                Ok(pkt) => {
+                    if let Some(status) = PrintStatus::parse(&pkt.data) {
+                        debug!(%status, "print status");
+                        // The 10-byte form carries a fault code the framing
+                        // layer never sees, so it can only be caught here.
+                        if let Some(code) = status.error {
+                            return Err(Error::Printer(PrinterErrorCode::from_u8(code)));
+                        }
+                        last_status = Some(status);
+                        if status.page_complete() {
+                            break;
+                        }
+                    }
+                }
+                Err(_) => {}
             }
             self.maybe_sleep(self.pacing.between_polls).await;
+        }
+        // Not an error: some firmware stops answering once the page is out, and
+        // `end_print` below is the real confirmation. But when a page *is*
+        // truncated this is the only number that says where.
+        if let Some(status) = last_status.filter(|s| !s.page_complete()) {
+            warn!(%status, "printer stopped short of a complete page — check the battery");
         }
 
         let end_tries = self.pacing.end_print_tries;
@@ -1041,6 +1067,58 @@ mod tests {
         );
         // And it stopped there rather than pressing on to PrintEnd.
         assert!(!c.transport().tx_cmds().contains(&0xf3));
+    }
+
+    #[tokio::test]
+    async fn fault_in_the_status_payload_aborts_the_job() {
+        // A fault reported *inside* a successful 0xb3 reply, not as a 0xDB
+        // error packet. The framing layer sees a normal response, so this is
+        // only catchable by reading the payload — which thermark used to throw
+        // away entirely.
+        let mut mock = MockTransport::new();
+        // page 1, imaged 73%, fed 0%, fault 0x03 = LowBattery.
+        mock.set_print_status(vec![0x00, 0x01, 73, 0x00, 0, 0, 0x03, 0, 0, 0]);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Printer(PrinterErrorCode::LowBattery)),
+            "expected the fault named in the status payload, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_page_that_stalls_without_a_fault_code_still_completes() {
+        // Progress stuck below 100 with no fault byte. There is nothing to
+        // raise — `end_print` is the authority on completion — so the job must
+        // finish rather than invent an error from the progress numbers.
+        let mut mock = MockTransport::new();
+        mock.set_print_status(vec![0x00, 0x01, 73, 0x00]);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        c.print_gray_image(&gray, Density::NORMAL)
+            .await
+            .expect("incomplete progress is a warning, not a failure");
+    }
+
+    #[tokio::test]
+    async fn a_complete_page_stops_polling_early() {
+        // The default mock reports 100/100 on the first poll. Continuing to
+        // poll after that is pure latency on every single print.
+        let mut c =
+            PrinterClient::new(MockTransport::new(), Model::B1).with_pacing(Pacing::INSTANT);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        c.print_gray_image(&gray, Density::NORMAL).await.unwrap();
+        let polls = c
+            .transport()
+            .tx_cmds()
+            .iter()
+            .filter(|&&c| c == 0xa3)
+            .count();
+        assert_eq!(polls, 1, "should stop at the first complete-page report");
     }
 
     #[tokio::test]

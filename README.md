@@ -294,6 +294,24 @@ is the last millimetre of *your* label. Pass the size you actually loaded —
 `thermark calibrate --boundary --label 40x20`. A safe area measured on one roll
 does not transfer to another, so save it per label size.
 
+### Does the printer know what size paper is loaded?
+
+**No — not in millimetres.** You always have to tell it with `--label`.
+
+It does know a surprising amount else, from the RFID tag in the roll core
+(`thermark info` prints it): the barcode/SKU, a serial number, how many labels
+the roll started with and how many are used, the consumable *type* (gapped,
+black-mark, continuous, transparent), and whether the tag read succeeded at all.
+
+What is not on the tag is the physical geometry. Vendor software maps the
+barcode to a size through its own catalogue; the printer never reports width or
+height, and no field in the protocol carries them. The gap sensor does measure
+label pitch mechanically while feeding, but that measurement is used internally
+for registration and is never sent back to the host.
+
+So: `--label 40x30` is not thermark being lazy. Nothing on the wire can supply
+it.
+
 ### I switched to a different roll — 40×20, 40×30, 50×80…
 
 Just change `--label`; everything derives from it. Two things to know:

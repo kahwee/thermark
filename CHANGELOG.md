@@ -10,6 +10,61 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-07-31
+
+More of the reference implementation's behaviour, read from
+[the protocol reference](the protocol reference) source.
+
+### Added
+
+- **`PrintStatus` (0xa3) replies are now parsed** into
+  `printer::info::PrintStatus` — `page`, `page_print_progress`,
+  `page_feed_progress`, and the fault code carried in the 10-byte form.
+  thermark polled this purely as a keepalive and discarded the body.
+- **`MockTransport::set_print_status`** so stalled and faulted pages can be
+  modelled without hardware.
+
+### Fixed
+
+- **A fault reported inside a successful status reply now aborts the job.** The
+  10-byte form of the 0xa3 response carries an error code at offset 6. It comes
+  back in a normal `0xb3` packet, not a `0xDB` error packet, so the framing
+  layer never saw it and the job pressed on to 50 `PrintEnd` retries and a
+  useless `PrintNotConfirmed`. Only the 10-byte form is read; at other lengths
+  that offset is a different field.
+
+### Changed
+
+- **Status polling stops as soon as the page reports fully imaged and fed**
+  instead of always running the full budget (8 polls on B1). Saves up to ~1.2 s
+  per print.
+- **A page that stops short is now logged with its progress** —
+  `printer stopped short of a complete page — check the battery`, with the
+  actual percentages. This is the number that would have identified the low
+  battery immediately instead of after a session of layout changes. It is a
+  warning, not an error: `PrintEnd` remains the authority on completion.
+
+- **`thermark info` now names the loaded consumable** — a `paper:` line with the
+  type (gapped, black-mark, continuous, transparent, …) decoded from the RFID
+  tag's `consumables_type`, plus labels remaining when the tag reports counts.
+  Previously this was printed as a bare integer. `RfidInfo::consumable_type_name`
+  and `RfidInfo::labels_remaining` are public; the latter returns `None` rather
+  than 0 for the printer's `-1` "not reported" sentinel.
+
+### Documentation
+
+- **README: "Does the printer know what size paper is loaded?"** No — not in
+  millimetres. The RFID tag carries barcode, serial, label counts and consumable
+  *type*, but no geometry; vendor software resolves size from the barcode
+  through its own catalogue. `--label` is not optional and cannot be inferred.
+  `thermark info` now says so directly instead of hinting that the barcode
+  encodes the size.
+- **`AGENTS.md`**: four more reference-implementation findings — the status
+  payload, `printEnd` returning 0 as *refused*, `labelPositioningCalibration`
+  ejecting ~15 cm of paper on B1 (deliberately not exposed), and RFID
+  `consumablesType` as a possible source for the label type thermark currently
+  hardcodes.
+
 ## [0.25.0] - 2026-07-31
 
 Non-50x30 media. Verified offline across 40x20, 40x30, 50x30 and 50x80; every
@@ -862,7 +917,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/kahwee/thermark/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/kahwee/thermark/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/kahwee/thermark/compare/v0.22.0...v0.23.0

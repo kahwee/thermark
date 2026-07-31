@@ -31,6 +31,8 @@ pub struct MockTransport {
     auto_reply: bool,
     /// Override 13-byte heartbeat payload (closing, power, paper, rfid at 9..=12).
     heartbeat: Option<[u8; 13]>,
+    /// Override the `PrintStatus` (0xa3) reply body.
+    print_status: Option<Vec<u8>>,
 }
 
 impl Default for MockTransport {
@@ -51,7 +53,19 @@ impl MockTransport {
             drop_writes: HashMap::new(),
             auto_reply: true,
             heartbeat: None,
+            print_status: None,
         }
+    }
+
+    /// Set the `PrintStatus` (0xa3) reply body.
+    ///
+    /// The 10-byte form is `[page:u16, print%, feed%, _, _, error, _, _, _]`.
+    /// The default reports a complete page with no fault; override it to model
+    /// a printer that stalls part-way, which is what a sagging battery looks
+    /// like on the wire.
+    pub fn set_print_status(&mut self, body: Vec<u8>) -> &mut Self {
+        self.print_status = Some(body);
+        self
     }
 
     /// Next time `cmd` is sent, reply with `0xDB` / `error_code` instead of success.
@@ -142,7 +156,9 @@ impl MockTransport {
             0xf3 => Some(Packet::new(0xf4, vec![0x01])),
             0xa3 => Some(Packet::new(
                 0xb3,
-                vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                self.print_status.clone().unwrap_or_else(|| {
+                    vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+                }),
             )),
             0xdc => {
                 let mut d = vec![0u8; 13];

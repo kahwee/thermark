@@ -172,7 +172,7 @@ printable area — not conclusions that have not been verified on hardware.
 
 [the protocol reference](the protocol reference) /
 [the protocol reference](the protocol reference) is the most complete
-open client. Six things it does differently:
+open client. Ten things it does differently:
 
 1. **Row repeat coalescing.** Consecutive identical rows increment the existing
    packet's `repeat` field instead of sending another packet
@@ -213,6 +213,29 @@ open client. Six things it does differently:
    run at 255. A blank 80 mm label is a single 640-row run; the reference stores
    the count in an unbounded JS number and writes it straight into the byte
    array, so it carries this bug latent.
+
+7. **`PrintStatus` (0xa3) has a payload worth reading**, and thermark now
+   reads it: `[page: i16, pagePrintProgress: u8, pageFeedProgress: u8]`, and in
+   the **10-byte form only**, a fault code at offset 6. That fault arrives
+   inside a *successful* 0xb3 reply, so the framing layer never sees it — it is
+   only catchable by parsing. The progress pair is also the direct answer to
+   "how far did it get?", which is the question the battery episode was really
+   asking. Do not read offset 6 at other lengths; it is a different field.
+
+8. **`printEnd` returning 0 means refused, not failed.** The reference polls
+   `printEnd` until it returns 1 as an alternative completion signal
+   (`waitUntilPrintFinishedByPrintEndPoll`) — thermark already retries on
+   `Ok(false)`, which is the same idea.
+
+9. **`labelPositioningCalibration` ejects ~15 cm of paper on B1** when sent 1 or
+   2 (the reference says so outright). Deliberately not exposed; there is no way
+   to make that non-destructive to a roll.
+
+10. **RFID tells you the consumable, not its size** — see the paper-size FAQ in
+    the README. `consumablesType` could auto-select the label type instead of
+    thermark's hardcoded `set_label_type(1)`, which is the one place a wrong
+    default costs a mis-feed on continuous stock. Not implemented; needs a roll
+    of continuous paper to verify.
 
 No label-height limit exists anywhere in the reference — no preset table, no
 clamp, no per-model maximum. Page height is bounded only by the `u16` row count.
