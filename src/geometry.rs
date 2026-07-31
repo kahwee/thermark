@@ -88,16 +88,18 @@ impl LabelMm {
 
     /// Pixel size clamped to the model printhead width.
     pub fn to_pixels(self, max_width_px: u32) -> LabelPx {
-        let mut w = mm_to_px(self.width_mm);
-        let h = mm_to_px(self.height_mm);
-        // Width must be multiple of 8 for clean byte packing
-        w = w.div_ceil(8) * 8;
-        if w > max_width_px {
-            w = max_width_px;
-        }
+        // Rows are packed one bit per pixel, so the width must land on a byte
+        // boundary. `checked_next_multiple_of` says that directly and returns
+        // `None` on overflow, where `div_ceil(8) * 8` could wrap — the bug that
+        // made `--label infx30` silently print an 8px-wide label.
+        let w = mm_to_px(self.width_mm)
+            .checked_next_multiple_of(8)
+            .unwrap_or(max_width_px)
+            .min(max_width_px);
+
         LabelPx {
             width_px: w.max(8),
-            height_px: h.max(1),
+            height_px: mm_to_px(self.height_mm).max(1),
         }
     }
 }

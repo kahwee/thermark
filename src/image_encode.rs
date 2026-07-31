@@ -156,8 +156,24 @@ fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
 ///
 /// Returns the image unchanged when it is blank or already tight.
 pub fn trim_white(img: DynamicImage, threshold: u8) -> DynamicImage {
-    let gray = img.to_luma8();
-    let (w, h) = gray.dimensions();
+    let (w, h) = img.dimensions();
+    let Some(ink) = ink_bounds(&img.to_luma8(), threshold) else {
+        return img; // nothing but background
+    };
+    if ink.x == 0 && ink.y == 0 && ink.w == w && ink.h == h {
+        return img; // already tight
+    }
+    DynamicImage::ImageRgba8(
+        imageops::crop_imm(&img.to_rgba8(), ink.x, ink.y, ink.w, ink.h).to_image(),
+    )
+}
+
+/// Bounding box of ink — pixels at or below `threshold` — or `None` if blank.
+///
+/// One implementation for a question asked all over this crate and its tests:
+/// where did anything actually get drawn? Answering it by hand each time is how
+/// two call sites end up disagreeing about what counts as ink.
+pub fn ink_bounds(gray: &GrayImage, threshold: u8) -> Option<Rect> {
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
     for (x, y, p) in gray.enumerate_pixels() {
         if p[0] <= threshold {
@@ -167,15 +183,12 @@ pub fn trim_white(img: DynamicImage, threshold: u8) -> DynamicImage {
             y1 = y1.max(y);
         }
     }
-    if x0 == u32::MAX {
-        return img; // nothing but background
-    }
-    if x0 == 0 && y0 == 0 && x1 == w - 1 && y1 == h - 1 {
-        return img; // already tight
-    }
-    DynamicImage::ImageRgba8(
-        imageops::crop_imm(&img.to_rgba8(), x0, y0, x1 - x0 + 1, y1 - y0 + 1).to_image(),
-    )
+    (x0 != u32::MAX).then(|| Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0 + 1,
+        h: y1 - y0 + 1,
+    })
 }
 
 /// Resize preserving aspect to fit within max width (height free).

@@ -10,6 +10,39 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-07-31
+
+Modern-std pass. Behaviour-preserving — `compare-render.sh` reports every
+output identical.
+
+### Changed
+
+- `LabelMm::to_pixels` uses `checked_next_multiple_of(8)` instead of
+  `div_ceil(8) * 8`. It states the intent — round the width up to a byte
+  boundary — and returns `None` on overflow where the multiply could wrap. That
+  wrap is the original `--label infx30` bug, so the guard is now in the
+  arithmetic rather than only in the validation ahead of it.
+
+### Added
+
+- `image_encode::ink_bounds` — bounding box of drawn pixels, or `None` if
+  blank. "Where did anything actually get drawn?" was being answered by
+  hand-rolled loops in `trim_white` and in two tests; separate implementations
+  of that question are how call sites end up disagreeing about what counts as
+  ink. `trim_white` and `tests/label_placement.rs` now share it.
+
+### Notes on what was considered and rejected
+
+`u32::midpoint` and `f32::midpoint` do not fit the centring code: that computes
+half of a *difference* (`(space - content) / 2`), not the midpoint of two
+values, and the subtraction cannot overflow.
+
+`slice::chunk_by` would fit the row encoder well — consecutive identical rows
+could collapse into a single packet using the `repeats` field, which is already
+in the wire format and always set to 1. That is the largest remaining byte
+reduction and would matter for dense pages. It changes what the printer
+receives, so it needs verification on hardware rather than a mock.
+
 ## [0.21.0] - 2026-07-31
 
 ### Fixed
@@ -727,7 +760,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/kahwee/thermark/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/kahwee/thermark/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/kahwee/thermark/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kahwee/thermark/compare/v0.18.0...v0.19.0

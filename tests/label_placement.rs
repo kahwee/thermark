@@ -3,6 +3,7 @@
 //! at once, without hardware.
 
 use thermark::geometry::{LabelMm, LabelPx, SafeArea};
+use thermark::image_encode::ink_bounds;
 use thermark::label::{
     QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_qr_label_opts, make_text_label,
 };
@@ -16,17 +17,12 @@ fn label() -> LabelPx {
 fn assert_inside_safe_area(img: &image::GrayImage, lp: LabelPx, safe: SafeArea, what: &str) {
     let (w, h) = img.dimensions();
     assert_eq!((w, h), (lp.width_px, lp.height_px), "{what}: wrong canvas");
-    let (mut top, mut bottom) = (u32::MAX, 0u32);
-    for (_, y, p) in img.enumerate_pixels() {
-        if p[0] < 128 {
-            top = top.min(y);
-            bottom = bottom.max(y);
-        }
-    }
-    assert!(top != u32::MAX, "{what}: rendered nothing");
+    let ink = ink_bounds(img, 127).unwrap_or_else(|| panic!("{what}: rendered nothing"));
+    let bottom = ink.y + ink.h - 1;
     assert!(
-        top >= safe.top,
-        "{what}: ink at row {top} is above the printable area (top inset {})",
+        ink.y >= safe.top,
+        "{what}: ink at row {} is above the printable area (top inset {})",
+        ink.y,
         safe.top
     );
     assert!(
@@ -114,15 +110,9 @@ fn text_is_optically_centred_in_the_printable_area() {
         return;
     };
 
-    let (mut top, mut bottom) = (u32::MAX, 0u32);
-    for (_, y, p) in img.enumerate_pixels() {
-        if p[0] < 128 {
-            top = top.min(y);
-            bottom = bottom.max(y);
-        }
-    }
-    let above = top - safe.top;
-    let below = (lp.height_px - safe.bottom) - bottom;
+    let ink = ink_bounds(&img, 127).expect("rendered nothing");
+    let above = ink.y - safe.top;
+    let below = (lp.height_px - safe.bottom) - (ink.y + ink.h - 1);
     // Centring on font metrics left 27 above and 1 below, because `ascent`
     // reserves space above cap height that the glyphs never use.
     assert!(
