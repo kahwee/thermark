@@ -10,6 +10,29 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-07-31
+
+Documentation only — `compare-render.sh` reports every output identical.
+
+### Added
+
+- **`AGENTS.md` → "Diagnosing a bad print".** Check the battery before touching
+  a layout constant; the tell for a power problem is *inconsistency between
+  runs*, since no buffer or pacing model produces run-to-run variation. Plus a
+  table of which question each tool answers and which of them cost a label
+  (only two do), and why a curled-label photograph is not a measurement.
+- **`AGENTS.md` → "Learned from the reference implementation".** Four things
+  [the protocol reference](the protocol reference) does that thermark
+  does not:
+  - coalesces consecutive identical rows via the `repeats` field
+  - sends `PrinterCheckLine` (0x86) every 200 rows
+  - uses `PrintBitmapRowIndexed` (0x83) for rows with ≤ 6 black pixels
+  - computes the black-pixel counts thermark sends as zeros
+- `Cmd::PrinterCheckLine` (0x86) added to the protocol enum, documented as
+  unimplemented, so a known gap is visible in code rather than only in prose.
+- `print_bitmap_row` documents why `black_counts` is zeroed and `repeats` is
+  always 1 — both deliberate deviations, neither an oversight.
+
 ## [0.23.0] - 2026-07-31
 
 **The printable area was never small.** Measured on a fully charged printer,
@@ -802,7 +825,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/kahwee/thermark/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/kahwee/thermark/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/kahwee/thermark/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/kahwee/thermark/compare/v0.20.0...v0.21.0

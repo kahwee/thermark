@@ -15,9 +15,16 @@ pub enum Cmd {
     SetDensity = 0x21,
     SetLabelType = 0x23,
     PrinterInfo = 0x40,
+    /// Sparse-row form: pixel indices instead of a bitmap. The reference
+    /// implementation uses it when a row has ≤ 6 black pixels. Not emitted here.
     PrintBitmapRowIndexed = 0x83,
     PrintEmptyRow = 0x84,
     PrintBitmapRow = 0x85,
+    /// `[line: u16, 0x01]`, reply `0xd3`. The reference implementation sends
+    /// one every 200 rows (`row % 200 == 199`). Not emitted here — the clearest
+    /// remaining protocol gap, and unverified as to whether it affects
+    /// reliability on long pages.
+    PrinterCheckLine = 0x86,
     PrintStatus = 0xa3,
     Connect = 0xc1,
     CancelPrint = 0xda,
@@ -193,7 +200,16 @@ pub fn print_status() -> Packet {
 /// Encode one bitmap print row (command 0x85).
 ///
 /// Layout: `row_index:u16be | black_counts:3bytes | repeats:u8 | pixels…`
-/// Community clients often send black_counts as zeros successfully.
+///
+/// `black_counts` is sent as zeros. The reference implementation computes real
+/// counts against the printhead width (`auto | split | total`); zeros are
+/// widely reported to work and do print here, so this is a deliberate
+/// deviation rather than an oversight.
+///
+/// `repeats` is always 1. The reference coalesces consecutive identical rows by
+/// incrementing it instead of sending another packet — the largest byte
+/// reduction still available, and byte volume is what strains the printer on
+/// dense pages.
 pub fn print_bitmap_row(row_index: u16, repeats: u8, pixels: &[u8]) -> Packet {
     let mut data = Vec::with_capacity(6 + pixels.len());
     data.extend_from_slice(&row_index.to_be_bytes());

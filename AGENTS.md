@@ -118,6 +118,90 @@ Wiki: the protocol notes in src/protocol.rs
 
 ---
 
+## Diagnosing a bad print
+
+Read this before changing any layout constant. Most of the effort spent on this
+project went into a printable-area limit that did not exist.
+
+### Check the battery first
+
+`thermark info` → `battery: N/4`. At level 1 a dense page sags the supply and
+the printer **stops mid-page**. That is indistinguishable from a clipped layout
+in a single sample, and it moved the apparent "printable area" by 7 mm between
+a flat and a charged battery.
+
+**The tell is inconsistency.** If the same bitmap prints differently twice, it
+is power — no buffer-size, pacing, or geometry model produces run-to-run
+variation. Chase geometry only after two identical runs agree.
+
+### Then decide what kind of question you have
+
+| Question | How to answer it | Costs a label? |
+|---|---|---|
+| What exactly will the printer receive? | `thermark print --preview out.png` | no |
+| Did output change when it should not have? | `scripts/compare-render.sh <ref>` | no |
+| Did a renderer change unexpectedly? | `cargo test --test golden` | no |
+| Does content land inside the printable area? | `cargo test --test label_placement` | no |
+| Where does this printer actually stop? | `thermark calibrate --boundary` | yes, one |
+| Is a deliberate visual change right? | print one label | yes, one |
+
+Only the last two need hardware. Everything above them used to be answered by
+printing and photographing, which is slow, ambiguous, and burns media.
+
+### Measure, do not infer
+
+- Photographs of a **curled** label are unreliable: estimating a scale from one
+  produced two contradictory measurements of the same printer, out by 5 mm.
+  Lay it flat, or read a printed numeral instead of estimating.
+- `calibrate --boundary` prints one numbered bar per millimetre, each at its own
+  horizontal position. Read the highest complete bar — no counting, no scale
+  estimation. If the **last** bar prints, there is no unprintable band at all.
+- Quote numbers from the artifact (ink row extents, byte counts), not from
+  reading the code.
+
+### Do not let a test encode a theory
+
+A test asserting `safe.bottom > safe.top` locked in a "the feed edge is
+unreachable" belief. When the correct value arrived, the test failed and
+argued for the wrong number. Pin observable behaviour — ink stays inside the
+printable area — not conclusions that have not been verified on hardware.
+
+---
+
+## Learned from the reference implementation
+
+[the protocol reference](the protocol reference) /
+[the protocol reference](the protocol reference) is the most complete
+open client. Four things it does that thermark does not:
+
+1. **Row repeat coalescing.** Consecutive identical rows increment the existing
+   packet's `repeat` field instead of sending another packet
+   (`lastPacket.repeat++`). thermark always sends `repeats = 1`, so a page with
+   large flat areas costs far more bytes than it needs to. Largest remaining
+   byte reduction, and byte volume is what strains the printer.
+
+2. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply
+   `In_PrinterCheckLine` (0xd3). Sent every 200 rows (`row % 200 === 199`).
+   thermark never sends it — a 240-row page would carry one at row 199.
+   Unknown whether it matters for reliability; it is the clearest protocol gap.
+
+3. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
+   **≤ 6 black pixels**, sending pixel indices instead of a full bitmap. Our
+   `Cmd` enum names it but nothing emits it.
+
+4. **Black-pixel counts are computed**, not zeroed. `printBitmapRow` takes
+   `printheadPixels` and a `countsMode` of `auto | split | total`; thermark
+   sends three zero bytes. Community clients report zeros working, and ours do
+   print, so this is likely optional — but it is a deliberate deviation, not an
+   accident.
+
+Also confirmed: the protocol reference writes with `writeValueWithoutResponse` and a fixed
+`packetIntervalMs` (default **10 ms**), which is why thermark paces by bytes to
+roughly the same total. Acknowledged writes were tried here and made no
+measurable difference.
+
+---
+
 ## Pitfalls
 
 1. BLE address match is **exact** by default (full advertising name or id). Short selectors no longer substring-match; use full name from `scan`, or pass `--fuzzy` only if intentional  
