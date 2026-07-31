@@ -10,6 +10,30 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-30
+
+### Added
+
+- **`thermark calibrate --boundary`** — a staircase of numbered bars, one per
+  millimetre from 17 to 29, each at its own horizontal position. The highest
+  number whose bar printed is where the printer stops. No counting, no
+  estimating a scale from a photograph.
+
+  The existing feed ruler puts ticks 1 mm (8 px) apart, too crowded to letter
+  every one, so readings off it were "somewhere past 20" plus arithmetic on a
+  photo — and that produced two contradictory measurements of the same printer:
+  a full-bleed calibration whose ink stopped at ~22.5 mm, and a QR label that
+  printed cleanly with ink to 23.6 mm. Separating each millimetre horizontally
+  removes the estimation entirely.
+
+### Notes
+
+Those two measurements disagreeing is itself the finding: **registration varies
+between labels**, so a single measured cutoff is not a safe inset — the safe
+inset has to cover the worst case across several. `SafeArea::B1` is unchanged
+pending readings from the probe; the legend now says to use the lower number if
+two runs differ.
+
 ## [0.13.0] - 2026-07-30
 
 Adds the verification that this project was missing. Nearly every bug this
@@ -514,7 +538,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/kahwee/thermark/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kahwee/thermark/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kahwee/thermark/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kahwee/thermark/compare/v0.10.0...v0.11.0

@@ -200,6 +200,10 @@ pub enum Commands {
         /// Density 1..=5 (default 4 = darker for full-bleed calibration)
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
         density: Density,
+        /// Print the boundary probe instead: one numbered bar per millimetre,
+        /// so the last one you can see is exactly where the printer stops.
+        #[arg(long, default_value_t = false)]
+        boundary: bool,
     },
     /// Print a text-only sticker (no QR) — auto-fitted to fill the label
     Text {

@@ -21,8 +21,8 @@ use std::path::PathBuf;
 use thermark::geometry::{LabelMm, LabelPx, SafeArea};
 use thermark::image_encode::{calibration_pattern, contain_label, fill_label, trim_white};
 use thermark::label::{
-    QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_calibration_label,
-    make_qr_label_opts, make_text_label,
+    QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_boundary_label,
+    make_calibration_label, make_qr_label_opts, make_text_label,
 };
 use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 
@@ -194,6 +194,10 @@ fn cases() -> Vec<Case> {
         Case {
             name: "calibration_numbered",
             render: || make_calibration_label(label(), SafeArea::default()).ok(),
+        },
+        Case {
+            name: "boundary_probe",
+            render: || make_boundary_label(label()).ok(),
         },
     ]
 }

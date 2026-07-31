@@ -281,6 +281,57 @@ pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImag
     Ok(img)
 }
 
+/// First and last millimetre marked on the boundary probe.
+pub const BOUNDARY_FROM_MM: u32 = 17;
+pub const BOUNDARY_TO_MM: u32 = 29;
+
+/// A staircase of numbered bars, one per millimetre, for finding exactly where
+/// the printer stops.
+///
+/// The feed ruler on [`make_calibration_label`] puts its ticks 1 mm (8 px)
+/// apart, which is too crowded to letter every one — so readings there are
+/// "somewhere past 20", and estimating the rest from a photo is what produced
+/// two contradictory measurements. Here each millimetre gets its own bar at its
+/// own horizontal position, so the numbers never crowd: **the last bar you can
+/// see is the answer**, with no counting and no scale estimation.
+pub fn make_boundary_label(label: LabelPx) -> Result<GrayImage> {
+    use crate::geometry::PX_PER_MM;
+
+    let (w, h) = (label.width_px, label.height_px);
+    let mut img = GrayImage::from_pixel(w, h, Luma([255]));
+    let font = load_font(None, None)?;
+
+    let px_per_mm = PX_PER_MM as u32;
+    let steps = BOUNDARY_TO_MM.saturating_sub(BOUNDARY_FROM_MM) + 1;
+    let slot = w / steps.max(1);
+    let bar_w = slot.saturating_sub(4).max(1);
+    let size = 12.0f32;
+
+    for i in 0..steps {
+        let mm = BOUNDARY_FROM_MM + i;
+        let y = mm * px_per_mm;
+        if y + px_per_mm > h {
+            break;
+        }
+        let x0 = i * slot;
+
+        // Bar: 1 mm tall, so its own thickness cannot be mistaken for a
+        // neighbour's.
+        for yy in y..(y + px_per_mm).min(h) {
+            for xx in x0..(x0 + bar_w).min(w) {
+                img.put_pixel(xx, yy, Luma([0]));
+            }
+        }
+        // Number sits above its bar. Horizontal separation is what keeps these
+        // legible where a shared ruler column could not.
+        let baseline = y as f32 - 2.0;
+        if baseline > size {
+            font.draw_text(&mut img, x0 as f32, baseline, &mm.to_string(), size);
+        }
+    }
+    Ok(img)
+}
+
 /// Options for a text-only sticker.
 #[derive(Debug, Clone)]
 pub struct TextLabelOptions {

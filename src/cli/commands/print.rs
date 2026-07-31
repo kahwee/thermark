@@ -122,6 +122,25 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
     println!("  thermark calibrate --label 50x30");
 }
 
+/// How to read the boundary probe.
+fn print_boundary_legend() {
+    use thermark::label::{BOUNDARY_FROM_MM, BOUNDARY_TO_MM};
+    println!();
+    println!(
+        "One numbered bar per millimetre, {BOUNDARY_FROM_MM}..{BOUNDARY_TO_MM} mm from the top."
+    );
+    println!("Each sits at its own horizontal position, so nothing crowds.");
+    println!();
+    println!("  Read the HIGHEST number whose bar printed completely.");
+    println!("  That is where this printer stops on this media.");
+    println!();
+    println!("Then save it — the tool works out the inset:");
+    println!("  thermark config safe-area --last-tick <that number> --label 50x30");
+    println!();
+    println!("Registration varies slightly between labels, so if two runs differ,");
+    println!("use the LOWER number.");
+}
+
 pub async fn calibrate(
     cfg: &Config,
     conn: &ConnArgs,
@@ -129,6 +148,7 @@ pub async fn calibrate(
     model: Option<Model>,
     label: &str,
     density: Density,
+    boundary: bool,
 ) -> Result<()> {
     let model = cfg.resolve_model(model);
     let label_mm = LabelMm::parse(label)?;
@@ -142,7 +162,11 @@ pub async fn calibrate(
     );
 
     let tmp: PathBuf = std::env::temp_dir().join("thermark_calibrate.png");
-    thermark::label::make_calibration_label(lp, cfg.resolve_safe_area())?.save(&tmp)?;
+    if boundary {
+        thermark::label::make_boundary_label(lp)?.save(&tmp)?;
+    } else {
+        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area())?.save(&tmp)?;
+    }
 
     let opts = PrintOptions {
         density,
@@ -159,6 +183,11 @@ pub async fn calibrate(
         trim: false,
     };
     print_file(cfg, conn, task, model, &tmp, opts).await?;
+    if boundary {
+        println!("OK — boundary probe printed ({label})");
+        print_boundary_legend();
+        return Ok(());
+    }
     println!("OK — calibration printed ({label})");
     print_calibration_legend(lp, cfg.resolve_safe_area());
     Ok(())
