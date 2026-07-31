@@ -250,13 +250,6 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Force simple 1-byte PrintStart / 4-byte page size (alias for `PrintTask::Simple`).
-    pub fn with_simple_print_start(mut self, yes: bool) -> Self {
-        if yes {
-            self.task = PrintTask::Simple;
-        }
-        self
-    }
-
     /// Override timings and retry budget (see [`Pacing::INSTANT`] for tests).
     pub fn with_pacing(mut self, pacing: Pacing) -> Self {
         self.pacing = pacing;
@@ -274,10 +267,6 @@ impl<T: Transport> PrinterClient<T> {
 
     pub fn transport(&self) -> &T {
         &self.transport
-    }
-
-    pub fn transport_mut(&mut self) -> &mut T {
-        &mut self.transport
     }
 
     pub fn model(&self) -> Model {

@@ -2,12 +2,19 @@
 
 use crate::errors::Result;
 use crate::print_task::{PrintTask, SupportStatus, hardware_matrix};
-use crate::printer::{Heartbeat, PrinterClient, RfidInfo};
+use crate::printer::{Heartbeat, RfidInfo};
 use crate::protocol::Model;
 use std::fmt;
-use std::time::Duration;
 
 use crate::transport::BleMatchMode;
+// Only a transport actually talks to a printer, so with both features off these
+// are dead. Gated rather than `#[allow(unused)]` so a genuinely unused import
+// still gets reported.
+#[cfg(any(feature = "ble", feature = "serial"))]
+use crate::printer::PrinterClient;
+#[cfg(feature = "ble")]
+use std::time::Duration;
+
 #[cfg(feature = "serial")]
 use crate::transport::SerialTransport;
 #[cfg(feature = "ble")]

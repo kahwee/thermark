@@ -67,6 +67,16 @@ pub enum Model {
 }
 
 impl Model {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::B1 => "b1",
+            Self::B21 => "b21",
+            Self::B18 => "b18",
+            Self::D11 => "d11",
+            Self::D110 => "d110",
+        }
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "b1" => Some(Self::B1),
@@ -112,27 +122,10 @@ impl std::str::FromStr for Model {
     }
 }
 
-impl Model {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::B1 => "b1",
-            Self::B21 => "b21",
-            Self::B18 => "b18",
-            Self::D11 => "d11",
-            Self::D110 => "d110",
-        }
-    }
-}
-
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.pad(self.as_str())
     }
-}
-
-/// Expected response command for a request (default: request + 1).
-pub fn default_response_cmd(request: u8) -> u8 {
-    request.wrapping_add(1)
 }
 
 pub fn pkt(cmd: Cmd, data: impl Into<Vec<u8>>) -> Packet {
@@ -168,14 +161,6 @@ pub fn print_start_simple() -> Packet {
     pkt(Cmd::PrintStart, vec![0x01])
 }
 
-pub fn page_start() -> Packet {
-    pkt(Cmd::PageStart, vec![0x01])
-}
-
-pub fn page_end() -> Packet {
-    pkt(Cmd::PageEnd, vec![0x01])
-}
-
 pub fn print_end() -> Packet {
     pkt(Cmd::PrintEnd, vec![0x01])
 }
@@ -199,10 +184,6 @@ pub fn set_page_size_b1(rows: u16, cols: u16, copies: u16) -> Packet {
     data.extend_from_slice(&cols.to_be_bytes());
     data.extend_from_slice(&copies.to_be_bytes());
     pkt(Cmd::SetPageSize, data)
-}
-
-pub fn set_quantity(n: u16) -> Packet {
-    pkt(Cmd::PrintQuantity, n.to_be_bytes().to_vec())
 }
 
 pub fn print_status() -> Packet {

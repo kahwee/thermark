@@ -10,6 +10,35 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-07-31
+
+### Fixed
+
+- **Lint-clean under every feature combination.** `--no-default-features` left
+  two unused imports in `doctor.rs`, since only a transport actually talks to a
+  printer. Gated on the features that use them rather than silenced with
+  `#[allow(unused)]`, so a genuinely unused import is still reported. All four
+  combinations — default, none, `ble` only, `serial` only — are now clean, as
+  is `clippy --all-targets -D warnings`, the form CI runs.
+
+### Removed
+
+Six public functions with zero callers anywhere in the crate:
+
+- `PrinterClient::with_simple_print_start` — superseded by `with_print_task`
+- `PrinterClient::transport_mut`
+- `protocol::{set_quantity, default_response_cmd, page_start, page_end}`
+
+`protocol::cancel_print` is kept despite having no caller: it is needed to stop
+a job on Ctrl-C, which is a known gap.
+
+### Changed
+
+- Dependencies updated (`image` 0.25.10, `moxcms` 0.8.1, `tokio-macros` 2.7.2).
+- `Model`'s two `impl` blocks merged into one.
+
+No rendering change — `compare-render.sh` reports every output identical.
+
 ## [0.20.0] - 2026-07-31
 
 ### Changed
@@ -698,7 +727,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/kahwee/thermark/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/kahwee/thermark/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kahwee/thermark/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kahwee/thermark/compare/v0.17.0...v0.18.0
