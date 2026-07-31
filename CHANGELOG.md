@@ -10,6 +10,30 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-31
+
+### Fixed
+
+- **A QR too dense to scan is now an error, not a sticker.** Long content means
+  more modules and fewer pixels each; below 2 px per module heat bleed closes
+  the gaps and the code is unreadable, but it still *looked* like a QR. A
+  900-byte payload on a 200 px square rendered 1 px modules. Warns below 3 px,
+  refuses below 2.
+- **`escape_wifi_field` now escapes `:`**, which is reserved in the WIFI QR
+  format. Lenient phone parsers coped, but a strict reader mis-parses a
+  password containing a colon.
+- **SSID length is checked in bytes, not characters.** The 802.11 limit is 32
+  *bytes*: a 12-character Japanese SSID is 36 bytes and invalid, and was being
+  accepted.
+
+### Added
+
+- An **FAQ** in the README covering what this project actually got wrong in
+  practice: distinguishing a low battery from a printable-area limit (the tell
+  is inconsistency between runs), measuring the real area with
+  `calibrate --boundary`, checking output with `--preview` instead of a label,
+  why artwork can print smaller than the media, and why a QR may not scan.
+
 ## [0.17.0] - 2026-07-31
 
 ### Added
@@ -627,7 +651,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/kahwee/thermark/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kahwee/thermark/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/kahwee/thermark/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/kahwee/thermark/compare/v0.14.0...v0.15.0

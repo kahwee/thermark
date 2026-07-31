@@ -12,6 +12,9 @@ use crate::geometry::{LabelPx, SafeArea};
 use crate::label::{QrLabelOptions, TextSide, make_qr_label_opts};
 use image::GrayImage;
 
+/// Maximum SSID length. The 802.11 limit is 32 **bytes**, not characters.
+pub const SSID_MAX_BYTES: usize = 32;
+
 /// Security type for the WIFI QR payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum WifiSecurity {
@@ -37,12 +40,16 @@ impl WifiSecurity {
     }
 }
 
-/// Escape special characters in WIFI QR fields (`\`, `;`, `,`, `"`).
+/// Escape the characters reserved in WIFI QR fields: `\`, `;`, `,`, `"`, `:`.
+///
+/// `:` matters because it separates a field's key from its value. Most phone
+/// parsers split on the first one and cope, but a strict reader will mis-parse
+/// a password containing a colon, so escape it per the specification.
 pub fn escape_wifi_field(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            '\\' | ';' | ',' | '"' => {
+            '\\' | ';' | ',' | '"' | ':' => {
                 out.push('\\');
                 out.push(c);
             }
@@ -72,10 +79,12 @@ pub fn wifi_qr_payload(
              (keeps the secret out of shell history). Open network: --security nopass",
         ));
     }
-    if ssid.chars().count() > 32 {
+    // The 802.11 limit is 32 *bytes*, not characters: a 17-character Japanese
+    // SSID is 43 bytes and invalid, while a 32-character ASCII one is fine.
+    if ssid.len() > SSID_MAX_BYTES {
         return Err(Error::msg(format!(
-            "SSID is {n} characters (Wi‑Fi max is usually 32); shorten the network name",
-            n = ssid.chars().count()
+            "SSID is {n} bytes (Wi‑Fi max is {SSID_MAX_BYTES}); shorten the network name",
+            n = ssid.len()
         )));
     }
 
@@ -182,10 +191,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ssid_over_32_chars() {
+    fn rejects_ssid_over_32_bytes() {
         let long = "a".repeat(33);
         let err = wifi_qr_payload(&long, "x", WifiSecurity::Wpa, false).unwrap_err();
         assert!(err.to_string().contains("32"), "{err}");
+
+        // 12 characters, 36 bytes: over the real limit though under 32 chars.
+        let multibyte = "ネットワーク名前あいうえお"
+            .chars()
+            .take(12)
+            .collect::<String>();
+        assert!(multibyte.chars().count() < 32 && multibyte.len() > 32);
+        assert!(wifi_qr_payload(&multibyte, "x", WifiSecurity::Wpa, false).is_err());
+
+        // Exactly 32 bytes is allowed.
+        assert!(wifi_qr_payload(&"a".repeat(32), "x", WifiSecurity::Wpa, false).is_ok());
+    }
+
+    #[test]
+    fn escapes_colon_in_password() {
+        let p = wifi_qr_payload("Net", "pa:ss", WifiSecurity::Wpa, false).unwrap();
+        assert!(p.contains(r"P:pa\:ss;"), "{p}");
     }
 
     #[test]

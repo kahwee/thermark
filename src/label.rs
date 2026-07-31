@@ -404,13 +404,37 @@ pub fn make_qr_label(
     })
 }
 
+/// Smallest module size a thermal print can hold and still scan reliably.
+///
+/// Below this the code is emitted but unreadable — heat bleed closes the gaps
+/// between modules. Failing loudly beats handing someone a sticker that looks
+/// right and never scans.
+pub const QR_MIN_MODULE_PX: usize = 2;
+/// Below this it scans, but marginally; worth saying so.
+pub const QR_COMFORTABLE_MODULE_PX: usize = 3;
+
 pub fn render_qr_square(url: &str, side: u32) -> Result<GrayImage> {
     let code = QrCode::new(url.as_bytes()).map_err(|e| Error::qr(format!("QR encode: {e}")))?;
     let colors = code.to_colors();
     let modules = code.width();
     let quiet = 2usize;
     let total = modules + quiet * 2;
-    let mpx = (side as usize / total).max(1);
+    let mpx = side as usize / total;
+
+    if mpx < QR_MIN_MODULE_PX {
+        return Err(Error::qr(format!(
+            "content needs {modules} QR modules, which is {mpx}px per module in {side}px — \
+             too fine to scan once printed (need {QR_MIN_MODULE_PX}px). \
+             Shorten the content, or use a larger label."
+        )));
+    }
+    if mpx < QR_COMFORTABLE_MODULE_PX {
+        tracing::warn!(
+            module_px = mpx,
+            modules,
+            "QR modules are small; it should scan but shorten the content if it does not"
+        );
+    }
     let drawn = (total * mpx) as u32;
     let ox = (side.saturating_sub(drawn)) / 2;
     let oy = ox;
@@ -532,6 +556,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn qr_rejects_content_too_dense_to_scan() {
+        // Long content used to render 1px modules into a 200px square: it
+        // looked like a QR and was unscannable. 900 bytes needs 113 modules,
+        // which is 1px each here.
+        let long = "x".repeat(900);
+        let err = render_qr_square(&long, 200).expect_err("should refuse");
+        assert!(err.to_string().contains("too fine to scan"), "{err}");
+
+        // The boundary: 600 bytes is 93 modules -> 2px, which still scans.
+        assert!(render_qr_square(&"x".repeat(600), 200).is_ok());
+    }
+
+    #[test]
+    fn qr_accepts_ordinary_content() {
+        let img = render_qr_square("https://github.com/kahwee/thermark", 200).unwrap();
+        assert_eq!(img.dimensions(), (200, 200));
     }
 
     #[test]

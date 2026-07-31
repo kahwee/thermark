@@ -240,6 +240,89 @@ Personal prints and real Wi‑Fi labels go in **`local/`** (see [`local/README.m
 RUST_LOG=thermark=debug ./target/release/thermark scan
 ```
 
+## FAQ
+
+### Part of my label is blank — is the printable area smaller than the label?
+
+Partly, but check the battery first. A dense or dark label draws far more
+current than a sparse one, and on a low battery the printer stops part-way
+through, which looks exactly like a clipped label. The tell is **inconsistency**:
+if the same image prints differently twice, it is power, not geometry.
+
+```sh
+thermark info          # battery: 1/4 (low — ...) means charge it
+```
+
+Beyond that, some white border is physical and no setting removes it:
+
+- **Across:** the printhead is 48 mm on a 50 mm label, so ~2 mm is unreachable.
+  If it is lopsided rather than even, the roll is off-centre — nudge the guide.
+- **Feed:** the printer starts a little after the label's leading edge and stops
+  before the trailing edge.
+
+### How do I find my printer's real printable area?
+
+```sh
+thermark calibrate --boundary
+```
+
+Prints one numbered bar per millimetre, each at its own horizontal position.
+Read the highest number whose bar printed completely, then save it:
+
+```sh
+thermark config safe-area --last-tick 26 --label 50x30
+```
+
+Do this on a **charged** printer, or you will measure the battery instead of the
+media. If two runs disagree, take the lower number.
+
+### How do I check what will print, without wasting a label?
+
+```sh
+thermark print -i art.png --label 50x30 --preview out.png
+```
+
+Writes exactly the bitmap that would be sent, and prints nothing. `qr`, `text`,
+and `wifi` take `--no-print --save out.png` for the same purpose.
+
+### My artwork prints smaller than the label
+
+Artwork usually carries its own white border, and that margin used to be added
+to the label's own inset. `thermark print` trims uniform background by default;
+`--no-trim` keeps it when the border is deliberate.
+
+### My QR will not scan
+
+Long content needs more modules, and each module gets fewer pixels. Below 2 px
+per module thermark refuses outright, because heat bleed closes the gaps and the
+code is unreadable even though it looks fine. Shorten the URL, use a shorter
+Wi-Fi password, or move to a larger label.
+
+### Nothing connects / "no BLE device matching"
+
+Only one application may hold the printer at a time — quit the vendor app.
+Matching is **exact** by default, so use the full advertising name from
+`thermark scan` (on macOS the id is a UUID, not a MAC). `--fuzzy` enables
+substring matching, which can pick the wrong device.
+
+### Can thermark tell whether the printer is charging?
+
+No. The protocol reports a 0–4 battery level and no charging flag. Check the
+device's own indicator, then re-run `thermark info` and confirm the level is
+climbing. On a B1 a blinking red light means charging; solid red is a paper
+error.
+
+### Why is my text smaller than I expected?
+
+Auto-fit picks the largest size at which every word stays whole. A single long
+word that will not fit the column forces a smaller size for the whole block —
+pass `--font-size` to override, or shorten the word.
+
+### Does this work without the vendor app or an internet connection?
+
+Yes. Everything runs locally over BLE or USB serial. Nothing is uploaded, and no
+account is needed.
+
 ## Protocol
 
 See [`AGENTS.md`](AGENTS.md). Community: the protocol notes in src/protocol.rs.
