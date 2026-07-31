@@ -134,6 +134,11 @@ fn print_boundary_legend() {
     println!("  Read the HIGHEST number whose bar printed completely.");
     println!("  That is where this printer stops on this media.");
     println!();
+    println!("  If the LAST bar printed, the printer reaches the whole label —");
+    println!("  there is no unprintable band, and any inset is only");
+    println!("  registration margin. Charge first: a low battery truncates");
+    println!("  dense pages and reads as a printable-area limit.");
+    println!();
     println!("Then save it — the tool works out the inset:");
     println!("  thermark config safe-area --last-tick <that number> --label 50x30");
     println!();

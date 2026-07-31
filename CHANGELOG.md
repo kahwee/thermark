@@ -10,6 +10,48 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-07-31
+
+**The printable area was never small.** Measured on a fully charged printer,
+`SafeArea::B1` drops from a 40 px bottom inset to 8 px, returning **4 mm of
+every label**.
+
+### Measurement
+
+`thermark calibrate --boundary` at battery 4/4: the **29 mm** bar — the last
+one the probe can draw, covering rows 232-239 — printed complete and reached
+the label's edge. The printer addresses the whole 240-row canvas.
+
+Every earlier reading was taken at battery 1/4, where a dense page sags the
+supply and the printer stops mid-page. That is indistinguishable from a
+printable-area limit in a single sample. Charging moved the apparent "limit" by
+7 mm, which is how we know it was never a limit.
+
+| | printable area | QR side |
+|---|---|---|
+| before | 48.0 x 24.0 mm | 184 px |
+| after | **48.0 x 28.0 mm** | **216 px** |
+
+The 1 mm retained top and bottom is registration insurance, not unreachable
+area — labels do not feed identically every time, and a circle placed exactly
+on row 0 came back with its top shaved. `SafeArea::NONE` gives true full bleed.
+
+### Changed
+
+- `SafeArea::B1` is `top: 8, bottom: 8, left: 0, right: 0`.
+- `SafeArea`'s documentation no longer claims the feed edge is asymmetrically
+  unreachable, and warns against inferring the value from one clipped print.
+- `calibrate --boundary` says what it means when the *last* bar prints — that
+  there is no unprintable band at all — and to charge before measuring.
+- Goldens regenerated: layouts legitimately change with the larger area.
+
+### Fixed
+
+- A test asserted `safe.bottom > safe.top`, encoding the incorrect
+  "feed edge is unreachable" theory. It defended a wrong belief and would have
+  resisted this correction; it now asserts only that insets are applied
+  correctly.
+
 ## [0.22.0] - 2026-07-31
 
 Modern-std pass. Behaviour-preserving — `compare-render.sh` reports every
@@ -760,7 +802,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/kahwee/thermark/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/kahwee/thermark/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/kahwee/thermark/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/kahwee/thermark/compare/v0.19.0...v0.20.0

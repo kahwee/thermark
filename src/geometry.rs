@@ -113,14 +113,17 @@ pub struct Rect {
     pub h: u32,
 }
 
-/// Per-edge inset where printing is unreliable.
+/// Per-edge inset kept clear of content.
 ///
-/// **This is not symmetric.** Measured on B1 hardware with 50×30 media using
-/// `thermark calibrate`: rings at inset 0 print cleanly along the top and both
-/// sides, but the last couple of millimetres at the *feed* (bottom) edge are
-/// lost — the label clears the printhead before the final rows are laid down.
-/// Padding all four edges equally would give away good label area on three
-/// sides to fix a problem on one.
+/// On healthy hardware this is **registration margin, not unreachable area**:
+/// a charged B1 addresses the entire canvas. It exists because labels do not
+/// feed identically every time, so ink placed exactly on an edge row is
+/// sometimes shaved.
+///
+/// Do not infer it from a single clipped print. A low battery truncates dense
+/// pages part-way, which looks the same and led to a value five times too
+/// large here. Measure with `thermark calibrate --boundary` on a charged
+/// printer, and if two runs disagree, take the lower reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SafeArea {
     pub top: u32,
@@ -132,32 +135,25 @@ pub struct SafeArea {
 impl SafeArea {
     /// Measured default for B1-class hardware with 50x30 media.
     ///
-    /// From `thermark calibrate` with the feed ruler, photographed flat:
+    /// Measured with `thermark calibrate --boundary` on a **fully charged**
+    /// printer: the 29 mm bar — the last one the probe can draw, covering rows
+    /// 232-239 — printed complete and reached the label's edge. The printer
+    /// addresses the whole canvas.
     ///
-    /// | Edge   | Observed                                        |
-    /// |--------|-------------------------------------------------|
-    /// | top    | ~2.4 mm of label before the first printed row    |
-    /// | band   | ~25.3 mm printed, ruler ticks evenly spaced      |
-    /// | bottom | ~2.3 mm of label after the last printed row      |
+    /// Earlier readings suggested a band of 4-6 mm was unreachable. Those were
+    /// taken at battery level 1: a dense page sags the supply and the printer
+    /// stops mid-page, which is indistinguishable from a printable-area limit
+    /// in a single sample. Charging the printer moved the "limit" by 7 mm, so
+    /// it was never a limit.
     ///
-    /// Tick spacing is uniform, so the image is **not** scaled — rows past the
-    /// window are simply dropped. The printer begins its window a little after
-    /// the label's leading edge, so canvas row 0 already lands inside the
-    /// printable band and `top` is 0; the last ~40 rows never reach paper.
-    ///
-    /// The ~2.3 mm at the very bottom, and the 2 mm across (48 mm head on a
-    /// 50 mm label), are hardware limits — no software setting fills them.
-    ///
-    /// Different media will differ. Re-measure with `thermark calibrate` and
-    /// save it: `thermark config safe-area --last-tick <mm> --label 50x30`.
+    /// The 1 mm kept here is registration insurance, not unreachable area:
+    /// labels do not feed identically every time, and a printed circle sitting
+    /// exactly on row 0 came back with its top shaved. Set to
+    /// [`SafeArea::NONE`] for true full bleed, or re-measure your own media
+    /// with `thermark config safe-area --last-tick <mm>`.
     pub const B1: Self = Self {
-        // 1 mm. Measured registration reaches row 0, but only just: with
-        // trimming, artwork's topmost ink lands exactly on row 0 and a printed
-        // circle came back with its top shaved flat. Label-to-label
-        // registration varies by a fraction of a millimetre, so ink does not
-        // belong on the extreme edge even when that edge nominally prints.
         top: 8,
-        bottom: 40,
+        bottom: 8,
         left: 0,
         right: 0,
     };
@@ -288,11 +284,13 @@ mod tests {
     }
 
     #[test]
-    fn safe_area_is_asymmetric_and_insets_correctly() {
+    fn safe_area_insets_correctly() {
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
         let safe = SafeArea::B1;
-        // Measured: the feed (bottom) edge loses more than the others.
-        assert!(safe.bottom > safe.top);
+        // Deliberately asserts no particular asymmetry. An earlier version
+        // required `bottom > top`, encoding a "the feed edge is unreachable"
+        // theory that turned out to be a low battery — so the test defended
+        // the wrong belief and would have resisted the correction.
         let area = safe.content(lp).unwrap();
         assert_eq!(area.x, safe.left);
         assert_eq!(area.y, safe.top);

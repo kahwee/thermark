@@ -107,16 +107,10 @@ Wiki: the protocol notes in src/protocol.rs
 ## Geometry & fonts
 
 - **8 px/mm**; max width **384**
-- Printable window on B1 + 50x30 is **48 x 25 mm** of a 50 x 30 label,
-  confirmed against hardware (the safe-area box prints complete on all four
-  sides). The remaining white is physical: ~4.6 mm at the feed edge, and 2 mm
-  across because the head is 48 mm. If the left/right white is lopsided the
-  roll is off-centre in the guide — not a software problem. Older note:
-  measured with `thermark calibrate`. The printer starts a little after the
-  leading edge and stops before the trailing edge; rows past the window are
-  dropped, not scaled. `SafeArea::B1` = top 0 / bottom 40 / left 0 / right 0.
-  The residual white at the feed edges (~2 mm) and across (48 mm head on a
-  50 mm label) is physical — do not try to fix it in software
+- Printable area on a **charged** B1 is the **whole canvas** — measured with
+  `calibrate --boundary`, the last bar (rows 232-239) prints. `SafeArea::B1` is
+  1 mm top/bottom as registration margin only. A low battery truncates dense
+  pages and looks exactly like a printable-area limit; charge before measuring
 - Always use `--label` for full-size media
 - Prefer system fonts (`--font-name helvetica|times|arial`) over bitmap fallback
 - Default no decorative border; QR is square beside text column
