@@ -388,7 +388,7 @@ impl<T: Transport> PrinterClient<T> {
         })
     }
 
-    /// Response offset style used by the simple print-task form (resp = req + offset).
+    /// Response offset style: reply command = request command + offset.
     async fn transceive_offset(
         &mut self,
         cmd: u8,

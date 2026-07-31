@@ -26,7 +26,7 @@ pub enum PrintTask {
     /// Experimental — not hardware-verified here.
     #[value(name = "d110", alias = "d11")]
     D110,
-    /// plain 1-byte PrintStart + 4-byte page size (works on some firmwares).
+    /// Plain 1-byte PrintStart + 4-byte page size (works on some firmwares).
     /// Experimental as a generic fallback.
     #[value(name = "simple", alias = "niimprint")]
     Simple,
@@ -64,7 +64,7 @@ impl PrintTask {
                 "Experimental. Based on wiki B21_V1 (1-byte PrintStart, 4-byte page size)."
             }
             Self::D110 => "Experimental. Based on wiki D110 / D11 203dpi notes.",
-            Self::Simple => "Experimental fallback (plain simple PrintStart).",
+            Self::Simple => "Experimental fallback (plain 1-byte PrintStart).",
         }
     }
 

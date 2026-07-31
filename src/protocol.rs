@@ -125,12 +125,12 @@ impl Model {
     }
 
     /// Payload for PrintStart. B1/newer may prefer the 7-byte form; simple `01`
-    /// is widely accepted (the simple print-task form tested on B1).
+    /// is widely accepted (verified on B1).
     pub fn print_start_payload(self) -> Vec<u8> {
         match self {
             // 7-byte form from community wiki (total pages = 1)
             Self::B1 => vec![0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
-            // 1-byte form used by older models / the simple print-task form fallback
+            // 1-byte form used by older models, and as a general fallback
             _ => vec![0x01],
         }
     }
@@ -181,7 +181,7 @@ pub fn print_start(model: Model) -> Packet {
     pkt(Cmd::PrintStart, model.print_start_payload())
 }
 
-/// Fallback simple print-start used by the simple print-task form (works on many firmwares).
+/// Fallback simple print-start (works on many firmwares).
 pub fn print_start_simple() -> Packet {
     pkt(Cmd::PrintStart, vec![0x01])
 }

@@ -49,7 +49,7 @@ pub struct ConnArgs {
 /// Which on-wire print sequence to use. Flattened into every printing command.
 #[derive(Debug, Clone, clap::Args)]
 pub struct TaskArgs {
-    /// Force simple 1-byte PrintStart (plain-form; experimental)
+    /// Force simple 1-byte PrintStart (experimental)
     #[arg(long, default_value_t = false)]
     pub simple_start: bool,
     /// Print task: b1 (tested), b21v1, d110, simple (experimental)

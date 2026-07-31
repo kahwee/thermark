@@ -10,6 +10,19 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-07-31
+
+### Changed
+
+- **Descriptive text no longer names the external client it was compared
+  against.** Comments across `print_task.rs`, `image_encode.rs`, `protocol.rs`,
+  `args.rs` and `client.rs` now describe the behaviour directly ("plain 1-byte
+  PrintStart", "invert grayscale, then convert to 1-bit"). The
+  `thermark tasks` description changed to match.
+
+  **`--task the simple print-task form` still works** — the alias is deliberately untouched so
+  existing scripts keep running. Only the prose changed.
+
 ## [0.28.0] - 2026-07-31
 
 ### Fixed
@@ -780,7 +793,7 @@ hard-coded, after a 5 mm bottom inset still clipped on real hardware.
 ### Known issue
 
 The bottom edge can still clip. Research points at a registration problem
-rather than an unprintable margin: community reports reports the printer
+rather than an unprintable margin: community reports describe the printer
 starting to print before the label's leading edge, so the leading rows land on
 the gap between labels and the trailing rows fall off the end. If that is what
 is happening here, shrinking the content (what `SafeArea` does) is the wrong
@@ -969,7 +982,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/kahwee/thermark/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/kahwee/thermark/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/kahwee/thermark/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/kahwee/thermark/compare/v0.25.0...v0.26.0

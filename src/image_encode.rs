@@ -38,7 +38,7 @@ pub fn rotate(img: DynamicImage, rotation: Rotation) -> DynamicImage {
 /// Load, threshold to 1-bit, and emit print row packets.
 ///
 /// Pixel convention: **1 = black (burn)**, **0 = white** after invert+threshold,
-/// matching the simple print-task form (invert grayscale then convert to 1-bit).
+/// invert grayscale, then convert to 1-bit.
 pub fn encode_path(
     path: &std::path::Path,
     max_width: u32,
