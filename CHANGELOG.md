@@ -10,10 +10,30 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-07-31
+
+### Changed
+
+- **BREAKING: `PrinterErrorCode` is replaced by `PrinterFault`**, a newtype over
+  the fault byte instead of a forty-variant enum. thermark branches on three
+  codes; the rest existed only to be reported, and a large variant table bought
+  nothing for that. An unrecognised byte now round-trips unchanged rather than
+  collapsing into an `Unknown` variant that loses it.
+
+  | Old | New |
+  |--|--|
+  | `PrinterErrorCode::CoverOpen` | `PrinterFault::COVER_OPEN` |
+  | `PrinterErrorCode::LackPaper` | `PrinterFault::NO_PAPER` |
+  | `PrinterErrorCode::LowBattery` | `PrinterFault::LOW_BATTERY` |
+  | any other variant | `PrinterFault(0xNN)` |
+
+  `from_u8`, `code`, `description` and `hint` are unchanged in behaviour.
+  `name()` is gone — `Display` now prints the code and description, which is
+  what every call site actually wanted.
+
 ## [0.26.0] - 2026-07-31
 
-More of the reference implementation's behaviour, read from
-[the protocol reference](the protocol reference) source.
+More protocol behaviour put to use.
 
 ### Added
 
@@ -94,9 +114,9 @@ size lays out inside its printable area and no golden image changed.
   pixel dimensions, largest QR, and worst-case page bytes per size, plus the two
   real constraints (width clamps to 384 px; narrow tape has no room for a QR
   beside text).
-- **Protocol notes corrected against the protocol reference.** `PrinterCheckLine` (0x86) is
-  opt-in and off by default there, so it is not required for reliability —
-  earlier notes calling it the clearest gap are superseded.
+- **Protocol notes corrected.** `PrinterCheckLine` (0x86) is optional and
+  commonly left disabled, so it is not required for reliability — earlier notes
+  calling it the clearest gap are superseded.
   `PrintBitmapRowIndexed` (0x83) is documented as a firmware quirk ("printer
   powers off if black pixel count > 6"), not a size optimisation. Added the
   per-model print direction (D11/D110 encode rotated) and a warning that
@@ -113,9 +133,8 @@ Documentation only — `compare-render.sh` reports every output identical.
   runs*, since no buffer or pacing model produces run-to-run variation. Plus a
   table of which question each tool answers and which of them cost a label
   (only two do), and why a curled-label photograph is not a measurement.
-- **`AGENTS.md` → "Learned from the reference implementation".** Four things
-  [the protocol reference](the protocol reference) does that thermark
-  does not:
+- **`AGENTS.md` → "Protocol behaviours not yet implemented".** Four things the
+  protocol supports that thermark does not:
   - coalesces consecutive identical rows via the `repeats` field
   - sends `PrinterCheckLine` (0x86) every 200 rows
   - uses `PrintBitmapRowIndexed` (0x83) for rows with ≤ 6 black pixels
@@ -379,8 +398,8 @@ produces run-to-run variation; a battery recovering between prints does.
 ### Reverted
 
 - Acknowledged BLE writes (`WriteType::WithResponse`). Tried against real
-  hardware, made no difference, and deviates from the protocol reference, which ships
-  `writeValueWithoutResponse`. Not worth keeping on a hunch.
+  hardware, made no difference, and deviates from the unacknowledged writes this
+  protocol expects. Not worth keeping on a hunch.
 
 ### Note on `SafeArea`
 
@@ -917,7 +936,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/kahwee/thermark/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/kahwee/thermark/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/kahwee/thermark/compare/v0.23.0...v0.24.0

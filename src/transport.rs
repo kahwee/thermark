@@ -527,10 +527,10 @@ mod ble {
 
     /// Write type for row data.
     ///
-    /// Unacknowledged, matching the reference implementation (the protocol reference sends
-    /// `writeValueWithoutResponse` with a fixed inter-packet delay). Acknowledged
-    /// writes were tried against a real B1 and made no difference to the
-    /// truncation being investigated, so the deviation was not worth keeping.
+    /// Unacknowledged, with a fixed inter-packet delay — what this protocol
+    /// expects for row streaming. Acknowledged writes were tried against a real
+    /// B1 and made no difference to the truncation being investigated, so the
+    /// deviation was not worth keeping.
     fn choose_write_type(_characteristic: &Characteristic) -> WriteType {
         WriteType::WithoutResponse
     }

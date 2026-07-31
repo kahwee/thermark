@@ -1,7 +1,4 @@
 //! Library error type and printer `In_PrintError` (0xDB) reason codes.
-//!
-//! `PrinterErrorCode` source: the protocol reference payloads.ts
-//! (<the protocol reference>).
 
 use crate::packet::PacketError;
 use std::fmt;
@@ -14,7 +11,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     /// Printer returned `In_PrintError` (0xDB).
     #[error("printer error: {0}")]
-    Printer(PrinterErrorCode),
+    Printer(PrinterFault),
 
     /// Timed out waiting for a response packet.
     #[error(
@@ -113,265 +110,106 @@ impl Error {
     }
 }
 
-/// Payload byte of response command `0xDB` (`In_PrintError`).
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrinterErrorCode {
-    CoverOpen = 0x01,
-    /// No paper
-    LackPaper = 0x02,
-    LowBattery = 0x03,
-    BatteryException = 0x04,
-    UserCancel = 0x05,
-    DataError = 0x06,
-    Overheat = 0x07,
-    PaperOutException = 0x08,
-    PrinterBusy = 0x09,
-    NoPrinterHead = 0x0a,
-    TemperatureLow = 0x0b,
-    PrinterHeadLoose = 0x0c,
-    NoRibbon = 0x0d,
-    WrongRibbon = 0x0e,
-    UsedRibbon = 0x0f,
-    WrongPaper = 0x10,
-    SetPaperFail = 0x11,
-    SetPrintModeFail = 0x12,
-    SetPrintDensityFail = 0x13,
-    WriteRfidFail = 0x14,
-    SetMarginFail = 0x15,
-    CommunicationException = 0x16,
-    Disconnect = 0x17,
-    CanvasParameterError = 0x18,
-    RotationParameterException = 0x19,
-    JsonParameterException = 0x1a,
-    B3sAbnormalPaperOutput = 0x1b,
-    ECheckPaper = 0x1c,
-    RfidTagNotWritten = 0x1d,
-    SetPrintDensityNoSupport = 0x1e,
-    SetPrintModeNoSupport = 0x1f,
-    SetPrintLabelMaterialError = 0x20,
-    SetPrintLabelMaterialNoSupport = 0x21,
-    NotSupportWrittenRfid = 0x22,
-    IllegalPage = 0x32,
-    IllegalRibbonPage = 0x33,
-    ReceiveDataTimeout = 0x34,
-    NonDedicatedRibbon = 0x35,
-    Unknown(u8),
-}
+/// A fault code reported by the printer in an `In_PrintError` (`0xDB`) reply,
+/// or in the 10-byte form of a `PrintStatus` reply.
+///
+/// Deliberately a thin newtype over the byte rather than an enum of every code
+/// the firmware can emit. thermark branches on three of them; the rest exist to
+/// be *reported*, and an enum with forty variants bought nothing for that but a
+/// large table to keep correct. An unrecognised byte round-trips unchanged
+/// instead of collapsing into an `Unknown` variant that loses it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PrinterFault(pub u8);
 
-impl PrinterErrorCode {
+impl PrinterFault {
+    /// Lid is open. Blocks printing until closed.
+    pub const COVER_OPEN: Self = Self(0x01);
+    /// No labels loaded.
+    pub const NO_PAPER: Self = Self(0x02);
+    /// Battery too low to drive the head reliably.
+    pub const LOW_BATTERY: Self = Self(0x03);
+
     pub fn from_u8(code: u8) -> Self {
-        match code {
-            0x01 => Self::CoverOpen,
-            0x02 => Self::LackPaper,
-            0x03 => Self::LowBattery,
-            0x04 => Self::BatteryException,
-            0x05 => Self::UserCancel,
-            0x06 => Self::DataError,
-            0x07 => Self::Overheat,
-            0x08 => Self::PaperOutException,
-            0x09 => Self::PrinterBusy,
-            0x0a => Self::NoPrinterHead,
-            0x0b => Self::TemperatureLow,
-            0x0c => Self::PrinterHeadLoose,
-            0x0d => Self::NoRibbon,
-            0x0e => Self::WrongRibbon,
-            0x0f => Self::UsedRibbon,
-            0x10 => Self::WrongPaper,
-            0x11 => Self::SetPaperFail,
-            0x12 => Self::SetPrintModeFail,
-            0x13 => Self::SetPrintDensityFail,
-            0x14 => Self::WriteRfidFail,
-            0x15 => Self::SetMarginFail,
-            0x16 => Self::CommunicationException,
-            0x17 => Self::Disconnect,
-            0x18 => Self::CanvasParameterError,
-            0x19 => Self::RotationParameterException,
-            0x1a => Self::JsonParameterException,
-            0x1b => Self::B3sAbnormalPaperOutput,
-            0x1c => Self::ECheckPaper,
-            0x1d => Self::RfidTagNotWritten,
-            0x1e => Self::SetPrintDensityNoSupport,
-            0x1f => Self::SetPrintModeNoSupport,
-            0x20 => Self::SetPrintLabelMaterialError,
-            0x21 => Self::SetPrintLabelMaterialNoSupport,
-            0x22 => Self::NotSupportWrittenRfid,
-            0x32 => Self::IllegalPage,
-            0x33 => Self::IllegalRibbonPage,
-            0x34 => Self::ReceiveDataTimeout,
-            0x35 => Self::NonDedicatedRibbon,
-            other => Self::Unknown(other),
-        }
+        Self(code)
     }
 
     pub fn code(self) -> u8 {
-        match self {
-            Self::CoverOpen => 0x01,
-            Self::LackPaper => 0x02,
-            Self::LowBattery => 0x03,
-            Self::BatteryException => 0x04,
-            Self::UserCancel => 0x05,
-            Self::DataError => 0x06,
-            Self::Overheat => 0x07,
-            Self::PaperOutException => 0x08,
-            Self::PrinterBusy => 0x09,
-            Self::NoPrinterHead => 0x0a,
-            Self::TemperatureLow => 0x0b,
-            Self::PrinterHeadLoose => 0x0c,
-            Self::NoRibbon => 0x0d,
-            Self::WrongRibbon => 0x0e,
-            Self::UsedRibbon => 0x0f,
-            Self::WrongPaper => 0x10,
-            Self::SetPaperFail => 0x11,
-            Self::SetPrintModeFail => 0x12,
-            Self::SetPrintDensityFail => 0x13,
-            Self::WriteRfidFail => 0x14,
-            Self::SetMarginFail => 0x15,
-            Self::CommunicationException => 0x16,
-            Self::Disconnect => 0x17,
-            Self::CanvasParameterError => 0x18,
-            Self::RotationParameterException => 0x19,
-            Self::JsonParameterException => 0x1a,
-            Self::B3sAbnormalPaperOutput => 0x1b,
-            Self::ECheckPaper => 0x1c,
-            Self::RfidTagNotWritten => 0x1d,
-            Self::SetPrintDensityNoSupport => 0x1e,
-            Self::SetPrintModeNoSupport => 0x1f,
-            Self::SetPrintLabelMaterialError => 0x20,
-            Self::SetPrintLabelMaterialNoSupport => 0x21,
-            Self::NotSupportWrittenRfid => 0x22,
-            Self::IllegalPage => 0x32,
-            Self::IllegalRibbonPage => 0x33,
-            Self::ReceiveDataTimeout => 0x34,
-            Self::NonDedicatedRibbon => 0x35,
-            Self::Unknown(c) => c,
-        }
+        self.0
     }
 
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::CoverOpen => "CoverOpen",
-            Self::LackPaper => "LackPaper",
-            Self::LowBattery => "LowBattery",
-            Self::BatteryException => "BatteryException",
-            Self::UserCancel => "UserCancel",
-            Self::DataError => "DataError",
-            Self::Overheat => "Overheat",
-            Self::PaperOutException => "PaperOutException",
-            Self::PrinterBusy => "PrinterBusy",
-            Self::NoPrinterHead => "NoPrinterHead",
-            Self::TemperatureLow => "TemperatureLow",
-            Self::PrinterHeadLoose => "PrinterHeadLoose",
-            Self::NoRibbon => "NoRibbon",
-            Self::WrongRibbon => "WrongRibbon",
-            Self::UsedRibbon => "UsedRibbon",
-            Self::WrongPaper => "WrongPaper",
-            Self::SetPaperFail => "SetPaperFail",
-            Self::SetPrintModeFail => "SetPrintModeFail",
-            Self::SetPrintDensityFail => "SetPrintDensityFail",
-            Self::WriteRfidFail => "WriteRfidFail",
-            Self::SetMarginFail => "SetMarginFail",
-            Self::CommunicationException => "CommunicationException",
-            Self::Disconnect => "Disconnect",
-            Self::CanvasParameterError => "CanvasParameterError",
-            Self::RotationParameterException => "RotationParameterException",
-            Self::JsonParameterException => "JsonParameterException",
-            Self::B3sAbnormalPaperOutput => "B3sAbnormalPaperOutput",
-            Self::ECheckPaper => "ECheckPaper",
-            Self::RfidTagNotWritten => "RfidTagNotWritten",
-            Self::SetPrintDensityNoSupport => "SetPrintDensityNoSupport",
-            Self::SetPrintModeNoSupport => "SetPrintModeNoSupport",
-            Self::SetPrintLabelMaterialError => "SetPrintLabelMaterialError",
-            Self::SetPrintLabelMaterialNoSupport => "SetPrintLabelMaterialNoSupport",
-            Self::NotSupportWrittenRfid => "NotSupportWrittenRfid",
-            Self::IllegalPage => "IllegalPage",
-            Self::IllegalRibbonPage => "IllegalRibbonPage",
-            Self::ReceiveDataTimeout => "ReceiveDataTimeout",
-            Self::NonDedicatedRibbon => "NonDedicatedRibbon",
-            Self::Unknown(_) => "Unknown",
-        }
-    }
-
+    /// Plain-English meaning, where the condition is one this printer family is
+    /// known to report. Unrecognised codes say so rather than guess.
     pub fn description(self) -> &'static str {
-        match self {
-            Self::CoverOpen => "Cover / lid is open",
-            Self::LackPaper => "No paper / labels loaded",
-            Self::LowBattery => "Battery too low to print",
-            Self::BatteryException => "Battery fault",
-            Self::UserCancel => "Print cancelled by user",
-            Self::DataError => "Invalid print data",
-            Self::Overheat => "Print head overheated",
-            Self::PaperOutException => "Paper ran out mid-job",
-            Self::PrinterBusy => "Printer is busy",
-            Self::NoPrinterHead => "Print head not detected",
-            Self::TemperatureLow => "Temperature too low",
-            Self::PrinterHeadLoose => "Print head loose / not seated",
-            Self::NoRibbon => "No ribbon installed",
-            Self::WrongRibbon => "Wrong ribbon type",
-            Self::UsedRibbon => "Ribbon exhausted / already used",
-            Self::WrongPaper => "Wrong paper / label type",
-            Self::SetPaperFail => "Failed to set paper parameters",
-            Self::SetPrintModeFail => "Failed to set print mode",
-            Self::SetPrintDensityFail => "Failed to set density",
-            Self::WriteRfidFail => "Failed to write RFID tag on label",
-            Self::SetMarginFail => "Failed to set margin",
-            Self::CommunicationException => "Communication error",
-            Self::Disconnect => "Disconnected during print",
-            Self::CanvasParameterError => "Canvas / image parameter error",
-            Self::RotationParameterException => "Invalid rotation parameter",
-            Self::JsonParameterException => "Invalid JSON parameter (app-side)",
-            Self::B3sAbnormalPaperOutput => "Abnormal paper output (B3S family)",
-            Self::ECheckPaper => "Paper check failed",
-            Self::RfidTagNotWritten => "RFID tag not written",
-            Self::SetPrintDensityNoSupport => "Density setting not supported",
-            Self::SetPrintModeNoSupport => "Print mode not supported",
-            Self::SetPrintLabelMaterialError => "Label material setting error",
-            Self::SetPrintLabelMaterialNoSupport => "Label material not supported",
-            Self::NotSupportWrittenRfid => "Printer does not support writing RFID",
-            Self::IllegalPage => "Illegal page / job parameter",
-            Self::IllegalRibbonPage => "Illegal ribbon page parameter",
-            Self::ReceiveDataTimeout => "Printer timed out waiting for data",
-            Self::NonDedicatedRibbon => "Non-official / non-dedicated ribbon",
-            Self::Unknown(_) => "Unknown printer error code",
+        match self.0 {
+            0x01 => "Cover / lid is open",
+            0x02 => "No paper / labels loaded",
+            0x03 => "Battery too low to print",
+            0x04 => "Battery fault",
+            0x05 => "Print cancelled at the printer",
+            0x06 => "Invalid print data",
+            0x07 => "Print head overheated",
+            0x08 => "Paper ran out mid-job",
+            0x09 => "Printer is busy",
+            0x0a => "Print head not detected",
+            0x0b => "Temperature too low to print",
+            0x0c => "Print head loose / not seated",
+            0x0d => "No ribbon installed",
+            0x0e => "Wrong ribbon type",
+            0x0f => "Ribbon exhausted",
+            0x10 => "Wrong paper / label type",
+            0x11 => "Printer rejected the paper settings",
+            0x12 => "Printer rejected the print mode",
+            0x13 => "Printer rejected the density setting",
+            0x14 => "Failed to write the label's RFID tag",
+            0x15 => "Printer rejected the margin setting",
+            0x16 => "Communication error",
+            0x17 => "Disconnected during print",
+            0x18 => "Canvas / image parameter out of range",
+            0x19 => "Invalid rotation parameter",
+            0x1a => "Malformed parameter",
+            0x1b => "Abnormal paper output",
+            0x1c => "Paper check failed",
+            0x1d => "RFID tag not written",
+            0x1e => "Density setting not supported",
+            0x1f => "Print mode not supported",
+            0x20 => "Label material setting rejected",
+            0x21 => "Label material not supported",
+            0x22 => "Printer cannot write RFID tags",
+            0x32 => "Illegal page / job parameter",
+            0x33 => "Illegal ribbon page parameter",
+            0x34 => "Printer timed out waiting for data",
+            0x35 => "Unrecognised ribbon",
+            _ => "Unrecognised printer fault",
         }
     }
 
+    /// What the user can actually do about it.
     pub fn hint(self) -> Option<&'static str> {
-        match self {
-            Self::CoverOpen => Some("Close the B1 cover fully until it clicks."),
-            Self::LackPaper | Self::PaperOutException | Self::ECheckPaper => {
-                Some("Load a label roll with 2–5 mm sticking out of the exit slot.")
+        Some(match self.0 {
+            0x01 => "Close the B1 cover fully until it clicks.",
+            0x02 | 0x08 | 0x1c => {
+                "Load a label roll with 2\u{2013}5 mm sticking out of the exit slot."
             }
-            Self::LowBattery | Self::BatteryException => {
-                Some("Charge the printer, then try again.")
+            0x03 | 0x04 => "Charge the printer, then try again.",
+            0x07 => "Wait for the print head to cool, then retry.",
+            0x09 => "Wait for the current job to finish, or power-cycle the printer.",
+            0x10 | 0x11 | 0x20 => {
+                "Use compatible labels for this model; check the label type setting."
             }
-            Self::WrongPaper | Self::SetPaperFail | Self::SetPrintLabelMaterialError => {
-                Some("Use compatible labels for this model; check label type in settings.")
+            0x14 | 0x1d | 0x22 => {
+                "RFID consumable issue \u{2014} try official labels or a different roll."
             }
-            Self::WriteRfidFail | Self::RfidTagNotWritten | Self::NotSupportWrittenRfid => {
-                Some("RFID consumable issue — try official labels or a different roll.")
+            0x06 | 0x18 | 0x32 => {
+                "Check image size (B1 max width 384 px) and print-task parameters."
             }
-            Self::Overheat => Some("Wait for the print head to cool, then retry."),
-            Self::PrinterBusy => {
-                Some("Wait for the current job to finish, or power-cycle the printer.")
-            }
-            Self::DataError | Self::CanvasParameterError | Self::IllegalPage => {
-                Some("Check image size (B1 max width 384 px) and print-task parameters.")
-            }
-            _ => None,
-        }
+            _ => return None,
+        })
     }
 }
 
-impl fmt::Display for PrinterErrorCode {
+impl fmt::Display for PrinterFault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "0x{:02X} {} — {}",
-            self.code(),
-            self.name(),
-            self.description()
-        )?;
+        write!(f, "0x{:02X} — {}", self.0, self.description())?;
         if let Some(h) = self.hint() {
             write!(f, " ({h})")?;
         }
@@ -385,19 +223,19 @@ mod tests {
 
     #[test]
     fn codes_we_saw() {
-        let e1 = PrinterErrorCode::from_u8(0x01);
-        assert_eq!(e1, PrinterErrorCode::CoverOpen);
+        let e1 = PrinterFault::from_u8(0x01);
+        assert_eq!(e1, PrinterFault::COVER_OPEN);
         assert!(e1.description().contains("open"));
 
-        let e2 = PrinterErrorCode::from_u8(0x02);
-        assert_eq!(e2, PrinterErrorCode::LackPaper);
+        let e2 = PrinterFault::from_u8(0x02);
+        assert_eq!(e2, PrinterFault::NO_PAPER);
         assert!(e2.description().to_lowercase().contains("paper"));
     }
 
     #[test]
     fn from_u8_roundtrip_known_and_unknown() {
         for code in [0x01u8, 0x02, 0x14, 0x35, 0x99] {
-            let e = PrinterErrorCode::from_u8(code);
+            let e = PrinterFault::from_u8(code);
             assert_eq!(e.code(), code);
             let _ = e.to_string();
             let _ = e.hint();
@@ -406,9 +244,9 @@ mod tests {
 
     #[test]
     fn typed_error_is_matchable() {
-        let err = Error::Printer(PrinterErrorCode::LackPaper);
+        let err = Error::Printer(PrinterFault::NO_PAPER);
         match err {
-            Error::Printer(PrinterErrorCode::LackPaper) => {}
+            Error::Printer(PrinterFault::NO_PAPER) => {}
             other => panic!("unexpected {other:?}"),
         }
     }

@@ -34,7 +34,7 @@ pub mod types;
 pub mod wifi;
 
 pub use config::{Config, ConnPref};
-pub use errors::{Error, PrinterErrorCode, Result};
+pub use errors::{Error, PrinterFault, Result};
 pub use geometry::{DEFAULT_B1_LABEL, HEAD_NARROW_PX, HEAD_WIDE_PX, LabelMm, LabelPx, PX_PER_MM};
 pub use image_encode::Raster;
 pub use label::{TextAlign, TextLabelOptions, TextSide, make_qr_label_opts, make_text_label};

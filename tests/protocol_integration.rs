@@ -1,6 +1,6 @@
 //! Integration-style tests (no hardware required).
 
-use thermark::errors::PrinterErrorCode;
+use thermark::errors::PrinterFault;
 use thermark::geometry::{LabelMm, PX_PER_MM};
 use thermark::label::{TextSide, make_qr_label, max_qr_side, render_qr_square};
 use thermark::packet::Packet;
@@ -44,9 +44,9 @@ fn density_and_label_type_packets() {
 
 #[test]
 fn error_codes_cover_and_paper() {
-    assert_eq!(PrinterErrorCode::from_u8(0x01), PrinterErrorCode::CoverOpen);
-    assert_eq!(PrinterErrorCode::from_u8(0x02), PrinterErrorCode::LackPaper);
-    let s = format!("{}", PrinterErrorCode::from_u8(0x01));
+    assert_eq!(PrinterFault::from_u8(0x01), PrinterFault::COVER_OPEN);
+    assert_eq!(PrinterFault::from_u8(0x02), PrinterFault::NO_PAPER);
+    let s = format!("{}", PrinterFault::from_u8(0x01));
     assert!(s.contains("Cover") || s.contains("open") || s.contains("0x01"));
 }
 

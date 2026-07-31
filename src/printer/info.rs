@@ -217,16 +217,16 @@ impl Heartbeat {
     ///
     /// Matches [`crate::doctor::evaluate_heartbeat`] FAIL cases for cover, paper,
     /// and empty battery. Missing fields are not blockers (firmware-dependent).
-    pub fn print_blocker(&self) -> Option<crate::errors::PrinterErrorCode> {
-        use crate::errors::PrinterErrorCode;
+    pub fn print_blocker(&self) -> Option<crate::errors::PrinterFault> {
+        use crate::errors::PrinterFault;
         if self.closing_state == Some(1) {
-            return Some(PrinterErrorCode::CoverOpen);
+            return Some(PrinterFault::COVER_OPEN);
         }
         if self.paper_state == Some(1) {
-            return Some(PrinterErrorCode::LackPaper);
+            return Some(PrinterFault::NO_PAPER);
         }
         if self.power_level == Some(0) {
-            return Some(PrinterErrorCode::LowBattery);
+            return Some(PrinterFault::LOW_BATTERY);
         }
         None
     }
@@ -235,7 +235,7 @@ impl Heartbeat {
 #[cfg(test)]
 mod heartbeat_blocker_tests {
     use super::*;
-    use crate::errors::PrinterErrorCode;
+    use crate::errors::PrinterFault;
 
     #[test]
     fn print_blocker_cover_paper_battery() {
@@ -243,15 +243,15 @@ mod heartbeat_blocker_tests {
         assert!(hb.print_blocker().is_none());
 
         hb.closing_state = Some(1);
-        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::CoverOpen));
+        assert_eq!(hb.print_blocker(), Some(PrinterFault::COVER_OPEN));
 
         hb.closing_state = Some(0);
         hb.paper_state = Some(1);
-        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::LackPaper));
+        assert_eq!(hb.print_blocker(), Some(PrinterFault::NO_PAPER));
 
         hb.paper_state = Some(0);
         hb.power_level = Some(0);
-        assert_eq!(hb.print_blocker(), Some(PrinterErrorCode::LowBattery));
+        assert_eq!(hb.print_blocker(), Some(PrinterFault::LOW_BATTERY));
     }
 }
 

@@ -1,7 +1,7 @@
 //! High-level printer client (protocol state machine / print jobs).
 
 use super::info::{Heartbeat, InfoValue, PrintStatus, PrinterSummary, RfidInfo};
-use crate::errors::{Error, PrinterErrorCode, Result};
+use crate::errors::{Error, PrinterFault, Result};
 use crate::geometry::{LabelMm, SafeArea};
 use crate::image_encode::{self, Raster};
 use crate::packet::Packet;
@@ -50,10 +50,10 @@ impl Default for Pacing {
 impl Pacing {
     /// Timings tuned against real B1 hardware.
     pub const REAL: Self = Self {
-        // Comparable to the reference implementation, which delays 10ms after
-        // every packet (the protocol reference `packetIntervalMs`). Combined with the 5ms
-        // per BLE chunk in the transport, a dense page is paced ~2.3s — the
-        // old fixed 8ms-per-8-rows gave it ~1.4s regardless of size.
+        // A ~10ms delay after every packet is the common figure for this
+        // protocol. Combined with the 5ms per BLE chunk in the transport, a
+        // dense page is paced ~2.3s — the old fixed 8ms-per-8-rows gave it
+        // ~1.4s regardless of size.
         row_pause: Duration::from_millis(5),
         pace_bytes: 64,
         after_page_end: Duration::from_millis(200),
@@ -370,7 +370,7 @@ impl<T: Transport> PrinterClient<T> {
             for p in self.recv_pkts(wait).await? {
                 if p.cmd == 0xdb {
                     let code = p.data.first().copied().unwrap_or(0);
-                    return Err(Error::Printer(PrinterErrorCode::from_u8(code)));
+                    return Err(Error::Printer(PrinterFault::from_u8(code)));
                 }
                 if p.cmd == response_cmd {
                     return Ok(p);
@@ -601,7 +601,7 @@ impl<T: Transport> PrinterClient<T> {
                         // The 10-byte form carries a fault code the framing
                         // layer never sees, so it can only be caught here.
                         if let Some(code) = status.error {
-                            return Err(Error::Printer(PrinterErrorCode::from_u8(code)));
+                            return Err(Error::Printer(PrinterFault::from_u8(code)));
                         }
                         last_status = Some(status);
                         if status.page_complete() {
@@ -792,7 +792,7 @@ mod tests {
             .await
             .unwrap_err();
         match err {
-            Error::Printer(PrinterErrorCode::LackPaper) => {}
+            Error::Printer(PrinterFault::NO_PAPER) => {}
             other => panic!("expected LackPaper, got {other:?}"),
         }
     }
@@ -808,7 +808,7 @@ mod tests {
             .await
             .unwrap_err();
         match err {
-            Error::Printer(PrinterErrorCode::CoverOpen) => {}
+            Error::Printer(PrinterFault::COVER_OPEN) => {}
             other => panic!("expected CoverOpen, got {other:?}"),
         }
     }
@@ -912,7 +912,7 @@ mod tests {
         let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let err = c.preflight_ready().await.unwrap_err();
         assert!(
-            matches!(err, Error::Printer(PrinterErrorCode::CoverOpen)),
+            matches!(err, Error::Printer(PrinterFault::COVER_OPEN)),
             "got {err:?}"
         );
     }
@@ -952,7 +952,7 @@ mod tests {
         let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
         let err = c.preflight_ready().await.unwrap_err();
         assert!(
-            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            matches!(err, Error::Printer(PrinterFault::NO_PAPER)),
             "got {err:?}"
         );
     }
@@ -977,7 +977,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            matches!(err, Error::Printer(PrinterFault::NO_PAPER)),
             "got {err:?}"
         );
         // Must not have entered the print sequence.
@@ -1062,7 +1062,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, Error::Printer(PrinterErrorCode::LackPaper)),
+            matches!(err, Error::Printer(PrinterFault::NO_PAPER)),
             "expected the printer's own reason, got {err:?}"
         );
         // And it stopped there rather than pressing on to PrintEnd.
@@ -1085,7 +1085,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, Error::Printer(PrinterErrorCode::LowBattery)),
+            matches!(err, Error::Printer(PrinterFault::LOW_BATTERY)),
             "expected the fault named in the status payload, got {err:?}"
         );
     }

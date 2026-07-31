@@ -168,51 +168,47 @@ printable area — not conclusions that have not been verified on hardware.
 
 ---
 
-## Learned from the reference implementation
+## Protocol behaviours not yet implemented
 
-[the protocol reference](the protocol reference) /
-[the protocol reference](the protocol reference) is the most complete
-open client. Ten things it does differently:
+Known properties of the NIIMBOT protocol that thermark does not currently use,
+with the reasoning for each. Ten items:
 
-1. **Row repeat coalescing.** Consecutive identical rows increment the existing
-   packet's `repeat` field instead of sending another packet
-   (`lastPacket.repeat++`). thermark always sends `repeats = 1`, so a page with
-   large flat areas costs far more bytes than it needs to. Largest remaining
-   byte reduction, and byte volume is what strains the printer.
+1. **Row repeat coalescing.** Consecutive identical rows can increment the
+   existing packet's `repeat` field instead of sending another packet. thermark
+   always sends `repeats = 1`, so a page with large flat areas costs far more
+   bytes than it needs to. Largest remaining byte reduction, and byte volume is
+   what strains the printer.
 
-2. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply
-   `In_PrinterCheckLine` (0xd3). The reference marks a slot every 200 rows
-   (`row % 200 === 199`) but only emits the packet under an opt-in
-   `enableCheckLine` option, **off by default** — so it is not required for
-   reliable printing, on long pages or otherwise. Closing this "gap" is
-   optional; treat earlier notes calling it the clearest gap as superseded.
+2. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply `0xd3`.
+   Conventionally slotted every 200 rows (`row % 200 == 199`), but it is
+   optional and commonly left disabled — it is not required for reliable
+   printing, on long pages or otherwise. Closing this "gap" is optional; treat
+   earlier notes calling it the clearest gap as superseded.
 
 3. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
-   **≤ 6 black pixels**, sending 2-byte pixel indices instead of a bitmap. The
-   reference's source comment is *"printer powers off if black pixel count >
-   6"*, and it throws rather than build the packet above 6 — so this reads as a
-   firmware quirk with a hard threshold, not a size optimisation. Our `Cmd` enum
-   names it but nothing emits it, and no power-off has been seen here. The rows
-   that would land under the threshold are hairlines: 1 px rules, thin borders,
-   the boundary probe's lettering.
+   **≤ 6 black pixels**, sending 2-byte pixel indices instead of a bitmap. This
+   threshold is a firmware quirk rather than a size optimisation: above 6 black
+   pixels the indexed form is reportedly unsafe, and clients refuse to build it.
+   Our `Cmd` enum names it but nothing emits it, and no misbehaviour has been
+   seen here. The rows that would land under the threshold are hairlines: 1 px
+   rules, thin borders, the boundary probe's lettering.
 
-4. **Black-pixel counts are computed**, not zeroed. `printBitmapRow` takes
-   `printheadPixels` and a `countsMode` of `auto | split | total`; thermark
-   sends three zero bytes. Community clients report zeros working, and ours do
-   print, so this is likely optional — but it is a deliberate deviation, not an
-   accident.
+4. **Black-pixel counts can be computed**, not zeroed. The bitmap row packet has
+   a three-byte count field, computed against the printhead width in either a
+   split (three chunks) or total form; thermark sends three zero bytes. Zeros
+   are widely reported to work, and ours do print, so this is likely optional —
+   but it is a deliberate deviation, not an accident.
 
-5. **Print direction is per-model.** Each model carries `printDirection`:
-   B-series is `"top"`, the D11/D110 family is `"left"` and gets its canvas
-   rotated 90° clockwise during encoding, so `cols` comes from the canvas
-   *height*. thermark does not rotate; a D110 label is authored narrow-side-first
-   (`--label 12x40`) and the wire bytes match. Same output, different authoring
-   convention — do not "fix" this by adding a rotation.
+5. **Print direction is per-model.** B-series images top-down; the D11/D110
+   family images left-to-right, so clients for those rotate the canvas 90°
+   clockwise during encoding and take the column count from the canvas *height*.
+   thermark does not rotate; a D110 label is authored narrow-side-first
+   (`--label 12x40`) and the wire bytes come out the same. Same output,
+   different authoring convention — do not "fix" this by adding a rotation.
 
 6. **`repeat` is one byte.** If row coalescing (1) is ever implemented, cap each
-   run at 255. A blank 80 mm label is a single 640-row run; the reference stores
-   the count in an unbounded JS number and writes it straight into the byte
-   array, so it carries this bug latent.
+   run at 255. A blank 80 mm label is a single 640-row run, which silently
+   corrupts if the count is written without clamping.
 
 7. **`PrintStatus` (0xa3) has a payload worth reading**, and thermark now
    reads it: `[page: i16, pagePrintProgress: u8, pageFeedProgress: u8]`, and in
@@ -222,14 +218,13 @@ open client. Ten things it does differently:
    "how far did it get?", which is the question the battery episode was really
    asking. Do not read offset 6 at other lengths; it is a different field.
 
-8. **`printEnd` returning 0 means refused, not failed.** The reference polls
-   `printEnd` until it returns 1 as an alternative completion signal
-   (`waitUntilPrintFinishedByPrintEndPoll`) — thermark already retries on
-   `Ok(false)`, which is the same idea.
+8. **`printEnd` returning 0 means refused, not failed.** Polling `printEnd`
+   until it returns 1 is a valid completion signal in its own right — thermark
+   already retries on `Ok(false)`, which is the same idea.
 
 9. **`labelPositioningCalibration` ejects ~15 cm of paper on B1** when sent 1 or
-   2 (the reference says so outright). Deliberately not exposed; there is no way
-   to make that non-destructive to a roll.
+   2. Deliberately not exposed; there is no way to make that non-destructive to
+   a roll.
 
 10. **RFID tells you the consumable, not its size** — see the paper-size FAQ in
     the README. `consumablesType` could auto-select the label type instead of
@@ -237,14 +232,14 @@ open client. Ten things it does differently:
     default costs a mis-feed on continuous stock. Not implemented; needs a roll
     of continuous paper to verify.
 
-No label-height limit exists anywhere in the reference — no preset table, no
-clamp, no per-model maximum. Page height is bounded only by the `u16` row count.
-50x80 media (384×640 px, ~38 KB worst case) is a supported size, not an edge
-case; it is simply the one most likely to expose a weak battery.
+No label-height limit exists in the protocol — no preset table, no clamp, no
+per-model maximum. Page height is bounded only by the `u16` row count. 50x80
+media (384×640 px, ~38 KB worst case) is a supported size, not an edge case; it
+is simply the one most likely to expose a weak battery.
 
-Also confirmed: the protocol reference writes with `writeValueWithoutResponse` and a fixed
-`packetIntervalMs` (default **10 ms**), which is why thermark paces by bytes to
-roughly the same total. Acknowledged writes were tried here and made no
+Also confirmed: row data is written unacknowledged with a fixed inter-packet
+interval (**10 ms** is the common figure), which is why thermark paces by bytes
+to roughly the same total. Acknowledged writes were tried here and made no
 measurable difference.
 
 ---
