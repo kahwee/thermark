@@ -13,6 +13,8 @@ pub const TAIL: [u8; 2] = [0xAA, 0xAA];
 
 /// Largest payload the single-byte `LEN` field can describe.
 pub const MAX_DATA_LEN: usize = u8::MAX as usize;
+/// Bytes a frame adds around its payload: head, cmd, len, checksum, tail.
+pub const FRAME_OVERHEAD: usize = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet {

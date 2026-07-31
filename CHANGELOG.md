@@ -10,6 +10,57 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-31
+
+Dense pages were printing only partway. It was not the printable area, and not
+the streaming — it was the battery.
+
+### Root cause
+
+`thermark info` reports **battery level 1 of 4**, which `doctor` already
+classifies as "low — charge before long jobs". A dense page fires far more
+heating elements than a sparse one and draws much more current; on a low
+battery the supply sags and the printer stops mid-page, which looks exactly
+like a clipped label.
+
+Everything observed fits, including the part that ruled out the alternatives:
+
+| Page | bytes | reached |
+|---|---|---|
+| boundary probe | 8.2 KB | row ~217 |
+| QR | 11.2 KB | complete |
+| calibration | 14.6 KB | row ~176 |
+
+…and **repeat runs of the same page differed**. No buffer-size or pacing model
+produces run-to-run variation; a battery recovering between prints does.
+
+### Added
+
+- **Low-battery warning before printing.** Only an empty battery blocked a job;
+  a low one said nothing, so the failure appeared as mysterious clipping. Now
+  warns and suggests charging or reducing `--density`.
+- `THERMARK_SLOW=1` selects `Pacing::CAREFUL`, kept as a diagnostic for
+  distinguishing "sent too fast" from other causes.
+
+### Changed
+
+- Row streaming paces by **bytes** rather than rows, comparable to the
+  reference implementation's fixed 10 ms per packet. A dense page now gets
+  ~2.3 s of pacing instead of the ~1.4 s it received regardless of size.
+
+### Reverted
+
+- Acknowledged BLE writes (`WriteType::WithResponse`). Tried against real
+  hardware, made no difference, and deviates from the protocol reference, which ships
+  `writeValueWithoutResponse`. Not worth keeping on a hunch.
+
+### Note on `SafeArea`
+
+Left unchanged. The measured "printable area" numbers from this investigation
+are contaminated by the battery, so tightening the inset against them would
+bake in an artefact. Re-measure with `thermark calibrate --boundary` on a
+charged printer.
+
 ## [0.14.0] - 2026-07-30
 
 ### Added
@@ -538,7 +589,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/kahwee/thermark/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kahwee/thermark/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kahwee/thermark/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kahwee/thermark/compare/v0.11.0...v0.12.0

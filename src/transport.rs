@@ -234,6 +234,9 @@ mod ble {
     pub struct BleTransport {
         peripheral: Peripheral,
         characteristic: Characteristic,
+        /// Acknowledged when the characteristic allows it — see
+        /// [`choose_write_type`].
+        write_type: WriteType,
         rx: mpsc::UnboundedReceiver<Vec<u8>>,
         rx_buf: Vec<u8>,
         notify_task: Option<tokio::task::JoinHandle<()>>,
@@ -389,6 +392,7 @@ mod ble {
 
             Ok(Self {
                 peripheral,
+                write_type: choose_write_type(&characteristic),
                 characteristic,
                 rx,
                 rx_buf: Vec::new(),
@@ -477,7 +481,7 @@ mod ble {
             const CHUNK: usize = 180;
             for chunk in data.chunks(CHUNK) {
                 self.peripheral
-                    .write(&self.characteristic, chunk, WriteType::WithoutResponse)
+                    .write(&self.characteristic, chunk, self.write_type)
                     .await
                     .map_err(|e| Error::transport(format!("BLE write: {e}")))?;
                 sleep(Duration::from_millis(5)).await;
@@ -519,6 +523,16 @@ mod ble {
                 }
             }
         }
+    }
+
+    /// Write type for row data.
+    ///
+    /// Unacknowledged, matching the reference implementation (the protocol reference sends
+    /// `writeValueWithoutResponse` with a fixed inter-packet delay). Acknowledged
+    /// writes were tried against a real B1 and made no difference to the
+    /// truncation being investigated, so the deviation was not worth keeping.
+    fn choose_write_type(_characteristic: &Characteristic) -> WriteType {
+        WriteType::WithoutResponse
     }
 
     async fn default_adapter() -> Result<Adapter> {

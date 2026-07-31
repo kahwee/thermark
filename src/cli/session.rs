@@ -4,11 +4,27 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use thermark::config::{Config, ConnPref};
 use thermark::print_task::PrintTask;
-use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
+use thermark::printer::{Pacing, PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
 use thermark::transport::{BleTransport, SerialTransport};
 
 use super::args::{ConnArgs, ResolvedConn, TaskArgs};
+
+/// Row pacing, overridable for diagnosing dense-page truncation.
+///
+/// `THERMARK_SLOW=1` selects [`Pacing::CAREFUL`]. Dense pages come back
+/// truncated while sparse ones do not, which points at the printer dropping
+/// data rather than at a printable-area limit; this makes that testable
+/// without a rebuild.
+fn pacing_from_env() -> Pacing {
+    match std::env::var("THERMARK_SLOW") {
+        Ok(v) if !v.trim().is_empty() && v != "0" => {
+            eprintln!("pacing: CAREFUL (THERMARK_SLOW set)");
+            Pacing::CAREFUL
+        }
+        _ => Pacing::REAL,
+    }
+}
 
 /// An open BLE or USB printer session.
 pub enum Session {
@@ -38,14 +54,18 @@ impl Session {
                 .await
                 .context("BLE connect")?;
                 Ok(Self::Ble(
-                    PrinterClient::new(ble, model).with_print_task(task),
+                    PrinterClient::new(ble, model)
+                        .with_print_task(task)
+                        .with_pacing(pacing_from_env()),
                 ))
             }
             ConnPref::Usb => {
                 let ser = SerialTransport::open(&conn.addr)
                     .with_context(|| format!("open serial {}", conn.addr))?;
                 Ok(Self::Usb(
-                    PrinterClient::new(ser, model).with_print_task(task),
+                    PrinterClient::new(ser, model)
+                        .with_print_task(task)
+                        .with_pacing(pacing_from_env()),
                 ))
             }
         }

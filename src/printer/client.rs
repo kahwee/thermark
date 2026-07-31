@@ -19,8 +19,16 @@ use tracing::{debug, info, warn};
 /// a retry path can never be exercised in tests but skipped in production.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pacing {
-    /// Pause after every 8 streamed rows.
-    pub row_batch: Duration,
+    /// Pause taken once per [`Self::pace_bytes`] of streamed row data.
+    ///
+    /// Pacing by *rows* under-serves dense pages: a solid page and a mostly
+    /// blank one send the same packet count in the same time, but four times
+    /// the bytes — and a dense page is also what strains the printer's power
+    /// and thermal budget. Pacing by bytes gives each page time proportional to
+    /// what it actually asks the printer to do.
+    pub row_pause: Duration,
+    /// Bytes of row data sent between pauses.
+    pub pace_bytes: usize,
     /// Settle time after PageEnd.
     pub after_page_end: Duration,
     /// Pause between status polls.
@@ -42,8 +50,29 @@ impl Default for Pacing {
 impl Pacing {
     /// Timings tuned against real B1 hardware.
     pub const REAL: Self = Self {
-        row_batch: Duration::from_millis(8),
+        // Comparable to the reference implementation, which delays 10ms after
+        // every packet (the protocol reference `packetIntervalMs`). Combined with the 5ms
+        // per BLE chunk in the transport, a dense page is paced ~2.3s — the
+        // old fixed 8ms-per-8-rows gave it ~1.4s regardless of size.
+        row_pause: Duration::from_millis(5),
+        pace_bytes: 64,
         after_page_end: Duration::from_millis(200),
+        between_polls: Duration::from_millis(50),
+        poll_wait: Duration::from_millis(100),
+        end_print_tries: 50,
+        between_end_tries: Duration::from_millis(100),
+    };
+
+    /// Six times the row pacing of [`Self::REAL`], via `THERMARK_SLOW=1`.
+    ///
+    /// Kept as a diagnostic. When a page truncates, this distinguishes "sent
+    /// too fast" from everything else — though on the hardware here the cause
+    /// turned out to be a low battery rather than pacing, and this only
+    /// improved matters because slower printing draws less average current.
+    pub const CAREFUL: Self = Self {
+        row_pause: Duration::from_millis(32),
+        pace_bytes: 256,
+        after_page_end: Duration::from_millis(300),
         between_polls: Duration::from_millis(50),
         poll_wait: Duration::from_millis(100),
         end_print_tries: 50,
@@ -53,7 +82,8 @@ impl Pacing {
     /// Same sequence and same retry counts, without the waiting — for tests
     /// against [`crate::mock::MockTransport`], which replies instantly.
     pub const INSTANT: Self = Self {
-        row_batch: Duration::ZERO,
+        row_pause: Duration::ZERO,
+        pace_bytes: 256,
         after_page_end: Duration::ZERO,
         between_polls: Duration::ZERO,
         poll_wait: Duration::from_millis(1),
@@ -90,6 +120,33 @@ pub struct PrinterClient<T: Transport> {
     model: Model,
     task: PrintTask,
     pacing: Pacing,
+}
+
+/// Power level at or below which dense pages become unreliable.
+pub const LOW_BATTERY_LEVEL: u8 = 1;
+
+/// Warn before printing on a low battery.
+///
+/// A dense page fires far more heating elements than a sparse one, so it draws
+/// much more current. On a low battery that sags the supply and the printer
+/// stops part-way through, which looks exactly like a clipped label. Observed
+/// on a real B1 at level 1: a 14.6 KB page truncated around 73% while an 8.2 KB
+/// page on the same roll completed, and repeat runs of the *same* page differed
+/// — the tell that it is power, not data, since no buffer or pacing model
+/// produces run-to-run variation.
+///
+/// Only an empty battery blocks printing ([`Heartbeat::print_blocker`]); a low
+/// one is a warning, because it usually still works for ordinary labels.
+fn warn_if_battery_low(power_level: Option<u8>) {
+    if let Some(level) = power_level
+        && level <= LOW_BATTERY_LEVEL
+    {
+        warn!(
+            level,
+            "battery low — dense or dark labels may print only partway. \
+             Charge the printer, or use a lower --density, if output is clipped"
+        );
+    }
 }
 
 /// Lay an image out on its label canvas exactly as printing would.
@@ -263,6 +320,7 @@ impl<T: Transport> PrinterClient<T> {
                 if let Some(code) = hb.print_blocker() {
                     return Err(Error::Printer(code));
                 }
+                warn_if_battery_low(hb.power_level);
                 Ok(())
             }
             Err(e) => {
@@ -514,10 +572,14 @@ impl<T: Transport> PrinterClient<T> {
             Cmd::SetPageSize as u8,
         )?;
 
-        for (i, pkt) in raster.rows.into_iter().enumerate() {
+        // Pace by bytes, not rows — see `Pacing::row_pause`.
+        let mut unpaced_bytes = 0usize;
+        for pkt in raster.rows {
+            unpaced_bytes += crate::packet::FRAME_OVERHEAD + pkt.data.len();
             self.send_raw_packet(pkt).await?;
-            if i % 8 == 7 {
-                self.maybe_sleep(self.pacing.row_batch).await;
+            if unpaced_bytes >= self.pacing.pace_bytes {
+                unpaced_bytes = 0;
+                self.maybe_sleep(self.pacing.row_pause).await;
             }
         }
 
@@ -838,6 +900,34 @@ mod tests {
             matches!(err, Error::Printer(PrinterErrorCode::CoverOpen)),
             "got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn low_battery_warns_but_does_not_block() {
+        // Level 1 is "low": dense pages may truncate, but ordinary labels
+        // usually still print, so this must stay a warning.
+        let mut mock = MockTransport::new();
+        let mut d = [0u8; 13];
+        d[9] = 0; // cover closed
+        d[10] = LOW_BATTERY_LEVEL; // battery low
+        d[11] = 0; // paper present
+        d[12] = 1;
+        mock.set_heartbeat(d);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        assert!(c.preflight_ready().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn empty_battery_still_blocks() {
+        let mut mock = MockTransport::new();
+        let mut d = [0u8; 13];
+        d[9] = 0;
+        d[10] = 0; // empty
+        d[11] = 0;
+        d[12] = 1;
+        mock.set_heartbeat(d);
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        assert!(c.preflight_ready().await.is_err());
     }
 
     #[tokio::test]
