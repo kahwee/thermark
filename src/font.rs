@@ -56,17 +56,17 @@ fn bail_no_font(name: &str) -> Result<LabelFont> {
 pub fn find_system_font(prefer: Option<&str>) -> Option<PathBuf> {
     let prefer = prefer.map(|s| s.to_ascii_lowercase());
     let cands = system_font_candidates();
-    if let Some(ref p) = prefer {
-        if let Some(hit) = cands.iter().find(|path| {
+    // Let-chain (edition 2024): one condition instead of nested `if let`s.
+    if let Some(p) = &prefer
+        && let Some(hit) = cands.iter().find(|path| {
             path.exists()
                 && path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .map(|n| n.to_ascii_lowercase().contains(p.as_str()))
-                    .unwrap_or(false)
-        }) {
-            return Some(hit.clone());
-        }
+                    .is_some_and(|n| n.to_ascii_lowercase().contains(p.as_str()))
+        })
+    {
+        return Some(hit.clone());
     }
     cands.into_iter().find(|p| p.exists())
 }

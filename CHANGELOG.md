@@ -10,6 +10,33 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-31
+
+Correctness and edition hygiene. No rendering change — `compare-render.sh`
+reports every output identical to v0.18.0.
+
+### Fixed
+
+- **Config writes are atomic.** `fs::write` truncates in place, so an
+  interruption mid-write left a half-written `config.json` that every later
+  command failed to parse. Now writes a sibling temp file and renames over the
+  target; a reader sees either the old file or the new one, never a fragment.
+- **`rust-version` was wrong.** The crate uses a let-chain, stabilised in 1.88,
+  while declaring 1.87 — so an older toolchain failed with a parse error rather
+  than cargo's clear "requires rustc 1.88".
+
+### Changed
+
+- **No `unsafe` left in the crate.** Five test sites called
+  `std::env::set_var`, which is `unsafe` in edition 2024 because a concurrent
+  read from another thread is undefined behaviour — and `resolve_addr` reads
+  the environment, in a suite that runs in parallel. Environment values are now
+  parameters (`resolve_addr_with`, `default_path_with`), read once at the CLI
+  edge, so the tests need no global mutation and the `ENV_LOCK` mutex they
+  shared is gone.
+- Collapsed nested `if let`s into edition-2024 let-chains, and replaced a
+  `map(..).unwrap_or(false)` with `is_some_and`.
+
 ## [0.18.0] - 2026-07-31
 
 ### Fixed
@@ -651,7 +678,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/kahwee/thermark/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kahwee/thermark/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kahwee/thermark/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/kahwee/thermark/compare/v0.15.0...v0.16.0

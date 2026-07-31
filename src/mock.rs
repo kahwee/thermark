@@ -187,11 +187,11 @@ impl Transport for MockTransport {
         self.tx_packets.push(pkt);
 
         // A lost write: recorded as sent, but the printer never sees it.
-        if let Some(remaining) = self.drop_writes.get_mut(&cmd) {
-            if *remaining > 0 {
-                *remaining -= 1;
-                return Ok(());
-            }
+        if let Some(remaining) = self.drop_writes.get_mut(&cmd)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            return Ok(());
         }
 
         if let Some(code) = self.fail_on.get(&cmd).copied() {
@@ -203,13 +203,13 @@ impl Transport for MockTransport {
             return Ok(());
         }
 
-        if self.auto_reply {
-            if let Some(mut reply) = self.synthesize_reply(cmd, &pdata) {
-                if self.reject.contains(&cmd) {
-                    reply.data = vec![0x00];
-                }
-                self.rx_queue.push(reply);
+        if self.auto_reply
+            && let Some(mut reply) = self.synthesize_reply(cmd, &pdata)
+        {
+            if self.reject.contains(&cmd) {
+                reply.data = vec![0x00];
             }
+            self.rx_queue.push(reply);
         }
         Ok(())
     }

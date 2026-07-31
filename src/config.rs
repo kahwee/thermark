@@ -108,11 +108,17 @@ impl Config {
 
     /// Path used by the CLI (`THERMARK_CONFIG` or `…/config.json`).
     pub fn default_path() -> Result<PathBuf> {
-        if let Ok(p) = std::env::var("THERMARK_CONFIG") {
-            let p = p.trim();
-            if !p.is_empty() {
-                return Ok(PathBuf::from(p));
-            }
+        let env = std::env::var("THERMARK_CONFIG").ok();
+        Self::default_path_with(env.as_deref())
+    }
+
+    /// Resolve the config path from an explicit override.
+    ///
+    /// Separated from the environment read so it is testable without
+    /// `set_var`, which is `unsafe` in edition 2024.
+    pub fn default_path_with(env: Option<&str>) -> Result<PathBuf> {
+        if let Some(p) = Self::nonempty(env) {
+            return Ok(PathBuf::from(p));
         }
         Ok(Self::config_dir()?.join("config.json"))
     }
@@ -156,10 +162,20 @@ impl Config {
             fs::create_dir_all(parent)
                 .map_err(|e| Error::msg(format!("create config dir {}: {e}", parent.display())))?;
         }
-        let body = self.to_json_pretty()?;
-        let body = format!("{body}\n");
-        fs::write(path, body)
-            .map_err(|e| Error::msg(format!("write config {}: {e}", path.display())))?;
+        let body = format!("{}\n", self.to_json_pretty()?);
+
+        // Write to a sibling temp file, then rename over the target. A plain
+        // write truncates in place, so an interruption mid-write leaves a
+        // half-written config that every later command fails to parse. Rename
+        // within a directory is atomic, so a reader sees either the old file or
+        // the new one.
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, body)
+            .map_err(|e| Error::msg(format!("write config {}: {e}", tmp.display())))?;
+        fs::rename(&tmp, path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            Error::msg(format!("replace config {}: {e}", path.display()))
+        })?;
         Ok(())
     }
 
@@ -201,15 +217,19 @@ impl Config {
         s.map(str::trim).filter(|s| !s.is_empty())
     }
 
-    /// Resolve printer address: CLI flag → `THERMARK_ADDR` → config.
-    pub fn resolve_addr(&self, cli_addr: Option<&str>) -> Result<String> {
-        if let Some(a) = Self::nonempty(cli_addr) {
+    /// Resolve printer address from explicit inputs.
+    ///
+    /// Takes the environment value rather than reading it, so tests need not
+    /// mutate process-wide state. `std::env::set_var` is `unsafe` in edition
+    /// 2024 precisely because another thread reading the environment at the
+    /// same time is undefined behaviour — and the test suite runs in parallel
+    /// with other tests that read it.
+    pub fn resolve_addr_with(&self, cli: Option<&str>, env: Option<&str>) -> Result<String> {
+        if let Some(a) = Self::nonempty(cli) {
             return Ok(a.to_string());
         }
-        if let Ok(a) = std::env::var("THERMARK_ADDR") {
-            if let Some(a) = Self::nonempty(Some(a.as_str())) {
-                return Ok(a.to_string());
-            }
+        if let Some(a) = Self::nonempty(env) {
+            return Ok(a.to_string());
         }
         if let Some(a) = Self::nonempty(self.addr.as_deref()) {
             return Ok(a.to_string());
@@ -218,6 +238,15 @@ impl Config {
             "no printer address: pass -a \"B1-YourPrinter\" (full name), set THERMARK_ADDR, \
              or: thermark scan --save / thermark config set -a \"B1-YourPrinter\"",
         ))
+    }
+
+    /// Resolve printer address: CLI flag → `THERMARK_ADDR` → config.
+    ///
+    /// Reads the environment here, at the edge, and defers the logic to
+    /// [`Self::resolve_addr_with`] so it stays testable without `set_var`.
+    pub fn resolve_addr(&self, cli_addr: Option<&str>) -> Result<String> {
+        let env = std::env::var("THERMARK_ADDR").ok();
+        self.resolve_addr_with(cli_addr, env.as_deref())
     }
 
     /// Prefer CLI connection when provided; else config; else BLE.
@@ -252,19 +281,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_clean_env<T>(f: impl FnOnce() -> T) -> T {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: tests hold ENV_LOCK so no concurrent env mutation.
-        unsafe {
-            std::env::remove_var("THERMARK_ADDR");
-            std::env::remove_var("THERMARK_CONFIG");
-        }
-        f()
-    }
 
     #[test]
     fn roundtrip_json_file() {
@@ -329,32 +345,36 @@ mod tests {
 
     #[test]
     fn resolve_addr_priority() {
-        with_clean_env(|| {
-            let cfg = Config {
-                addr: Some("from-config".into()),
-                ..Default::default()
-            };
-            assert_eq!(cfg.resolve_addr(Some("from-cli")).unwrap(), "from-cli");
-            assert_eq!(cfg.resolve_addr(None).unwrap(), "from-config");
-            unsafe {
-                std::env::set_var("THERMARK_ADDR", "from-env");
-            }
-            assert_eq!(cfg.resolve_addr(None).unwrap(), "from-env");
-            unsafe {
-                std::env::remove_var("THERMARK_ADDR");
-            }
-        });
+        // No `set_var`: the env value is a parameter, so this cannot race with
+        // any other test that reads the environment.
+        let cfg = Config {
+            addr: Some("from-config".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.resolve_addr_with(Some("from-cli"), Some("from-env"))
+                .unwrap(),
+            "from-cli"
+        );
+        assert_eq!(
+            cfg.resolve_addr_with(None, Some("from-env")).unwrap(),
+            "from-env"
+        );
+        assert_eq!(cfg.resolve_addr_with(None, None).unwrap(), "from-config");
+        // Blank values fall through instead of resolving to an empty address.
+        assert_eq!(
+            cfg.resolve_addr_with(Some("  "), Some("  ")).unwrap(),
+            "from-config"
+        );
     }
 
     #[test]
     fn resolve_addr_missing_errors() {
-        with_clean_env(|| {
-            let err = Config::default()
-                .resolve_addr(None)
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("config set"), "{err}");
-        });
+        let err = Config::default()
+            .resolve_addr_with(None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("config set"), "{err}");
     }
 
     #[test]
@@ -403,17 +423,20 @@ mod tests {
 
     #[test]
     fn default_path_honors_thermark_config_env() {
-        with_clean_env(|| {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("custom.json");
-            unsafe {
-                std::env::set_var("THERMARK_CONFIG", path.as_os_str());
-            }
-            assert_eq!(Config::default_path().unwrap(), path);
-            unsafe {
-                std::env::remove_var("THERMARK_CONFIG");
-            }
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("custom.json");
+        assert_eq!(Config::default_path_with(path.to_str()).unwrap(), path);
+        // Blank or absent falls back to the platform config directory.
+        assert!(
+            Config::default_path_with(Some("  "))
+                .unwrap()
+                .ends_with("config.json")
+        );
+        assert!(
+            Config::default_path_with(None)
+                .unwrap()
+                .ends_with("config.json")
+        );
     }
 
     #[test]
