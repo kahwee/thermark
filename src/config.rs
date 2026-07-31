@@ -14,6 +14,9 @@
 
 use crate::errors::{Error, Result};
 use crate::geometry::SafeArea;
+
+/// Fallback label size when neither the CLI nor the config names one.
+pub const DEFAULT_LABEL: &str = "50x30";
 use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -74,6 +77,10 @@ pub struct Config {
     /// Set it from `thermark calibrate`; see `thermark config safe-area`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_area: Option<SafeArea>,
+    /// Default label size, e.g. `"50x30"`. Saves repeating `--label` on media
+    /// you use every day.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl Config {
@@ -89,6 +96,7 @@ impl Config {
             && self.model.is_none()
             && self.scan_secs.is_none()
             && self.safe_area.is_none()
+            && self.label.is_none()
     }
 
     /// Config directory (platform standard).
@@ -222,6 +230,14 @@ impl Config {
         cli.or(self.model).unwrap_or_default()
     }
 
+    /// Label size: CLI flag, else saved default, else 50x30.
+    pub fn resolve_label(&self, cli: Option<&str>) -> String {
+        Self::nonempty(cli)
+            .map(str::to_string)
+            .or_else(|| Self::nonempty(self.label.as_deref()).map(str::to_string))
+            .unwrap_or_else(|| DEFAULT_LABEL.to_string())
+    }
+
     /// Measured safe area if one was saved, else the built-in default.
     pub fn resolve_safe_area(&self) -> SafeArea {
         self.safe_area.unwrap_or_default()
@@ -260,6 +276,7 @@ mod tests {
             model: Some(Model::B1),
             scan_secs: Some(6),
             safe_area: None,
+            label: None,
         };
         cfg.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -294,6 +311,7 @@ mod tests {
             model: Some(Model::B21),
             scan_secs: Some(9),
             safe_area: None,
+            label: None,
         };
         cfg.apply_set("B1-New", ConnPref::Ble, None, None);
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
@@ -337,6 +355,19 @@ mod tests {
                 .to_string();
             assert!(err.contains("config set"), "{err}");
         });
+    }
+
+    #[test]
+    fn resolve_label_prefers_cli_then_config_then_default() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.resolve_label(None), DEFAULT_LABEL);
+        assert_eq!(cfg.resolve_label(Some("40x20")), "40x20");
+
+        cfg.label = Some("30x15".into());
+        assert_eq!(cfg.resolve_label(None), "30x15");
+        assert_eq!(cfg.resolve_label(Some("40x20")), "40x20");
+        // Blank flags fall through rather than producing an empty size.
+        assert_eq!(cfg.resolve_label(Some("   ")), "30x15");
     }
 
     #[test]

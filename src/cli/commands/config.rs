@@ -15,7 +15,8 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             conn,
             model,
             scan_secs,
-        } => set(&addr, conn, model, scan_secs)?,
+            label,
+        } => set(&addr, conn, model, scan_secs, label.as_deref())?,
         ConfigCmd::SafeArea {
             last_tick,
             label,
@@ -24,7 +25,7 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             left,
             right,
             reset,
-        } => safe_area(last_tick, &label, top, bottom, left, right, reset)?,
+        } => safe_area(last_tick, label.as_deref(), top, bottom, left, right, reset)?,
         ConfigCmd::Clear => clear()?,
     }
     Ok(())
@@ -45,7 +46,7 @@ fn show(json: bool) -> Result<()> {
         return Ok(());
     }
     // field, value, what applies when unset
-    let rows: [(&str, Option<String>, &str); 5] = [
+    let rows: [(&str, Option<String>, &str); 6] = [
         ("addr", cfg.addr.clone(), "(unset)"),
         (
             "connection",
@@ -58,6 +59,7 @@ fn show(json: bool) -> Result<()> {
             cfg.scan_secs.map(|n| n.to_string()),
             "(default 4)",
         ),
+        ("label", cfg.label.clone(), "(default 50x30)"),
         (
             "safe_area",
             cfg.safe_area.map(|s| {
@@ -75,9 +77,21 @@ fn show(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn set(addr: &str, conn: ConnPref, model: Option<Model>, scan_secs: Option<u64>) -> Result<()> {
+fn set(
+    addr: &str,
+    conn: ConnPref,
+    model: Option<Model>,
+    scan_secs: Option<u64>,
+    label: Option<&str>,
+) -> Result<()> {
     let mut cfg = Config::load().unwrap_or_default();
     cfg.apply_set(addr, conn, model, scan_secs);
+    if let Some(l) = label {
+        // Validate before saving: a bad size here would fail on every later
+        // command with no hint where it came from.
+        thermark::geometry::LabelMm::parse(l)?;
+        cfg.label = Some(l.to_string());
+    }
     let path = cfg.save()?;
     println!("saved default printer → {addr}");
     println!("  connection: {conn}");
@@ -91,7 +105,7 @@ fn set(addr: &str, conn: ConnPref, model: Option<Model>, scan_secs: Option<u64>)
 #[allow(clippy::too_many_arguments)]
 fn safe_area(
     last_tick: Option<f64>,
-    label: &str,
+    label: Option<&str>,
     top: Option<f64>,
     bottom: Option<f64>,
     left: Option<f64>,
@@ -112,7 +126,7 @@ fn safe_area(
     // printed tells us how much of the label the printer actually reaches.
     let bottom = match (last_tick, bottom) {
         (Some(tick), _) => {
-            let height_mm = LabelMm::parse(label)?.height_mm;
+            let height_mm = LabelMm::parse(&cfg.resolve_label(label))?.height_mm;
             let lost = (height_mm - tick).max(0.0);
             println!(
                 "last tick {tick} mm on a {height_mm} mm label -> {lost} mm unreachable at the feed edge"

@@ -65,7 +65,16 @@ pub async fn run(cli: Cli) -> Result<i32> {
             density,
             boundary,
         } => {
-            commands::print::calibrate(&cfg, &conn, &task, model, &label, density, boundary).await?
+            commands::print::calibrate(
+                &cfg,
+                &conn,
+                &task,
+                model,
+                label.as_deref(),
+                density,
+                boundary,
+            )
+            .await?
         }
 
         Commands::Text {
@@ -82,7 +91,17 @@ pub async fn run(cli: Cli) -> Result<i32> {
             no_print,
         } => {
             commands::sticker::text(
-                &cfg, &conn, &task, &font, model, &text, align, &label, border, density, save,
+                &cfg,
+                &conn,
+                &task,
+                &font,
+                model,
+                &text,
+                align,
+                label.as_deref(),
+                border,
+                density,
+                save,
                 no_print,
             )
             .await?
@@ -103,8 +122,19 @@ pub async fn run(cli: Cli) -> Result<i32> {
             no_print,
         } => {
             commands::sticker::qr(
-                &cfg, &conn, &task, &font, model, &url, &text, text_side, &label, border, density,
-                save, no_print,
+                &cfg,
+                &conn,
+                &task,
+                &font,
+                model,
+                &url,
+                &text,
+                text_side,
+                label.as_deref(),
+                border,
+                density,
+                save,
+                no_print,
             )
             .await?
         }
@@ -138,7 +168,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
                 hidden,
                 show_password,
                 text_side,
-                &label,
+                label.as_deref(),
                 border,
                 density,
                 save,

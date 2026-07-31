@@ -194,9 +194,9 @@ pub enum Commands {
         /// Printer model (default: config or b1)
         #[arg(short, long, value_enum)]
         model: Option<Model>,
-        /// Label size mm, e.g. 50x30
-        #[arg(long, default_value = "50x30")]
-        label: String,
+        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+        #[arg(long)]
+        label: Option<String>,
         /// Density 1..=5 (default 4 = darker for full-bleed calibration)
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
         density: Density,
@@ -222,9 +222,9 @@ pub enum Commands {
         /// Horizontal alignment: left, center (default), right
         #[arg(long, value_enum, default_value_t = TextAlign::Center)]
         align: TextAlign,
-        /// Label size mm, e.g. 50x30
-        #[arg(long, default_value = "50x30")]
-        label: String,
+        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+        #[arg(long)]
+        label: Option<String>,
         /// Draw a 1px outer border
         #[arg(long, default_value_t = false)]
         border: bool,
@@ -258,9 +258,9 @@ pub enum Commands {
         /// Put text on left or right of the square QR
         #[arg(long, value_enum, default_value_t = TextSide::Right)]
         text_side: TextSide,
-        /// Label size mm, e.g. 50x30
-        #[arg(long, default_value = "50x30")]
-        label: String,
+        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+        #[arg(long)]
+        label: Option<String>,
         /// Draw a 1px outer border (usually unnecessary)
         #[arg(long, default_value_t = false)]
         border: bool,
@@ -306,8 +306,8 @@ pub enum Commands {
         show_password: bool,
         #[arg(long, value_enum, default_value_t = TextSide::Right)]
         text_side: TextSide,
-        #[arg(long, default_value = "50x30")]
-        label: String,
+        #[arg(long)]
+        label: Option<String>,
         #[arg(long, default_value_t = false)]
         border: bool,
         #[arg(short, long, default_value = "4", value_parser = parse_density)]
@@ -386,6 +386,9 @@ pub enum ConfigCmd {
         /// Default BLE scan seconds before connect
         #[arg(long)]
         scan_secs: Option<u64>,
+        /// Default label size, e.g. 50x30 — saves repeating --label
+        #[arg(short, long)]
+        label: Option<String>,
     },
     /// Save the printable insets measured with `thermark calibrate`
     ///
@@ -397,8 +400,8 @@ pub enum ConfigCmd {
         #[arg(long)]
         last_tick: Option<f64>,
         /// Label size the reading came from (needed with --last-tick)
-        #[arg(long, default_value = "50x30")]
-        label: String,
+        #[arg(long)]
+        label: Option<String>,
         #[arg(long)]
         top: Option<f64>,
         #[arg(long)]

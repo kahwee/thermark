@@ -146,12 +146,13 @@ pub async fn calibrate(
     conn: &ConnArgs,
     task: &TaskArgs,
     model: Option<Model>,
-    label: &str,
+    label: Option<&str>,
     density: Density,
     boundary: bool,
 ) -> Result<()> {
     let model = cfg.resolve_model(model);
-    let label_mm = LabelMm::parse(label)?;
+    let label = cfg.resolve_label(label);
+    let label_mm = LabelMm::parse(&label)?;
     let lp = label_mm.to_pixels(model.max_width_px());
     info!(
         width_px = lp.width_px,

@@ -25,10 +25,10 @@ use crate::cli::tips::{guard_wifi_save_path, resolve_wifi_password};
 fn label_geometry(
     cfg: &Config,
     model: Option<Model>,
-    label: &str,
+    label: Option<&str>,
 ) -> Result<(Model, LabelMm, LabelPx)> {
     let model = cfg.resolve_model(model);
-    let label_mm = LabelMm::parse(label)?;
+    let label_mm = LabelMm::parse(&cfg.resolve_label(label))?;
     let lp = label_mm.to_pixels(model.max_width_px());
     Ok((model, label_mm, lp))
 }
@@ -95,7 +95,7 @@ pub async fn text(
     model: Option<Model>,
     text: &str,
     align: TextAlign,
-    label: &str,
+    label: Option<&str>,
     border: bool,
     density: Density,
     save: Option<PathBuf>,
@@ -146,7 +146,7 @@ pub async fn qr(
     url: &str,
     text: &str,
     text_side: TextSide,
-    label: &str,
+    label: Option<&str>,
     border: bool,
     density: Density,
     save: Option<PathBuf>,
@@ -204,7 +204,7 @@ pub async fn wifi(
     hidden: bool,
     show_password: bool,
     text_side: TextSide,
-    label: &str,
+    label: Option<&str>,
     border: bool,
     density: Density,
     save: Option<PathBuf>,
