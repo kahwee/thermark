@@ -239,11 +239,15 @@ fn draw_border(img: &mut GrayImage) {
 /// this adds the numerals, which need font access. Numbers make the photo
 /// self-describing: read the last one that printed rather than counting ticks
 /// from an edge that may itself be cut off.
-pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImage> {
+pub fn make_calibration_label(
+    label: LabelPx,
+    safe: SafeArea,
+    font_path: Option<&std::path::Path>,
+) -> Result<GrayImage> {
     use crate::geometry::PX_PER_MM;
 
     let mut img = crate::image_encode::calibration_pattern(label, Some(safe));
-    let font = match load_font(None, None) {
+    let font = match load_font(font_path, None) {
         Ok(f) => f,
         // No system font: the geometric pattern is still perfectly usable.
         Err(_) => return Ok(img),
@@ -310,12 +314,15 @@ pub fn boundary_range(label: LabelPx) -> std::ops::RangeInclusive<u32> {
 /// two contradictory measurements. Here each millimetre gets its own bar at its
 /// own horizontal position, so the numbers never crowd: **the last bar you can
 /// see is the answer**, with no counting and no scale estimation.
-pub fn make_boundary_label(label: LabelPx) -> Result<GrayImage> {
+pub fn make_boundary_label(
+    label: LabelPx,
+    font_path: Option<&std::path::Path>,
+) -> Result<GrayImage> {
     use crate::geometry::PX_PER_MM;
 
     let (w, h) = (label.width_px, label.height_px);
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
-    let font = load_font(None, None)?;
+    let font = load_font(font_path, None)?;
 
     let px_per_mm = PX_PER_MM as u32;
     let range = boundary_range(label);

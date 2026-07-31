@@ -1,7 +1,7 @@
 //! Print-task variants (command sequences differ by model / firmware era).
 //!
 //! Aligns with the community wiki:
-//! the protocol notes in src/protocol.rs
+//! Print-task variants differ in the PrintStart and SetPageSize forms they use.
 //!
 //! **Hardware-tested in this repo:** only [`PrintTask::B1`] on a real B1.
 //! Other tasks are implemented from public protocol notes and should be treated

@@ -168,9 +168,9 @@ pub async fn calibrate(
 
     let tmp: PathBuf = std::env::temp_dir().join("thermark_calibrate.png");
     if boundary {
-        thermark::label::make_boundary_label(lp)?.save(&tmp)?;
+        thermark::label::make_boundary_label(lp, None)?.save(&tmp)?;
     } else {
-        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area())?.save(&tmp)?;
+        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area(), None)?.save(&tmp)?;
     }
 
     let opts = PrintOptions {

@@ -100,7 +100,7 @@ Experimental print tasks need `--allow-experimental`.
 - `0xDB` first byte = `PrinterErrorCode` (0x01 cover, 0x02 no paper, …)
 - Info response cmd = `0x40 + key`
 
-Wiki: the protocol notes in src/protocol.rs
+Protocol notes: see the command table in `src/protocol.rs`.
 
 ---
 

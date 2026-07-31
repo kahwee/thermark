@@ -1,6 +1,6 @@
 [package]
 name = "thermark"
-version = "0.27.0"
+version = "0.28.0"
 edition = "2024"
 # Minimum supported Rust, not a request for a particular toolchain. Set to the
 # current stable so new language features can be used freely; the cost is that

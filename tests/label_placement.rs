@@ -212,7 +212,7 @@ fn boundary_probe_marks_the_trailing_edge_of_any_media() {
             "{spec}: probe needs more than one bar to be readable"
         );
 
-        let img = make_boundary_label(lp).unwrap_or_else(|e| panic!("{spec}: {e}"));
+        let img = make_boundary_label(lp, None).unwrap_or_else(|e| panic!("{spec}: {e}"));
         let ink = ink_bounds(&img, 127).unwrap_or_else(|| panic!("{spec}: probe drew nothing"));
         let bottom = ink.y + ink.h - 1;
         // Full bleed on purpose — the probe measures the edge, so it must draw

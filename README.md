@@ -377,7 +377,7 @@ account is needed.
 
 ## Protocol
 
-See [`AGENTS.md`](AGENTS.md). Community: the protocol notes in src/protocol.rs.
+See [`AGENTS.md`](AGENTS.md).
 
 ## License
 

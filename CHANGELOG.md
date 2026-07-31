@@ -10,6 +10,39 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-31
+
+### Fixed
+
+- **The golden suite has been failing on CI since the day it landed.** Text
+  cases passed `font_path: None` and took whatever font the host offered —
+  Helvetica on macOS, DejaVu on Linux. The goldens were generated on macOS, so
+  all 8 text cases mismatched on every CI run while the 6 geometry cases passed.
+  Local runs were green, which is why it went unnoticed. Text now renders with a
+  vendored `tests/fonts/DejaVuSans.ttf`, identical on every host.
+- **The suite now refuses to run without that font** rather than silently
+  falling back to a system one, which is precisely how the failure hid. The
+  8 text goldens were regenerated; geometry goldens are byte-identical.
+
+### Changed
+
+- **BREAKING: `make_calibration_label` and `make_boundary_label` take a
+  `font_path: Option<&Path>`.** They previously always loaded a system font,
+  leaving no way to render them deterministically. Pass `None` for the old
+  behaviour.
+
+### Added
+
+- **`tests/fonts/DejaVuSans.ttf`** (DejaVu Fonts license, included as
+  `tests/fonts/LICENSE-DejaVu.txt`). Test asset only — real printing still picks
+  a system font and is unaffected.
+
+### Removed
+
+- Remaining external wiki links from `README.md`, `AGENTS.md`, `src/lib.rs` and
+  `src/print_task.rs`; the protocol notes now point at `src/protocol.rs` and
+  `src/packet.rs` in this repo.
+
 ## [0.27.0] - 2026-07-31
 
 ### Changed
@@ -936,7 +969,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/kahwee/thermark/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/kahwee/thermark/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/kahwee/thermark/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.25.0

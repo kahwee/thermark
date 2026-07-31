@@ -15,7 +15,7 @@
 //!
 //! Protocol-only / mock testing: `cargo test --no-default-features`.
 //!
-//! Protocol reference: the protocol notes in src/protocol.rs
+//! Protocol: see `protocol.rs` for command IDs and `packet.rs` for framing.
 
 pub mod config;
 pub mod doctor;

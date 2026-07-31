@@ -13,8 +13,12 @@
 //! Review the diff when regenerating: a changed golden is either a fix you
 //! meant to make or a regression you did not.
 //!
-//! Text cases depend on a system font, so they are skipped where the expected
-//! one is absent (CI, non-macOS). Geometry cases always run.
+//! Text cases render with a **vendored** font (`tests/fonts/DejaVuSans.ttf`),
+//! not a system one. They used to pass `font_path: None` and take whatever the
+//! host offered: Helvetica on macOS, DejaVu on Linux CI. The goldens were
+//! generated on macOS, so every text case failed on CI from the day this
+//! harness landed — a permanent red that hid real regressions. Pinning the font
+//! makes the bytes identical everywhere.
 
 use image::GrayImage;
 use std::path::PathBuf;
@@ -27,6 +31,15 @@ use thermark::label::{
 use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 
 const GOLDEN_DIR: &str = "tests/golden";
+/// Vendored so text rasterises identically on every host. Never swap this for a
+/// system font: the goldens are pixel comparisons, and a different face changes
+/// every one of them.
+const GOLDEN_FONT: &str = "tests/fonts/DejaVuSans.ttf";
+
+fn golden_font() -> Option<PathBuf> {
+    let p = PathBuf::from(GOLDEN_FONT);
+    p.exists().then_some(p)
+}
 /// Where a mismatching render is written, so it can be inspected.
 const ACTUAL_DIR: &str = "target/golden-actual";
 
@@ -99,7 +112,7 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     text_side: TextSide::Right,
                     border: false,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: None,
                 })
@@ -116,7 +129,7 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     text_side: TextSide::Left,
                     border: true,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: None,
                 })
@@ -132,7 +145,7 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Center,
                     border: false,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: None,
                 })
@@ -148,7 +161,7 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Left,
                     border: false,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: Some(14.0),
                 })
@@ -164,7 +177,7 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Center,
                     border: false,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: None,
                 })
@@ -183,7 +196,7 @@ fn cases() -> Vec<Case> {
                     label: label(),
                     safe: SafeArea::default(),
                     text_side: TextSide::Right,
-                    font_path: None,
+                    font_path: golden_font(),
                     font_name: None,
                     font_size: None,
                     border: false,
@@ -193,11 +206,13 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "calibration_numbered",
-            render: || make_calibration_label(label(), SafeArea::default()).ok(),
+            render: || {
+                make_calibration_label(label(), SafeArea::default(), golden_font().as_deref()).ok()
+            },
         },
         Case {
             name: "boundary_probe",
-            render: || make_boundary_label(label()).ok(),
+            render: || make_boundary_label(label(), golden_font().as_deref()).ok(),
         },
     ]
 }
@@ -221,6 +236,16 @@ fn golden_renders_are_unchanged() {
     if update {
         std::fs::create_dir_all(GOLDEN_DIR).expect("create golden dir");
     }
+
+    // Without this the text cases fall back to `font_path: None`, silently
+    // pick up a system font, and compare host-specific rasterisation against
+    // committed goldens — which is exactly how this suite stayed red on CI.
+    assert!(
+        golden_font().is_some(),
+        "vendored font missing: {GOLDEN_FONT}\n\
+         Text goldens are pixel comparisons and MUST NOT fall back to a system \
+         font. Restore the file rather than regenerating the goldens."
+    );
 
     let mut verified = Vec::new();
     let mut skipped = Vec::new();
