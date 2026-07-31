@@ -10,6 +10,26 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-31
+
+### Changed
+
+- **`rust-version` is now `1.97`**, the current stable, so new language
+  features can be used without checking an older floor first. This is a
+  minimum, not a request for a toolchain: anyone below it cannot build, which
+  is a deliberate trade for a personal CLI rather than a library others pin.
+
+### Added
+
+- `rust-toolchain.toml` pinning the `stable` channel with rustfmt and clippy.
+  Honoured by rustup; a Homebrew or distro `cargo` ignores it and uses what it
+  ships, which is fine as long as that meets `rust-version` — cargo says so
+  clearly if not.
+- CI installs stable explicitly (`dtolnay/rust-toolchain@stable`) and prints
+  the version. The runner image ships some Rust, but it can lag behind
+  `rust-version`, and then the build fails for a reason unrelated to the change
+  under test.
+
 ## [0.19.0] - 2026-07-31
 
 Correctness and edition hygiene. No rendering change — `compare-render.sh`
@@ -678,7 +698,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/kahwee/thermark/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kahwee/thermark/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kahwee/thermark/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kahwee/thermark/compare/v0.16.0...v0.17.0

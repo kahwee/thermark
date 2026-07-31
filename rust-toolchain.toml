@@ -1,0 +1,8 @@
+# Build with the current stable, so `rust-version` in Cargo.toml can track it.
+#
+# Honoured by rustup only. A Homebrew/distro `cargo` ignores this file and uses
+# whatever it ships — fine as long as that is at least the `rust-version` in
+# Cargo.toml, which cargo checks and reports clearly if not.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

@@ -1,11 +1,12 @@
 [package]
 name = "thermark"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2024"
-# Let-chains (`if let Some(x) = e && cond`) are used in printer/client.rs and
-# were stabilised in 1.88. Declaring 1.87 made an older toolchain fail with a
-# parse error instead of cargo's clear "requires rustc 1.88" message.
-rust-version = "1.88"
+# Minimum supported Rust, not a request for a particular toolchain. Set to the
+# current stable so new language features can be used freely; the cost is that
+# anyone on an older toolchain cannot build, which is deliberate for a personal
+# CLI. CI installs stable explicitly so this stays honest.
+rust-version = "1.97"
 description = "Local sticker printing for pocket thermal printers over BLE/USB — QR links, inventory tags, badges, photos; no vendor app"
 license = "MIT"
 readme = "README.md"

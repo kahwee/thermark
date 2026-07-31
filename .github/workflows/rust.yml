@@ -16,6 +16,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Install stable explicitly. The runner image ships some Rust, but it can
+    # lag behind the `rust-version` in Cargo.toml, and then the build fails for
+    # a reason unrelated to the change under test.
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Show toolchain
+      run: rustc --version && cargo --version
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
