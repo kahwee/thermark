@@ -160,10 +160,14 @@ pub fn evaluate_heartbeat(hb: &Heartbeat) -> Vec<Check> {
             )),
             _ => None,
         }),
-        sensor_check("battery", hb.power_level, |v| match v {
-            0 => Some((Fail, "empty / critical (0)".into())),
-            1 => Some((Warn, "low (1) — charge before long jobs".into())),
-            _ => Some((Pass, format!("level {v} (scale ~0–4)"))),
+        sensor_check("battery", hb.power_level, |v| {
+            // Wording comes from `describe_battery` so info and doctor agree.
+            let text = crate::printer::describe_battery(v);
+            match v {
+                0 => Some((Fail, text)),
+                1 => Some((Warn, text)),
+                _ => Some((Pass, text)),
+            }
         }),
     ]
 }

@@ -10,6 +10,29 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-31
+
+### Changed
+
+- **Battery is reported as a level out of 4, with what it means.** `info`
+  printed a bare `battery: 1`, which reads like a unit rather than a warning —
+  and a low battery makes dense pages print only partway, which is easy to
+  mistake for a layout bug. Now:
+
+  ```
+  battery:      1/4  (low — dense or dark labels may print only partway; charge it)
+  ```
+
+  `doctor` uses the same wording via `printer::describe_battery`, so the two
+  cannot describe the same battery differently.
+
+### Note
+
+The protocol reports a 0–4 level and no charging flag, so thermark can tell you
+the level but not whether the printer is currently charging — check the
+device's own indicator for that, then re-run `thermark info` to confirm the
+level is climbing.
+
 ## [0.15.0] - 2026-07-31
 
 Dense pages were printing only partway. It was not the printable area, and not
@@ -589,7 +612,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/kahwee/thermark/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/kahwee/thermark/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kahwee/thermark/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kahwee/thermark/compare/v0.12.0...v0.13.0

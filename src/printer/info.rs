@@ -216,6 +216,34 @@ mod heartbeat_blocker_tests {
     }
 }
 
+/// Highest power level the printer reports. The scale is 0..=`BATTERY_MAX`.
+pub const BATTERY_MAX: u8 = 4;
+
+/// Plain-language reading of a power level.
+///
+/// One source of truth so `info` and `doctor` cannot describe the same battery
+/// differently. A bare "battery: 1" reads like a unit, not a warning — and a
+/// low battery makes dense pages print only partway, which is easy to mistake
+/// for a layout bug.
+pub fn describe_battery(level: u8) -> String {
+    let meaning = match level {
+        0 => "empty — will not print",
+        1 => "low — dense or dark labels may print only partway; charge it",
+        2 => "about half",
+        3 => "good",
+        _ => "full",
+    };
+    format!("{level}/{BATTERY_MAX}  ({meaning})")
+}
+
+/// Same, for a value that may not parse as a level.
+pub fn describe_battery_str(raw: &str) -> String {
+    match raw.trim().parse::<u8>() {
+        Ok(level) if level <= BATTERY_MAX => describe_battery(level),
+        _ => raw.to_string(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PrinterSummary {
     pub serial: Option<InfoValue>,
@@ -243,7 +271,11 @@ impl std::fmt::Display for PrinterSummary {
             writeln!(f, "  hard version: {v}")?;
         }
         if let Some(v) = &self.battery {
-            writeln!(f, "  battery:      {v}")?;
+            writeln!(
+                f,
+                "  battery:      {}",
+                describe_battery_str(&v.to_string())
+            )?;
         }
         if let Some(r) = &self.rfid {
             writeln!(f, "  RFID:         {r}")?;
