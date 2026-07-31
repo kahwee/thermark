@@ -281,9 +281,25 @@ pub fn make_calibration_label(label: LabelPx, safe: SafeArea) -> Result<GrayImag
     Ok(img)
 }
 
-/// First and last millimetre marked on the boundary probe.
-pub const BOUNDARY_FROM_MM: u32 = 17;
-pub const BOUNDARY_TO_MM: u32 = 29;
+/// How many millimetres the boundary probe covers, ending at the label's edge.
+///
+/// Thirteen bars is what fits across a 384 px head while leaving each numeral
+/// room; the window is placed at the *end* of the label because that is the
+/// edge in question.
+pub const BOUNDARY_SPAN_MM: u32 = 13;
+
+/// Millimetre range the boundary probe marks on `label`: the last
+/// [`BOUNDARY_SPAN_MM`] millimetres, ending at the final drawable one.
+///
+/// Derived from the label rather than fixed. A hardcoded 17..29 drew three
+/// bars on 40x20 media and probed the middle of a 50x80 label — nowhere near
+/// the edge it exists to measure.
+pub fn boundary_range(label: LabelPx) -> std::ops::RangeInclusive<u32> {
+    let px_per_mm = crate::geometry::PX_PER_MM as u32;
+    let last = (label.height_px / px_per_mm).saturating_sub(1);
+    let first = last.saturating_sub(BOUNDARY_SPAN_MM - 1);
+    first..=last
+}
 
 /// A staircase of numbered bars, one per millimetre, for finding exactly where
 /// the printer stops.
@@ -302,13 +318,14 @@ pub fn make_boundary_label(label: LabelPx) -> Result<GrayImage> {
     let font = load_font(None, None)?;
 
     let px_per_mm = PX_PER_MM as u32;
-    let steps = BOUNDARY_TO_MM.saturating_sub(BOUNDARY_FROM_MM) + 1;
+    let range = boundary_range(label);
+    let steps = range.end() - range.start() + 1;
     let slot = w / steps.max(1);
     let bar_w = slot.saturating_sub(4).max(1);
     let size = 12.0f32;
 
-    for i in 0..steps {
-        let mm = BOUNDARY_FROM_MM + i;
+    for (i, mm) in range.enumerate() {
+        let i = i as u32;
         let y = mm * px_per_mm;
         if y + px_per_mm > h {
             break;

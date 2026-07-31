@@ -10,6 +10,43 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-07-31
+
+Non-50x30 media. Verified offline across 40x20, 40x30, 50x30 and 50x80; every
+size lays out inside its printable area and no golden image changed.
+
+### Fixed
+
+- **The boundary probe now adapts to the loaded media.** `BOUNDARY_FROM_MM` /
+  `BOUNDARY_TO_MM` were fixed at 17..29 — correct only for 50x30. On 40x20 that
+  drew three bars, and on 50x80 it drew a staircase across the middle of the
+  label, measuring nothing. Replaced by `label::boundary_range(label)`, which
+  marks the last `BOUNDARY_SPAN_MM` (13) millimetres, ending at the final
+  drawable one. On 50x30 it still yields 17..29, so goldens are unchanged.
+
+### Changed
+
+- **`label::BOUNDARY_FROM_MM` and `label::BOUNDARY_TO_MM` are gone**, replaced by
+  `label::BOUNDARY_SPAN_MM` and `label::boundary_range(LabelPx)`.
+
+### Added
+
+- **`tests/label_placement.rs`: two multi-size tests.** One renders text and QR
+  labels on all four common roll sizes and asserts the ink stays inside the safe
+  area; the other asserts the probe's last bar is the media's last millimetre.
+  These caught the hardcoded range.
+- **README: a media-size table and an "I switched to a different roll" FAQ** —
+  pixel dimensions, largest QR, and worst-case page bytes per size, plus the two
+  real constraints (width clamps to 384 px; narrow tape has no room for a QR
+  beside text).
+- **Protocol notes corrected against the protocol reference.** `PrinterCheckLine` (0x86) is
+  opt-in and off by default there, so it is not required for reliability —
+  earlier notes calling it the clearest gap are superseded.
+  `PrintBitmapRowIndexed` (0x83) is documented as a firmware quirk ("printer
+  powers off if black pixel count > 6"), not a size optimisation. Added the
+  per-model print direction (D11/D110 encode rotated) and a warning that
+  `repeat` is one byte, so future row coalescing must cap runs at 255.
+
 ## [0.24.0] - 2026-07-31
 
 Documentation only — `compare-render.sh` reports every output identical.
@@ -825,7 +862,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/kahwee/thermark/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/kahwee/thermark/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/kahwee/thermark/compare/v0.21.0...v0.22.0

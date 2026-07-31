@@ -146,3 +146,81 @@ fn trimmed_artwork_stays_inside_the_printable_area() {
         assert_inside_safe_area(&placed.to_luma8(), lp, safe, mode);
     }
 }
+
+/// Every media size the user actually stocks must render, not just 50x30.
+///
+/// The whole layout stack is derived from `LabelPx`, but two things were still
+/// hardcoded to the starter roll and only this test caught them: the boundary
+/// probe's millimetre range, and the assumption that a QR always has a text
+/// column beside it.
+#[test]
+fn common_media_sizes_all_render_inside_the_printable_area() {
+    let safe = SafeArea::default();
+    for spec in ["40x20", "40x30", "50x30", "50x80"] {
+        let lp = LabelMm::parse(spec).unwrap().to_pixels(384);
+
+        let text = make_text_label(&TextLabelOptions {
+            text: "PANTRY\nrice, dried".into(),
+            label: lp,
+            safe,
+            align: TextAlign::Center,
+            border: false,
+            font_path: None,
+            font_name: None,
+            font_size: None,
+        })
+        .unwrap_or_else(|e| panic!("{spec}: text label failed: {e}"));
+        assert_inside_safe_area(&text, lp, safe, &format!("{spec} text"));
+
+        let qr = make_qr_label_opts(&QrLabelOptions {
+            url: "https://example.com/inventory/10428".into(),
+            side_text: "BIN 12".into(),
+            label: lp,
+            safe,
+            text_side: TextSide::Right,
+            border: false,
+            font_path: None,
+            font_name: None,
+            font_size: None,
+        })
+        .unwrap_or_else(|e| panic!("{spec}: qr label failed: {e}"));
+        assert_inside_safe_area(&qr, lp, safe, &format!("{spec} qr"));
+    }
+}
+
+/// The boundary probe exists to find where the printer stops on *this* media,
+/// so its bars must sit against that media's trailing edge.
+///
+/// It used to mark a fixed 17..29 mm: three bars on a 20 mm label, and on
+/// 50x80 a staircase across the middle of the label measuring nothing.
+#[test]
+fn boundary_probe_marks_the_trailing_edge_of_any_media() {
+    use thermark::label::{boundary_range, make_boundary_label};
+
+    for spec in ["40x20", "40x30", "50x30", "50x80"] {
+        let lp = LabelMm::parse(spec).unwrap().to_pixels(384);
+        let range = boundary_range(lp);
+        let height_mm = lp.height_px / 8;
+
+        assert_eq!(
+            *range.end(),
+            height_mm - 1,
+            "{spec}: last bar must be the final drawable millimetre"
+        );
+        assert!(
+            range.start() < range.end(),
+            "{spec}: probe needs more than one bar to be readable"
+        );
+
+        let img = make_boundary_label(lp).unwrap_or_else(|e| panic!("{spec}: {e}"));
+        let ink = ink_bounds(&img, 127).unwrap_or_else(|| panic!("{spec}: probe drew nothing"));
+        let bottom = ink.y + ink.h - 1;
+        // Full bleed on purpose — the probe measures the edge, so it must draw
+        // right up to it.
+        assert!(
+            bottom >= lp.height_px - 8,
+            "{spec}: probe stops at row {bottom}, short of the edge at {}",
+            lp.height_px - 1
+        );
+    }
+}

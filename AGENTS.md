@@ -172,7 +172,7 @@ printable area — not conclusions that have not been verified on hardware.
 
 [the protocol reference](the protocol reference) /
 [the protocol reference](the protocol reference) is the most complete
-open client. Four things it does that thermark does not:
+open client. Six things it does differently:
 
 1. **Row repeat coalescing.** Consecutive identical rows increment the existing
    packet's `repeat` field instead of sending another packet
@@ -181,19 +181,43 @@ open client. Four things it does that thermark does not:
    byte reduction, and byte volume is what strains the printer.
 
 2. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply
-   `In_PrinterCheckLine` (0xd3). Sent every 200 rows (`row % 200 === 199`).
-   thermark never sends it — a 240-row page would carry one at row 199.
-   Unknown whether it matters for reliability; it is the clearest protocol gap.
+   `In_PrinterCheckLine` (0xd3). The reference marks a slot every 200 rows
+   (`row % 200 === 199`) but only emits the packet under an opt-in
+   `enableCheckLine` option, **off by default** — so it is not required for
+   reliable printing, on long pages or otherwise. Closing this "gap" is
+   optional; treat earlier notes calling it the clearest gap as superseded.
 
 3. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
-   **≤ 6 black pixels**, sending pixel indices instead of a full bitmap. Our
-   `Cmd` enum names it but nothing emits it.
+   **≤ 6 black pixels**, sending 2-byte pixel indices instead of a bitmap. The
+   reference's source comment is *"printer powers off if black pixel count >
+   6"*, and it throws rather than build the packet above 6 — so this reads as a
+   firmware quirk with a hard threshold, not a size optimisation. Our `Cmd` enum
+   names it but nothing emits it, and no power-off has been seen here. The rows
+   that would land under the threshold are hairlines: 1 px rules, thin borders,
+   the boundary probe's lettering.
 
 4. **Black-pixel counts are computed**, not zeroed. `printBitmapRow` takes
    `printheadPixels` and a `countsMode` of `auto | split | total`; thermark
    sends three zero bytes. Community clients report zeros working, and ours do
    print, so this is likely optional — but it is a deliberate deviation, not an
    accident.
+
+5. **Print direction is per-model.** Each model carries `printDirection`:
+   B-series is `"top"`, the D11/D110 family is `"left"` and gets its canvas
+   rotated 90° clockwise during encoding, so `cols` comes from the canvas
+   *height*. thermark does not rotate; a D110 label is authored narrow-side-first
+   (`--label 12x40`) and the wire bytes match. Same output, different authoring
+   convention — do not "fix" this by adding a rotation.
+
+6. **`repeat` is one byte.** If row coalescing (1) is ever implemented, cap each
+   run at 255. A blank 80 mm label is a single 640-row run; the reference stores
+   the count in an unbounded JS number and writes it straight into the byte
+   array, so it carries this bug latent.
+
+No label-height limit exists anywhere in the reference — no preset table, no
+clamp, no per-model maximum. Page height is bounded only by the `u16` row count.
+50x80 media (384×640 px, ~38 KB worst case) is a supported size, not an edge
+case; it is simply the one most likely to expose a weak battery.
 
 Also confirmed: the protocol reference writes with `writeValueWithoutResponse` and a fixed
 `packetIntervalMs` (default **10 ms**), which is why thermark paces by bytes to

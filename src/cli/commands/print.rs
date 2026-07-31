@@ -123,12 +123,11 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
 }
 
 /// How to read the boundary probe.
-fn print_boundary_legend() {
-    use thermark::label::{BOUNDARY_FROM_MM, BOUNDARY_TO_MM};
+fn print_boundary_legend(label: thermark::geometry::LabelPx) {
+    let range = thermark::label::boundary_range(label);
+    let (from, to) = (range.start(), range.end());
     println!();
-    println!(
-        "One numbered bar per millimetre, {BOUNDARY_FROM_MM}..{BOUNDARY_TO_MM} mm from the top."
-    );
+    println!("One numbered bar per millimetre, {from}..{to} mm from the top.");
     println!("Each sits at its own horizontal position, so nothing crowds.");
     println!();
     println!("  Read the HIGHEST number whose bar printed completely.");
@@ -191,7 +190,7 @@ pub async fn calibrate(
     print_file(cfg, conn, task, model, &tmp, opts).await?;
     if boundary {
         println!("OK — boundary probe printed ({label})");
-        print_boundary_legend();
+        print_boundary_legend(lp);
         return Ok(());
     }
     println!("OK — calibration printed ({label})");

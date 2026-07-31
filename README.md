@@ -192,6 +192,19 @@ Preview QR without printing: `qr ... --save /tmp/out.png --no-print`.
 | Max width (B1) | **384 px** (~48 mm) |
 | 50×30 mm sticker | **384×240 px** |
 
+Any size works — pass `--label WxH` in mm. Common rolls:
+
+| `--label` | Pixels | Largest QR | Page bytes (worst case) |
+|--|--|--|--|
+| `40x20` | 320×160 | 136 px | 8.3 KB |
+| `40x30` | 320×240 | 195 px | 12.4 KB |
+| `50x30` | 384×240 | 216 px | 14.3 KB |
+| `50x80` | 384×640 | 237 px | 38.1 KB |
+
+Width is clamped to the printhead, so 50 mm media prints 48 mm wide (384 px) —
+the 2 mm is liner, not a bug. Height is unconstrained: the protocol carries the
+row count in a `u16`, and nothing in the format caps a page.
+
 ## Doctor
 
 ```bash
@@ -275,6 +288,27 @@ thermark config safe-area --last-tick 26 --label 50x30
 
 Do this on a **charged** printer, or you will measure the battery instead of the
 media. If two runs disagree, take the lower number.
+
+The probe adapts to the media: it always marks the last 13 mm, so the final bar
+is the last millimetre of *your* label. Pass the size you actually loaded —
+`thermark calibrate --boundary --label 40x20`. A safe area measured on one roll
+does not transfer to another, so save it per label size.
+
+### I switched to a different roll — 40×20, 40×30, 50×80…
+
+Just change `--label`; everything derives from it. Two things to know:
+
+- **Width is clamped to 384 px (~48 mm).** 50 mm media prints 48 mm wide. Media
+  wider than that gets cropped, not scaled — thermark cannot make the printhead
+  bigger.
+- **Narrow media runs out of room for a QR beside text.** The limit is width,
+  not height: 40×20 and even 25×15 lay out fine, but 12 mm D110 tape leaves less
+  than the 64 px of QR that survives thermal printing, so `qr` errors out rather
+  than print something unscannable. Use `text` there, or author it sideways as
+  `--label 40x12`.
+
+Re-run `calibrate --boundary` after switching, and save the result with
+`--label` so each roll keeps its own safe area.
 
 ### How do I check what will print, without wasting a label?
 

@@ -15,15 +15,25 @@ pub enum Cmd {
     SetDensity = 0x21,
     SetLabelType = 0x23,
     PrinterInfo = 0x40,
-    /// Sparse-row form: pixel indices instead of a bitmap. The reference
-    /// implementation uses it when a row has ≤ 6 black pixels. Not emitted here.
+    /// Sparse-row form: 2-byte pixel indices instead of a bitmap.
+    ///
+    /// The reference implementation switches to it whenever a row has **≤ 6**
+    /// black pixels, and its source carries the note *"printer powers off if
+    /// black pixel count > 6"* — i.e. this is not a size optimisation but a
+    /// firmware quirk with a hard threshold. It refuses to build the packet
+    /// above 6, so the two forms partition rows rather than overlap.
+    ///
+    /// Not emitted here, and no such power-off has been observed. Worth
+    /// implementing before printing artwork made of hairlines — a 1 px rule or
+    /// a thin border is exactly the row that lands under the threshold.
     PrintBitmapRowIndexed = 0x83,
     PrintEmptyRow = 0x84,
     PrintBitmapRow = 0x85,
-    /// `[line: u16, 0x01]`, reply `0xd3`. The reference implementation sends
-    /// one every 200 rows (`row % 200 == 199`). Not emitted here — the clearest
-    /// remaining protocol gap, and unverified as to whether it affects
-    /// reliability on long pages.
+    /// `[line: u16, 0x01]`, reply `0xd3`. The reference implementation marks a
+    /// slot every 200 rows (`row % 200 == 199`) but emits the packet **only
+    /// under an opt-in `enableCheckLine` flag, off by default** — so it is not
+    /// load-bearing for reliability, on long pages or otherwise. Not emitted
+    /// here, deliberately.
     PrinterCheckLine = 0x86,
     PrintStatus = 0xa3,
     Connect = 0xc1,
@@ -50,6 +60,14 @@ pub enum InfoKey {
 }
 
 /// Supported printer models (printhead width and print-start variants).
+///
+/// **Authoring orientation differs by family.** The reference implementation
+/// tags each model with a print direction: B-series is `"top"`, while the
+/// D11/D110 family is `"left"` and has its canvas rotated 90° clockwise during
+/// encoding, so its *long* edge is the one designed across. thermark does not
+/// rotate — a D110 label is authored as `--label 12x40`, narrow side first, and
+/// the bytes on the wire come out identical. Use `--rotate` if artwork was
+/// drawn the other way round.
 #[derive(
     Debug,
     Clone,
@@ -210,6 +228,11 @@ pub fn print_status() -> Packet {
 /// incrementing it instead of sending another packet — the largest byte
 /// reduction still available, and byte volume is what strains the printer on
 /// dense pages.
+///
+/// If that is ever implemented, **cap each run at 255**: the field is one byte,
+/// and a blank 80 mm label is a single 640-row run. The reference stores the
+/// count in an unbounded JS number and writes it straight into the byte array,
+/// so it has this bug latent — do not copy the arithmetic.
 pub fn print_bitmap_row(row_index: u16, repeats: u8, pixels: &[u8]) -> Packet {
     let mut data = Vec::with_capacity(6 + pixels.len());
     data.extend_from_slice(&row_index.to_be_bytes());
