@@ -51,7 +51,7 @@ pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
         .unwrap_or_else(|| pick.candidate.id.clone());
     let mut cfg = Config::load()?;
     let model = cfg.model;
-    cfg.apply_set(&addr, ConnPref::Ble, model, None);
+    cfg.apply_set(&addr, ConnPref::Ble, model, None)?;
     let path = cfg.save()?;
     println!("\nsaved default printer → {addr}");
     println!("  file: {}", path.display());

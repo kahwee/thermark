@@ -63,7 +63,7 @@ impl Pacing {
         between_end_tries: Duration::from_millis(100),
     };
 
-    /// Six times the row pacing of [`Self::REAL`], via `THERMARK_SLOW=1`.
+    /// Slower diagnostic pacing, via `THERMARK_SLOW=1`.
     ///
     /// Kept as a diagnostic. When a page truncates, this distinguishes "sent
     /// too fast" from everything else — though on the hardware here the cause
@@ -90,6 +90,18 @@ impl Pacing {
         end_print_tries: 50,
         between_end_tries: Duration::ZERO,
     };
+
+    fn validate(self) -> Result<()> {
+        if self.pace_bytes == 0 {
+            return Err(Error::InvalidPacing("pace_bytes must be at least 1".into()));
+        }
+        if self.end_print_tries == 0 {
+            return Err(Error::InvalidPacing(
+                "end_print_tries must be at least 1".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// What to do when a request gets no reply within the wait window.
@@ -363,6 +375,9 @@ impl<T: Transport> PrinterClient<T> {
         wait: Duration,
         on_timeout: OnTimeout,
     ) -> Result<Packet> {
+        if attempts == 0 {
+            return Err(Error::InvalidRetryBudget);
+        }
         let req_cmd = request.cmd;
         for attempt in 0..attempts {
             // BLE writes go out unacknowledged (`WriteType::WithoutResponse`),
@@ -515,6 +530,7 @@ impl<T: Transport> PrinterClient<T> {
     ///
     /// Returns [`Error::PrintNotConfirmed`] if the printer never ACKs PrintEnd.
     pub async fn print_raster(&mut self, raster: Raster, density: Density) -> Result<()> {
+        self.pacing.validate()?;
         let (width, height) = (raster.width(), raster.height());
         info!(
             width,
@@ -730,22 +746,41 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn fetch_summary(&mut self) -> Result<PrinterSummary> {
-        let serial = self.get_info(InfoKey::DeviceSerial).await.ok();
-        let soft = self.get_info(InfoKey::SoftVersion).await.ok();
-        let hard = self.get_info(InfoKey::HardVersion).await.ok();
-        let battery = self.get_info(InfoKey::Battery).await.ok();
-        let device_type = self.get_info(InfoKey::DeviceType).await.ok();
-        let hb = self.heartbeat().await.ok();
-        let rfid = self.rfid_info().await.ok();
-        Ok(PrinterSummary {
+        fn optional<T>(result: Result<T>, errors: &mut Vec<Error>) -> Option<T> {
+            match result {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    errors.push(error);
+                    None
+                }
+            }
+        }
+
+        let mut errors = Vec::new();
+        let serial = optional(self.get_info(InfoKey::DeviceSerial).await, &mut errors);
+        let soft = optional(self.get_info(InfoKey::SoftVersion).await, &mut errors);
+        let hard = optional(self.get_info(InfoKey::HardVersion).await, &mut errors);
+        let battery = optional(self.get_info(InfoKey::Battery).await, &mut errors);
+        let device_type = optional(self.get_info(InfoKey::DeviceType).await, &mut errors);
+        let heartbeat = optional(self.heartbeat().await, &mut errors);
+        let rfid = optional(self.rfid_info().await, &mut errors);
+        let summary = PrinterSummary {
             serial,
             soft,
             hard,
             battery,
             device_type,
-            heartbeat: hb,
+            heartbeat,
             rfid,
-        })
+        };
+        if summary.has_data() {
+            Ok(summary)
+        } else {
+            Err(errors
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| Error::msg("printer returned no summary data")))
+        }
     }
 }
 
@@ -869,6 +904,49 @@ mod tests {
         let cmds = c.transport().tx_cmds();
         assert!(cmds.contains(&0x40));
         assert!(cmds.contains(&0xdc));
+    }
+
+    #[tokio::test]
+    async fn fetch_summary_does_not_hide_total_transport_failure() {
+        let mut mock = MockTransport::new();
+        mock.fail_receives("link down");
+        let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let err = c.fetch_summary().await.unwrap_err();
+        assert!(matches!(err, Error::Transport(message) if message.contains("link down")));
+    }
+
+    #[tokio::test]
+    async fn rejects_zero_retry_and_pacing_budgets() {
+        let mut c = client_b1();
+        let err = c
+            .transceive(
+                protocol::info(InfoKey::Battery),
+                (Cmd::PrinterInfo as u8).wrapping_add(InfoKey::Battery as u8),
+                0,
+                Duration::ZERO,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidRetryBudget));
+
+        let mut pacing = Pacing::INSTANT;
+        pacing.pace_bytes = 0;
+        let mut c = PrinterClient::new(MockTransport::new(), Model::B1).with_pacing(pacing);
+        let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidPacing(_)));
+
+        pacing = Pacing::INSTANT;
+        pacing.end_print_tries = 0;
+        let mut c = PrinterClient::new(MockTransport::new(), Model::B1).with_pacing(pacing);
+        let err = c
+            .print_gray_image(&gray, Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidPacing(_)));
     }
 
     #[tokio::test]

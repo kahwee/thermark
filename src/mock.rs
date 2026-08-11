@@ -33,6 +33,7 @@ pub struct MockTransport {
     heartbeat: Option<[u8; 13]>,
     /// Override the `PrintStatus` (0xa3) reply body.
     print_status: Option<Vec<u8>>,
+    recv_error: Option<String>,
 }
 
 impl Default for MockTransport {
@@ -54,6 +55,7 @@ impl MockTransport {
             auto_reply: true,
             heartbeat: None,
             print_status: None,
+            recv_error: None,
         }
     }
 
@@ -131,6 +133,11 @@ impl MockTransport {
     /// Queue a raw fragment to exercise transport-level packet splitting.
     pub fn push_rx_raw(&mut self, bytes: impl Into<Vec<u8>>) {
         self.rx_queue.push(bytes.into());
+    }
+
+    pub fn fail_receives(&mut self, message: impl Into<String>) -> &mut Self {
+        self.recv_error = Some(message.into());
+        self
     }
 
     pub fn auto_reply(&mut self, yes: bool) -> &mut Self {
@@ -237,6 +244,9 @@ impl Transport for MockTransport {
     }
 
     async fn recv_raw(&mut self, _wait: Duration) -> Result<Vec<u8>> {
+        if let Some(message) = &self.recv_error {
+            return Err(Error::transport(message.clone()));
+        }
         if self.rx_queue.is_empty() {
             return Ok(Vec::new());
         }

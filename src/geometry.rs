@@ -180,8 +180,10 @@ impl SafeArea {
     /// The reliably printable rectangle of `label`, or `None` if the insets
     /// leave nothing.
     pub fn content(self, label: LabelPx) -> Option<Rect> {
-        let w = label.width_px.checked_sub(self.left + self.right)?;
-        let h = label.height_px.checked_sub(self.top + self.bottom)?;
+        let horizontal = self.left.checked_add(self.right)?;
+        let vertical = self.top.checked_add(self.bottom)?;
+        let w = label.width_px.checked_sub(horizontal)?;
+        let h = label.height_px.checked_sub(vertical)?;
         (w > 0 && h > 0).then_some(Rect {
             x: self.left,
             y: self.top,
@@ -309,6 +311,21 @@ mod tests {
         };
         assert!(SafeArea::B1.content(tiny).is_none());
         assert!(SafeArea::NONE.content(tiny).is_some());
+    }
+
+    #[test]
+    fn safe_area_overflow_is_rejected() {
+        let label = LabelPx {
+            width_px: 384,
+            height_px: 240,
+        };
+        let hostile = SafeArea {
+            top: u32::MAX,
+            bottom: 1,
+            left: u32::MAX,
+            right: 1,
+        };
+        assert!(hostile.content(label).is_none());
     }
 
     #[test]

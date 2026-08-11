@@ -3,7 +3,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use thermark::config::{Config, ConnPref};
+use thermark::config::{Config, ConnPref, MAX_SCAN_SECS};
 use thermark::label::{TextAlign, TextSide};
 use thermark::print_task::PrintTask;
 use thermark::protocol::Model;
@@ -40,7 +40,7 @@ pub struct ConnArgs {
     #[arg(short, long)]
     pub addr: Option<String>,
     /// BLE scan time before connect (seconds; default: config or 4)
-    #[arg(long)]
+    #[arg(long, value_parser = parse_scan_seconds)]
     pub scan_secs: Option<u64>,
     /// Allow substring BLE name matching (default: exact name or id only)
     #[arg(long, default_value_t = false)]
@@ -113,6 +113,18 @@ pub fn parse_threshold(s: &str) -> std::result::Result<Threshold, String> {
     s.parse::<Threshold>().map_err(|e| e.to_string())
 }
 
+pub fn parse_scan_seconds(s: &str) -> std::result::Result<u64, String> {
+    let seconds = s
+        .parse::<u64>()
+        .map_err(|_| "scan time must be an integer number of seconds".to_string())?;
+    if !(1..=MAX_SCAN_SECS).contains(&seconds) {
+        return Err(format!(
+            "scan time must be between 1 and {MAX_SCAN_SECS} seconds"
+        ));
+    }
+    Ok(seconds)
+}
+
 // ─── Commands ───────────────────────────────────────────────────────────────
 
 #[derive(Subcommand, Debug)]
@@ -120,7 +132,7 @@ pub enum Commands {
     /// Scan for thermal label printers over Bluetooth LE
     Scan {
         /// How long to scan (seconds)
-        #[arg(short, long, default_value_t = 5)]
+        #[arg(short, long, default_value_t = 5, value_parser = parse_scan_seconds)]
         seconds: u64,
         /// Save the best match into config.json as the default printer
         #[arg(long, default_value_t = false)]
@@ -349,7 +361,7 @@ pub enum Commands {
         #[arg(long, value_enum)]
         task: Option<PrintTask>,
         /// BLE scan seconds
-        #[arg(short, long, default_value_t = 5)]
+        #[arg(short, long, default_value_t = 5, value_parser = parse_scan_seconds)]
         seconds: u64,
         /// Use saved default printer even without -a (connect + sensors)
         #[arg(long, default_value_t = false)]
@@ -390,7 +402,7 @@ pub enum ConfigCmd {
         #[arg(short, long, value_enum)]
         model: Option<Model>,
         /// Default BLE scan seconds before connect
-        #[arg(long)]
+        #[arg(long, value_parser = parse_scan_seconds)]
         scan_secs: Option<u64>,
         /// Default label size, e.g. 50x30 — saves repeating --label
         #[arg(short, long)]
@@ -403,7 +415,7 @@ pub enum ConfigCmd {
     SafeArea {
         /// Millimetre mark of the LAST ruler tick that printed, from
         /// `thermark calibrate`. Sets the bottom inset for you.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "bottom")]
         last_tick: Option<f64>,
         /// Label size the reading came from (needed with --last-tick)
         #[arg(long)]

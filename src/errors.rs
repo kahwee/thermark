@@ -43,6 +43,14 @@ pub enum Error {
     #[error("invalid raster: {0}")]
     InvalidRaster(String),
 
+    /// Retry loop cannot make progress with zero attempts.
+    #[error("retry attempts must be at least 1")]
+    InvalidRetryBudget,
+
+    /// Pacing settings would skip required control flow.
+    #[error("invalid pacing: {0}")]
+    InvalidPacing(String),
+
     /// Job streamed but the printer never confirmed PrintEnd.
     #[error(
         "print job finished without printer confirmation (end_print never succeeded; \

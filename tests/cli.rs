@@ -343,6 +343,38 @@ fn config_set_show_clear() {
 }
 
 #[test]
+fn scan_durations_are_bounded_at_the_cli() {
+    for args in [
+        vec!["scan", "--seconds", "0"],
+        vec!["doctor", "--seconds", "301"],
+        vec!["config", "set", "-a", "B1-Test", "--scan-secs", "0"],
+        vec!["info", "-a", "B1-Test", "--scan-secs", "999999"],
+    ] {
+        thermark()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "scan time must be between 1 and 300 seconds",
+            ));
+    }
+}
+
+#[test]
+fn safe_area_rejects_non_finite_negative_and_consuming_values() {
+    let (_dir, path) = temp_config_path();
+    for args in [
+        vec!["config", "safe-area", "--top", "NaN"],
+        vec!["config", "safe-area", "--left", "-1"],
+        vec!["config", "safe-area", "--last-tick", "31"],
+        vec!["config", "safe-area", "--top", "20", "--bottom", "10"],
+    ] {
+        thermark_with_config(&path).args(args).assert().failure();
+    }
+    assert!(!path.exists(), "invalid input must not create config.json");
+}
+
+#[test]
 fn config_set_merges_model_and_connection() {
     let (_dir, path) = temp_config_path();
 

@@ -294,6 +294,18 @@ pub struct PrinterSummary {
     pub rfid: Option<RfidInfo>,
 }
 
+impl PrinterSummary {
+    pub fn has_data(&self) -> bool {
+        self.serial.is_some()
+            || self.soft.is_some()
+            || self.hard.is_some()
+            || self.battery.is_some()
+            || self.device_type.is_some()
+            || self.heartbeat.is_some()
+            || self.rfid.is_some()
+    }
+}
+
 impl std::fmt::Display for PrinterSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Printer info")?;

@@ -13,10 +13,11 @@
 //! 3. `addr` in this config file
 
 use crate::errors::{Error, Result};
-use crate::geometry::SafeArea;
+use crate::geometry::{LabelMm, SafeArea};
 
 /// Fallback label size when neither the CLI nor the config names one.
 pub const DEFAULT_LABEL: &str = "50x30";
+pub const MAX_SCAN_SECS: u64 = 300;
 use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -61,6 +62,7 @@ impl std::fmt::Display for ConnPref {
 
 /// On-disk / in-memory user preferences (JSON).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Default BLE name / UUID or serial device path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,7 +144,10 @@ impl Config {
 
     /// Parse JSON body (no file I/O).
     pub fn parse_json(text: &str) -> Result<Self> {
-        serde_json::from_str(text).map_err(|e| Error::msg(format!("invalid JSON: {e}")))
+        let config: Self =
+            serde_json::from_str(text).map_err(|e| Error::msg(format!("invalid JSON: {e}")))?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Pretty-print JSON for display / file.
@@ -159,6 +164,7 @@ impl Config {
 
     /// Write JSON to an explicit path.
     pub fn save_to(&self, path: &Path) -> Result<()> {
+        self.validate()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| Error::msg(format!("create config dir {}: {e}", parent.display())))?;
@@ -206,8 +212,19 @@ impl Config {
         connection: ConnPref,
         model: Option<Model>,
         scan_secs: Option<u64>,
-    ) {
-        self.addr = Some(addr.into().trim().to_string());
+    ) -> Result<()> {
+        let addr = addr.into().trim().to_string();
+        if addr.is_empty() {
+            return Err(Error::msg("printer address cannot be blank"));
+        }
+        if let Some(seconds) = scan_secs
+            && !(1..=MAX_SCAN_SECS).contains(&seconds)
+        {
+            return Err(Error::msg(format!(
+                "scan time must be 1..={MAX_SCAN_SECS} seconds, got {seconds}"
+            )));
+        }
+        self.addr = Some(addr);
         self.connection = Some(connection);
         if let Some(m) = model {
             self.model = Some(m);
@@ -215,6 +232,38 @@ impl Config {
         if let Some(s) = scan_secs {
             self.scan_secs = Some(s);
         }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self
+            .addr
+            .as_deref()
+            .is_some_and(|addr| addr.trim().is_empty())
+        {
+            return Err(Error::msg("configured printer address cannot be blank"));
+        }
+        if let Some(seconds) = self.scan_secs
+            && !(1..=MAX_SCAN_SECS).contains(&seconds)
+        {
+            return Err(Error::msg(format!(
+                "configured scan time must be 1..={MAX_SCAN_SECS} seconds, got {seconds}"
+            )));
+        }
+        if let Some(label) = self.label.as_deref() {
+            LabelMm::parse(label)
+                .map_err(|e| Error::msg(format!("configured label is invalid: {e}")))?;
+        }
+        if let Some(safe_area) = self.safe_area {
+            let label = LabelMm::parse(&self.resolve_label(None))?;
+            let pixels = label.to_pixels(self.resolve_model(None).max_width_px());
+            if safe_area.content(pixels).is_none() {
+                return Err(Error::msg(
+                    "configured safe-area insets consume the entire label",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn nonempty(s: Option<&str>) -> Option<&str> {
@@ -278,7 +327,7 @@ impl Config {
 
     /// Prefer CLI scan seconds when provided; else config; else 4.
     pub fn resolve_scan_secs(&self, cli: Option<u64>) -> u64 {
-        cli.or(self.scan_secs).unwrap_or(4).max(1)
+        cli.or(self.scan_secs).unwrap_or(4).clamp(1, MAX_SCAN_SECS)
     }
 }
 
@@ -347,6 +396,33 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_or_invalid_config_values() {
+        for body in [
+            r#"{"adress":"B1-Typo"}"#,
+            r#"{"addr":"   "}"#,
+            r#"{"scan_secs":0}"#,
+            r#"{"scan_secs":301}"#,
+            r#"{"label":"not-a-label"}"#,
+            r#"{"safe_area":{"top":4294967295,"bottom":1,"left":0,"right":0}}"#,
+        ] {
+            assert!(Config::parse_json(body).is_err(), "accepted {body}");
+        }
+    }
+
+    #[test]
+    fn apply_set_rejects_invalid_values_without_mutating() {
+        let original = Config::default();
+        let mut cfg = original.clone();
+        assert!(cfg.apply_set("  ", ConnPref::Ble, None, None).is_err());
+        assert_eq!(cfg, original);
+        assert!(
+            cfg.apply_set("B1-Test", ConnPref::Ble, None, Some(0))
+                .is_err()
+        );
+        assert_eq!(cfg, original);
+    }
+
+    #[test]
     fn apply_set_merges_without_clobbering_unspecified() {
         let mut cfg = Config {
             addr: Some("old".into()),
@@ -356,7 +432,7 @@ mod tests {
             safe_area: None,
             label: None,
         };
-        cfg.apply_set("B1-New", ConnPref::Ble, None, None);
+        cfg.apply_set("B1-New", ConnPref::Ble, None, None).unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
         assert_eq!(cfg.connection, Some(ConnPref::Ble));
         assert_eq!(cfg.model, Some(Model::B21));
@@ -366,7 +442,8 @@ mod tests {
     #[test]
     fn apply_set_trims_addr() {
         let mut cfg = Config::default();
-        cfg.apply_set("  B1-Spaced  ", ConnPref::Ble, None, None);
+        cfg.apply_set("  B1-Spaced  ", ConnPref::Ble, None, None)
+            .unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-Spaced"));
     }
 

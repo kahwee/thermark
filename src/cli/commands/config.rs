@@ -93,7 +93,7 @@ fn set(
     label: Option<&str>,
 ) -> Result<()> {
     let mut cfg = Config::load()?;
-    cfg.apply_set(addr, conn, model, scan_secs);
+    cfg.apply_set(addr, conn, model, scan_secs)?;
     if let Some(l) = label {
         // Validate before saving: a bad size here would fail on every later
         // command with no hint where it came from.
@@ -121,7 +121,8 @@ struct SafeAreaUpdate {
 }
 
 fn safe_area(update: SafeAreaUpdate) -> Result<()> {
-    use thermark::geometry::{LabelMm, PX_PER_MM, SafeArea};
+    use anyhow::bail;
+    use thermark::geometry::{LabelMm, MAX_DIMENSION_MM, PX_PER_MM, SafeArea};
 
     let SafeAreaUpdate {
         last_tick,
@@ -141,11 +142,29 @@ fn safe_area(update: SafeAreaUpdate) -> Result<()> {
         return Ok(());
     }
 
+    let validate_mm = |name: &str, value: Option<f64>| -> Result<Option<f64>> {
+        if let Some(value) = value
+            && (!value.is_finite() || !(0.0..=MAX_DIMENSION_MM).contains(&value))
+        {
+            bail!("{name} must be a finite value from 0 to {MAX_DIMENSION_MM} mm");
+        }
+        Ok(value)
+    };
+    let last_tick = validate_mm("last tick", last_tick)?;
+    let top = validate_mm("top inset", top)?;
+    let bottom = validate_mm("bottom inset", bottom)?;
+    let left = validate_mm("left inset", left)?;
+    let right = validate_mm("right inset", right)?;
+
+    let label_mm = LabelMm::parse(&cfg.resolve_label(label.as_deref()))?;
     // A ruler reading is easier to report than an inset: the last tick that
     // printed tells us how much of the label the printer actually reaches.
     let bottom = match (last_tick, bottom) {
         (Some(tick), _) => {
-            let height_mm = LabelMm::parse(&cfg.resolve_label(label.as_deref()))?.height_mm;
+            let height_mm = label_mm.height_mm;
+            if tick > height_mm {
+                bail!("last tick {tick} mm exceeds the label height {height_mm} mm");
+            }
             let lost = (height_mm - tick).max(0.0);
             println!(
                 "last tick {tick} mm on a {height_mm} mm label -> {lost} mm bottom content inset"
@@ -166,6 +185,14 @@ fn safe_area(update: SafeAreaUpdate) -> Result<()> {
         left: px(left, current.left),
         right: px(right, current.right),
     };
+    let label_px = label_mm.to_pixels(cfg.resolve_model(None).max_width_px());
+    if updated.content(label_px).is_none() {
+        bail!(
+            "safe-area insets consume the entire {}x{} mm label",
+            label_mm.width_mm,
+            label_mm.height_mm
+        );
+    }
     cfg.safe_area = Some(updated);
     let path = cfg.save()?;
     let mm = |v: u32| v as f64 / PX_PER_MM;
