@@ -10,6 +10,35 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-08-10
+
+### Added
+
+- Consecutive identical raster rows are coalesced with the protocol repeat
+  field. Runs longer than 255 rows are split safely; a blank 640-row page is
+  encoded as `255 + 255 + 130` rather than overflowing the one-byte field.
+- `PrinterClient::raw()` provides an explicit advanced API for individual
+  protocol commands. Raw retry counts use `NonZeroU32`.
+
+### Changed
+
+- **BREAKING: low-level state-changing methods moved under
+  `PrinterClient::raw()`.** For example, `client.set_density(density)` is now
+  `client.raw().set_density(density)`. Safe print jobs and read-only information
+  queries remain directly on `PrinterClient`.
+- **BREAKING: `Pacing` fields are private and non-zero budgets are represented
+  with `NonZeroUsize` / `NonZeroU32`.** Use its getters and `with_*` methods;
+  zero byte or retry budgets can no longer be constructed.
+- Printer responsibilities are split into client lifecycle, raw protocol I/O,
+  safe print orchestration, queries, pacing, and image-job options. BLE and
+  serial transports now have separate modules.
+
+### Fixed
+
+- Raster validation now verifies logical row coverage across repeat-compressed
+  packets instead of assuming one packet per page row.
+- Two stale rustdoc links now pass strict documentation checks.
+
 ## [0.29.0] - 2026-07-31
 
 ### Changed

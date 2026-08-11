@@ -70,42 +70,53 @@ impl Raster {
                 height: self.height,
             });
         }
-        if self.rows.len() != self.height as usize {
-            return Err(Error::InvalidRaster(format!(
-                "height is {} but raster contains {} row packets",
-                self.height,
-                self.rows.len()
-            )));
-        }
-        for (index, row) in self.rows.iter().enumerate() {
-            let expected_index = (index as u16).to_be_bytes();
+        let mut logical_row = 0u32;
+        for (packet_index, row) in self.rows.iter().enumerate() {
+            let expected_index = (logical_row as u16).to_be_bytes();
             if row.data.get(..2) != Some(expected_index.as_slice()) {
                 return Err(Error::InvalidRaster(format!(
-                    "row {index} has the wrong row index"
+                    "row packet {packet_index} starts at the wrong logical row"
                 )));
             }
-            match row.cmd {
+            let repeats = match row.cmd {
                 cmd if cmd == protocol::Cmd::PrintEmptyRow as u8 => {
-                    if row.data.len() != 3 || row.data[2] != 1 {
+                    if row.data.len() != 3 || row.data[2] == 0 {
                         return Err(Error::InvalidRaster(format!(
-                            "row {index} has an invalid empty-row payload"
+                            "row packet {packet_index} has an invalid empty-row payload"
                         )));
                     }
+                    row.data[2]
                 }
                 cmd if cmd == protocol::Cmd::PrintBitmapRow as u8 => {
                     let pixel_bytes = (self.width as usize).div_ceil(8);
-                    if row.data.len() != 6 + pixel_bytes || row.data[5] != 1 {
+                    if row.data.len() != 6 + pixel_bytes || row.data[5] == 0 {
                         return Err(Error::InvalidRaster(format!(
-                            "row {index} has an invalid bitmap-row payload"
+                            "row packet {packet_index} has an invalid bitmap-row payload"
                         )));
                     }
+                    row.data[5]
                 }
                 _ => {
                     return Err(Error::InvalidRaster(format!(
-                        "row {index} uses a non-row command"
+                        "row packet {packet_index} uses a non-row command"
                     )));
                 }
+            };
+            logical_row = logical_row.checked_add(u32::from(repeats)).ok_or_else(|| {
+                Error::InvalidRaster("row repeat count overflowed page height".into())
+            })?;
+            if logical_row > self.height {
+                return Err(Error::InvalidRaster(format!(
+                    "row packet {packet_index} repeats beyond page height {}",
+                    self.height
+                )));
             }
+        }
+        if logical_row != self.height {
+            return Err(Error::InvalidRaster(format!(
+                "height is {} but row packets cover {logical_row} logical rows",
+                self.height
+            )));
         }
         Ok(())
     }
@@ -204,7 +215,10 @@ pub fn gray_to_print_bits(gray: &GrayImage, threshold: u8, dither: bool) -> Gray
 fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
     let (w, h) = bw.dimensions();
     let bytes_per_row = (w as usize).div_ceil(8);
-    let mut out = Vec::with_capacity(h as usize);
+    let mut out = Vec::new();
+    let mut run_start = 0u16;
+    let mut run_pixels: Option<Vec<u8>> = None;
+    let mut run_len = 0u8;
 
     for y in 0..h {
         let mut row = vec![0u8; bytes_per_row];
@@ -219,13 +233,30 @@ fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
             }
         }
 
-        if all_white {
-            out.push(protocol::print_empty_row(y as u16, 1));
-        } else {
-            out.push(protocol::print_bitmap_row(y as u16, 1, &row));
+        let pixels = (!all_white).then_some(row);
+        let matches_run = run_len > 0 && run_pixels == pixels;
+        if matches_run && run_len < u8::MAX {
+            run_len += 1;
+            continue;
         }
+        if run_len > 0 {
+            push_row_run(&mut out, run_start, run_len, run_pixels.as_deref());
+        }
+        run_start = y as u16;
+        run_pixels = pixels;
+        run_len = 1;
+    }
+    if run_len > 0 {
+        push_row_run(&mut out, run_start, run_len, run_pixels.as_deref());
     }
     out
+}
+
+fn push_row_run(out: &mut Vec<Packet>, start: u16, repeats: u8, pixels: Option<&[u8]>) {
+    out.push(match pixels {
+        Some(pixels) => protocol::print_bitmap_row(start, repeats, pixels),
+        None => protocol::print_empty_row(start, repeats),
+    });
 }
 
 /// Crop uniform white space from the edges of an image.
@@ -535,7 +566,8 @@ mod tests {
         let r = encode(img, 384, 127, false).unwrap();
         let (w, h, pkts) = (r.width, r.height, r.rows);
         assert_eq!((w, h), (100, 50));
-        assert_eq!(pkts.len(), 50);
+        assert_eq!(pkts.len(), 1);
+        assert_eq!(pkts[0].data[5], 50);
     }
 
     #[test]
@@ -563,6 +595,47 @@ mod tests {
             Raster::try_new(8, 1, vec![repeated]),
             Err(Error::InvalidRaster(_))
         ));
+
+        let gap = protocol::print_empty_row(1, 1);
+        assert!(matches!(
+            Raster::try_new(8, 1, vec![gap]),
+            Err(Error::InvalidRaster(_))
+        ));
+    }
+
+    #[test]
+    fn repeat_coalescing_splits_runs_at_255() {
+        let blank = DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 640, Luma([255])));
+        let raster = encode(blank, 384, 127, false).unwrap();
+        assert_eq!(raster.rows.len(), 3);
+        let starts_and_repeats: Vec<_> = raster
+            .rows
+            .iter()
+            .map(|packet| {
+                (
+                    u16::from_be_bytes([packet.data[0], packet.data[1]]),
+                    packet.data[2],
+                )
+            })
+            .collect();
+        assert_eq!(starts_and_repeats, [(0, 255), (255, 255), (510, 130)]);
+        raster.validate().unwrap();
+    }
+
+    #[test]
+    fn only_consecutive_identical_rows_are_coalesced() {
+        let mut image = GrayImage::from_pixel(8, 4, Luma([255]));
+        for x in 0..8 {
+            image.put_pixel(x, 1, Luma([0]));
+            image.put_pixel(x, 3, Luma([0]));
+        }
+        let raster = encode(DynamicImage::ImageLuma8(image), 384, 127, false).unwrap();
+        assert_eq!(raster.rows.len(), 4);
+        assert!(raster.rows.iter().all(|packet| match packet.cmd {
+            cmd if cmd == Cmd::PrintEmptyRow as u8 => packet.data[2] == 1,
+            cmd if cmd == Cmd::PrintBitmapRow as u8 => packet.data[5] == 1,
+            _ => false,
+        }));
     }
 
     #[test]

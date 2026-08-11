@@ -65,8 +65,8 @@ Experimental print tasks need `--allow-experimental`.
 | `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
 | `errors.rs` | Print error 0xDB reason codes |
-| `transport.rs` | BLE + serial; `PRINTER_SERVICE` / `PRINTER_CHAR` |
-| `printer/` | Client + print job; `info` (heartbeat/RFID/summary) |
+| `transport.rs`, `transport/` | Common transport/matching + BLE and serial implementations |
+| `printer/` | Client core, safe print jobs, queries, validated pacing, explicit raw API |
 | `geometry.rs` | 8 px/mm, `LabelMm` / `LabelPx`, `HEAD_*_PX` widths |
 | `image_encode.rs` | Image → `Raster` (rows + dimensions together) |
 | `font.rs` | System TTF/TTC (`ab_glyph`), named fonts |
@@ -171,21 +171,16 @@ printable area — not conclusions that have not been verified on hardware.
 ## Protocol behaviours not yet implemented
 
 Known properties of the NIIMBOT protocol that thermark does not currently use,
-with the reasoning for each. Ten items:
+with the reasoning for each. Eight items. Row-repeat coalescing is implemented;
+the encoder splits long runs at the one-byte repeat limit of 255.
 
-1. **Row repeat coalescing.** Consecutive identical rows can increment the
-   existing packet's `repeat` field instead of sending another packet. thermark
-   always sends `repeats = 1`, so a page with large flat areas costs far more
-   bytes than it needs to. Largest remaining byte reduction, and byte volume is
-   what strains the printer.
-
-2. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply `0xd3`.
+1. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply `0xd3`.
    Conventionally slotted every 200 rows (`row % 200 == 199`), but it is
    optional and commonly left disabled — it is not required for reliable
    printing, on long pages or otherwise. Closing this "gap" is optional; treat
    earlier notes calling it the clearest gap as superseded.
 
-3. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
+2. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
    **≤ 6 black pixels**, sending 2-byte pixel indices instead of a bitmap. This
    threshold is a firmware quirk rather than a size optimisation: above 6 black
    pixels the indexed form is reportedly unsafe, and clients refuse to build it.
@@ -193,24 +188,20 @@ with the reasoning for each. Ten items:
    seen here. The rows that would land under the threshold are hairlines: 1 px
    rules, thin borders, the boundary probe's lettering.
 
-4. **Black-pixel counts can be computed**, not zeroed. The bitmap row packet has
+3. **Black-pixel counts can be computed**, not zeroed. The bitmap row packet has
    a three-byte count field, computed against the printhead width in either a
    split (three chunks) or total form; thermark sends three zero bytes. Zeros
    are widely reported to work, and ours do print, so this is likely optional —
    but it is a deliberate deviation, not an accident.
 
-5. **Print direction is per-model.** B-series images top-down; the D11/D110
+4. **Print direction is per-model.** B-series images top-down; the D11/D110
    family images left-to-right, so clients for those rotate the canvas 90°
    clockwise during encoding and take the column count from the canvas *height*.
    thermark does not rotate; a D110 label is authored narrow-side-first
    (`--label 12x40`) and the wire bytes come out the same. Same output,
    different authoring convention — do not "fix" this by adding a rotation.
 
-6. **`repeat` is one byte.** If row coalescing (1) is ever implemented, cap each
-   run at 255. A blank 80 mm label is a single 640-row run, which silently
-   corrupts if the count is written without clamping.
-
-7. **`PrintStatus` (0xa3) has a payload worth reading**, and thermark now
+5. **`PrintStatus` (0xa3) has a payload worth reading**, and thermark now
    reads it: `[page: i16, pagePrintProgress: u8, pageFeedProgress: u8]`, and in
    the **10-byte form only**, a fault code at offset 6. That fault arrives
    inside a *successful* 0xb3 reply, so the framing layer never sees it — it is
@@ -218,15 +209,15 @@ with the reasoning for each. Ten items:
    "how far did it get?", which is the question the battery episode was really
    asking. Do not read offset 6 at other lengths; it is a different field.
 
-8. **`printEnd` returning 0 means refused, not failed.** Polling `printEnd`
+6. **`printEnd` returning 0 means refused, not failed.** Polling `printEnd`
    until it returns 1 is a valid completion signal in its own right — thermark
    already retries on `Ok(false)`, which is the same idea.
 
-9. **`labelPositioningCalibration` ejects ~15 cm of paper on B1** when sent 1 or
+7. **`labelPositioningCalibration` ejects ~15 cm of paper on B1** when sent 1 or
    2. Deliberately not exposed; there is no way to make that non-destructive to
    a roll.
 
-10. **RFID tells you the consumable, not its size** — see the paper-size FAQ in
+8. **RFID tells you the consumable, not its size** — see the paper-size FAQ in
     the README. `consumablesType` could auto-select the label type instead of
     thermark's hardcoded `set_label_type(1)`, which is the one place a wrong
     default costs a mis-feed on continuous stock. Not implemented; needs a roll

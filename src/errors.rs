@@ -47,10 +47,6 @@ pub enum Error {
     #[error("retry attempts must be at least 1")]
     InvalidRetryBudget,
 
-    /// Pacing settings would skip required control flow.
-    #[error("invalid pacing: {0}")]
-    InvalidPacing(String),
-
     /// Job streamed but the printer never confirmed PrintEnd.
     #[error(
         "print job finished without printer confirmation (end_print never succeeded; \

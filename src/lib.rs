@@ -43,7 +43,7 @@ pub use packet::Packet;
 pub use print_task::{PrintTask, SupportStatus, effective_max_width_px, hardware_matrix};
 pub use printer::{
     Heartbeat, InfoValue, OnTimeout, Pacing, PrintOptions, PrintStatus, PrinterClient,
-    PrinterSummary, RfidInfo,
+    PrinterSummary, RawPrinter, RfidInfo,
 };
 pub use protocol::Model;
 pub use transport::{

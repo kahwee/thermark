@@ -209,15 +209,8 @@ pub fn print_status() -> Packet {
 /// widely reported to work and do print here, so this is a deliberate
 /// deviation rather than an oversight.
 ///
-/// `repeats` is always 1. The reference coalesces consecutive identical rows by
-/// incrementing it instead of sending another packet — the largest byte
-/// reduction still available, and byte volume is what strains the printer on
-/// dense pages.
-///
-/// If that is ever implemented, **cap each run at 255**: the field is one byte,
-/// and a blank 80 mm label is a single 640-row run. The reference stores the
-/// count in an unbounded JS number and writes it straight into the byte array,
-/// so it has this bug latent — do not copy the arithmetic.
+/// `repeats` coalesces consecutive identical rows. It is one byte, so callers
+/// must split longer runs at 255; [`crate::image_encode::encode`] does this.
 pub fn print_bitmap_row(row_index: u16, repeats: u8, pixels: &[u8]) -> Packet {
     let mut data = Vec::with_capacity(6 + pixels.len());
     data.extend_from_slice(&row_index.to_be_bytes());

@@ -97,7 +97,20 @@ fn assert_encodes(name: &str) {
     let r = image_encode::encode_path(&path, MAX_W, 127, false)
         .unwrap_or_else(|e| panic!("encode {name}: {e}"));
     assert_eq!((r.width(), r.height()), (W, H), "{name} encoded size");
-    assert_eq!(r.rows().len() as u32, H, "{name} one packet per row");
+    let logical_rows: u32 = r
+        .rows()
+        .iter()
+        .map(|packet| match packet.cmd {
+            0x84 => u32::from(packet.data[2]),
+            0x85 => u32::from(packet.data[5]),
+            other => panic!("{name}: unexpected row command {other:#04x}"),
+        })
+        .sum();
+    assert_eq!(logical_rows, H, "{name} encoded logical rows");
+    assert!(
+        r.rows().len() < H as usize,
+        "{name} should coalesce at least one repeated row"
+    );
 }
 
 #[test]
@@ -293,8 +306,22 @@ async fn wifi_fixture_mock_print_streams_rows() {
 
     let cmds = c.transport().tx_cmds();
     assert!(cmds.contains(&0x01), "print start: {cmds:?}");
-    let rows = cmds.iter().filter(|c| **c == 0x84 || **c == 0x85).count();
-    assert!(rows >= 200, "expected ~240 row packets, got {rows}");
+    let row_packets: Vec<_> = c
+        .transport()
+        .tx_packets
+        .iter()
+        .filter(|packet| matches!(packet.cmd, 0x84 | 0x85))
+        .collect();
+    let logical_rows: u32 = row_packets
+        .iter()
+        .map(|packet| match packet.cmd {
+            0x84 => u32::from(packet.data[2]),
+            0x85 => u32::from(packet.data[5]),
+            _ => unreachable!(),
+        })
+        .sum();
+    assert_eq!(logical_rows, H);
+    assert!(row_packets.len() < H as usize, "rows were not coalesced");
 }
 
 /// ```text

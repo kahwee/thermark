@@ -63,7 +63,7 @@ const QR_SIDE_MIN: u32 = 64;
 const MIN_TEXT_BOX_PX: u32 = 16;
 
 /// The box every label type composes into: the label area, inset by the
-/// cosmetic [`MARGIN`].
+/// cosmetic `MARGIN`.
 ///
 /// **One owner for this calculation.** It was previously computed separately in
 /// `qr_layout` and `make_text_label`, and the two drifted: the text path was
@@ -234,7 +234,7 @@ fn draw_border(img: &mut GrayImage) {
 
 /// Calibration pattern with printed millimetre numbers down the feed ruler.
 ///
-/// The geometry comes from [`crate::image_encode::calibration_pattern_with`];
+/// The geometry comes from [`crate::image_encode::calibration_pattern`];
 /// this adds the numerals, which need font access. Numbers make the photo
 /// self-describing: read the last one that printed rather than counting ticks
 /// from an edge that may itself be cut off.

@@ -1,0 +1,87 @@
+//! Image composition and high-level print-job options.
+
+use crate::errors::Result;
+use crate::geometry::{LabelMm, SafeArea};
+use crate::image_encode;
+use crate::types::{Density, Rotation, Threshold};
+use std::path::Path;
+use tracing::info;
+
+/// Lay an image out on its label canvas exactly as printing would.
+///
+/// Split out from the transport path so a preview can be produced without a
+/// printer — `thermark print --preview out.png` renders through this.
+pub fn compose_for_label(
+    path: &Path,
+    opts: &PrintOptions,
+    max_width_px: u32,
+) -> Result<image::DynamicImage> {
+    let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
+    if opts.trim {
+        img = image_encode::trim_white(img, opts.threshold.get());
+    }
+
+    match opts.label.map(|l| l.to_pixels(max_width_px)) {
+        Some(lp) => {
+            info!(
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = lp.mm().width_mm,
+                height_mm = lp.mm().height_mm,
+                max_w = max_width_px,
+                fill = opts.fill,
+                margin_px = opts.margin_px,
+                dither = opts.dither,
+                safe_bottom = opts.safe.bottom,
+                "label canvas"
+            );
+            img = if opts.fill {
+                image_encode::fill_label(img, lp, opts.safe, opts.margin_px)
+            } else {
+                image_encode::contain_label(img, lp, opts.safe, opts.margin_px)
+            };
+        }
+        None if opts.fit => img = image_encode::fit_width(img, max_width_px),
+        None => {}
+    }
+    Ok(img)
+}
+
+/// Options for a raster print job.
+#[derive(Debug, Clone)]
+pub struct PrintOptions {
+    pub density: Density,
+    pub rotate: Rotation,
+    pub threshold: Threshold,
+    /// Scale down only if wider than printhead.
+    pub fit: bool,
+    /// Physical label size (mm). Image is scaled/padded to this.
+    pub label: Option<LabelMm>,
+    /// If true with `label`, scale image to cover the label (may crop).
+    pub fill: bool,
+    /// White inset margin in pixels on each side.
+    pub margin_px: u32,
+    /// Floyd–Steinberg dither instead of a hard threshold.
+    pub dither: bool,
+    /// Content/registration insets.
+    pub safe: SafeArea,
+    /// Crop the source image's own white border before placement.
+    pub trim: bool,
+}
+
+impl Default for PrintOptions {
+    fn default() -> Self {
+        Self {
+            density: Density::NORMAL,
+            rotate: Rotation::Deg0,
+            threshold: Threshold::DEFAULT,
+            fit: false,
+            label: None,
+            fill: true,
+            margin_px: 0,
+            dither: false,
+            safe: SafeArea::default(),
+            trim: true,
+        }
+    }
+}

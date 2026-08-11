@@ -5,7 +5,9 @@ use thermark::geometry::{LabelMm, PX_PER_MM};
 use thermark::label::{TextSide, make_qr_label, max_qr_side, render_qr_square};
 use thermark::packet::Packet;
 use thermark::print_task::PrintTask;
+use thermark::printer::{Pacing, PrinterClient};
 use thermark::protocol::{self, Model};
+use thermark::types::Density;
 
 #[test]
 fn b1_print_start_roundtrip() {
@@ -98,4 +100,12 @@ fn packet_buffer_resync() {
     let pkts = Packet::drain_buffer(&mut buf);
     assert_eq!(pkts.len(), 1);
     assert_eq!(pkts[0].cmd, 0x40);
+}
+
+#[tokio::test]
+async fn low_level_commands_require_the_explicit_raw_api() {
+    let mut client =
+        PrinterClient::new(thermark::MockTransport::new(), Model::B1).with_pacing(Pacing::INSTANT);
+    assert!(client.raw().set_density(Density::DARK).await.unwrap());
+    assert_eq!(client.transport().tx_cmds(), [0x21]);
 }
