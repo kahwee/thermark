@@ -244,6 +244,28 @@ mod ble {
         closed: bool,
     }
 
+    /// Owns cleanup from the moment a peripheral connects until the complete
+    /// transport has been constructed. This also covers future cancellation.
+    struct BleSetupGuard(Option<Peripheral>);
+
+    impl BleSetupGuard {
+        fn new(peripheral: &Peripheral) -> Self {
+            Self(Some(peripheral.clone()))
+        }
+
+        fn disarm(&mut self) {
+            self.0 = None;
+        }
+    }
+
+    impl Drop for BleSetupGuard {
+        fn drop(&mut self) {
+            if let Some(peripheral) = self.0.take() {
+                disconnect_on_drop(peripheral, "BLE disconnected after incomplete setup");
+            }
+        }
+    }
+
     /// A scanned peripheral plus its signal strength.
     #[derive(Debug, Clone)]
     pub struct BleDeviceInfo {
@@ -363,48 +385,52 @@ mod ble {
                      and use the full name from `thermark scan` (exact match by default)."
                 ))
             })?;
-            peripheral.discover_services().await.map_err(|e| {
-                Error::transport(format!(
+            let mut setup_guard = BleSetupGuard::new(&peripheral);
+            if let Err(e) = peripheral.discover_services().await {
+                let error = Error::transport(format!(
                     "discover services failed: {e}. Wrong device or incomplete BLE connection — \
                      run `thermark scan` and pass -a with the full advertising name."
-                ))
-            })?;
+                ));
+                return Err(error);
+            }
 
-            let characteristic = find_printer_char(&peripheral).await?;
+            let characteristic = match find_printer_char(&peripheral).await {
+                Ok(characteristic) => characteristic,
+                Err(error) => return Err(error),
+            };
 
             let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
-            peripheral
-                .subscribe(&characteristic)
-                .await
-                .map_err(|e| Error::transport(format!("subscribe: {e}")))?;
+            if let Err(e) = peripheral.subscribe(&characteristic).await {
+                return Err(Error::transport(format!("subscribe: {e}")));
+            }
 
-            let mut notif = peripheral
-                .notifications()
-                .await
-                .map_err(|e| Error::transport(format!("notifications stream: {e}")))?;
+            let mut notif = match peripheral.notifications().await {
+                Ok(notifications) => notifications,
+                Err(e) => return Err(Error::transport(format!("notifications stream: {e}"))),
+            };
             let notify_task = tokio::spawn(async move {
                 while let Some(n) = notif.next().await {
                     let _ = tx.send(n.value);
                 }
             });
 
-            sleep(Duration::from_millis(200)).await;
-
-            Ok(Self {
+            let transport = Self {
                 peripheral,
                 write_type: choose_write_type(&characteristic),
                 characteristic,
                 rx,
                 notify_task: Some(notify_task),
                 closed: false,
-            })
+            };
+            setup_guard.disarm();
+            sleep(Duration::from_millis(200)).await;
+            Ok(transport)
         }
 
         async fn close_inner(&mut self) -> Result<()> {
             if self.closed {
                 return Ok(());
             }
-            self.closed = true;
             if let Some(task) = self.notify_task.take() {
                 task.abort();
             }
@@ -412,6 +438,7 @@ mod ble {
                 .disconnect()
                 .await
                 .map_err(|e| Error::transport(format!("BLE disconnect: {e}")))?;
+            self.closed = true;
             debug!("BLE disconnected");
             Ok(())
         }
@@ -435,35 +462,7 @@ mod ble {
                 task.abort();
             }
 
-            let Ok(handle) = tokio::runtime::Handle::try_current() else {
-                // No runtime left to drive the disconnect; the OS tears the
-                // link down when the process exits.
-                debug!("BLE transport dropped outside a runtime");
-                return;
-            };
-            let peripheral = self.peripheral.clone();
-
-            match handle.runtime_flavor() {
-                RuntimeFlavor::MultiThread => {
-                    // `block_in_place` moves this off the async worker so the
-                    // runtime stays live while we wait for the disconnect.
-                    tokio::task::block_in_place(|| {
-                        handle.block_on(async {
-                            match peripheral.disconnect().await {
-                                Ok(()) => debug!("BLE disconnected on drop"),
-                                Err(e) => debug!(error = %e, "BLE disconnect on drop (ignored)"),
-                            }
-                        });
-                    });
-                }
-                // Single-threaded runtimes (e.g. `#[tokio::test]`) cannot block
-                // without deadlocking, so best-effort is all that is available.
-                _ => {
-                    handle.spawn(async move {
-                        let _ = peripheral.disconnect().await;
-                    });
-                }
-            }
+            disconnect_on_drop(self.peripheral.clone(), "BLE disconnected on drop");
         }
     }
 
@@ -516,6 +515,30 @@ mod ble {
     /// deviation was not worth keeping.
     fn choose_write_type(_characteristic: &Characteristic) -> WriteType {
         WriteType::WithoutResponse
+    }
+
+    fn disconnect_on_drop(peripheral: Peripheral, success_message: &'static str) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            debug!("BLE connection dropped outside a runtime");
+            return;
+        };
+        match handle.runtime_flavor() {
+            RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        match peripheral.disconnect().await {
+                            Ok(()) => debug!("{success_message}"),
+                            Err(e) => debug!(error = %e, "BLE disconnect on drop (ignored)"),
+                        }
+                    });
+                });
+            }
+            _ => {
+                handle.spawn(async move {
+                    let _ = peripheral.disconnect().await;
+                });
+            }
+        }
     }
 
     async fn default_adapter() -> Result<Adapter> {

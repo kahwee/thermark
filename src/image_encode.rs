@@ -78,16 +78,33 @@ impl Raster {
             )));
         }
         for (index, row) in self.rows.iter().enumerate() {
-            let valid_cmd = matches!(
-                row.cmd,
-                x if x == protocol::Cmd::PrintBitmapRow as u8
-                    || x == protocol::Cmd::PrintEmptyRow as u8
-            );
-            let expected = u16::try_from(index).ok().map(u16::to_be_bytes);
-            if !valid_cmd || row.data.get(..2) != expected.as_ref().map(|v| v.as_slice()) {
+            let expected_index = (index as u16).to_be_bytes();
+            if row.data.get(..2) != Some(expected_index.as_slice()) {
                 return Err(Error::InvalidRaster(format!(
-                    "invalid packet for row {index}"
+                    "row {index} has the wrong row index"
                 )));
+            }
+            match row.cmd {
+                cmd if cmd == protocol::Cmd::PrintEmptyRow as u8 => {
+                    if row.data.len() != 3 || row.data[2] != 1 {
+                        return Err(Error::InvalidRaster(format!(
+                            "row {index} has an invalid empty-row payload"
+                        )));
+                    }
+                }
+                cmd if cmd == protocol::Cmd::PrintBitmapRow as u8 => {
+                    let pixel_bytes = (self.width as usize).div_ceil(8);
+                    if row.data.len() != 6 + pixel_bytes || row.data[5] != 1 {
+                        return Err(Error::InvalidRaster(format!(
+                            "row {index} has an invalid bitmap-row payload"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(Error::InvalidRaster(format!(
+                        "row {index} uses a non-row command"
+                    )));
+                }
             }
         }
         Ok(())
@@ -525,6 +542,27 @@ mod tests {
     fn encode_rejects_too_wide() {
         let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(400, 10, Luma([0])));
         assert!(encode(img, 384, 127, false).is_err());
+    }
+
+    #[test]
+    fn raster_constructor_rejects_malformed_row_payloads() {
+        let missing_repeat = Packet::new(protocol::Cmd::PrintEmptyRow as u8, [0, 0]);
+        assert!(matches!(
+            Raster::try_new(8, 1, vec![missing_repeat]),
+            Err(Error::InvalidRaster(_))
+        ));
+
+        let wrong_bitmap_width = protocol::print_bitmap_row(0, 1, &[0, 0]);
+        assert!(matches!(
+            Raster::try_new(8, 1, vec![wrong_bitmap_width]),
+            Err(Error::InvalidRaster(_))
+        ));
+
+        let repeated = protocol::print_empty_row(0, 2);
+        assert!(matches!(
+            Raster::try_new(8, 1, vec![repeated]),
+            Err(Error::InvalidRaster(_))
+        ));
     }
 
     #[test]
