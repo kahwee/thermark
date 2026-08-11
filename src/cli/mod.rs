@@ -17,7 +17,7 @@ use thermark::config::Config;
 
 /// Dispatch a parsed command. Returns the process exit code.
 pub async fn run(cli: Cli) -> Result<i32> {
-    let cfg = Config::load().unwrap_or_default();
+    let cfg = Config::load()?;
 
     match cli.command {
         Commands::Scan {
@@ -51,8 +51,25 @@ pub async fn run(cli: Cli) -> Result<i32> {
             preview,
         } => {
             commands::print::print(
-                &cfg, &conn, &task, &image, model, density, rotate, threshold, fit, label, fill,
-                no_fill, margin, dither, no_trim, full_bleed, preview,
+                &cfg,
+                commands::print::PrintCommand {
+                    conn,
+                    task,
+                    image,
+                    model,
+                    density,
+                    rotate,
+                    threshold,
+                    fit,
+                    label,
+                    fill,
+                    no_fill,
+                    margin,
+                    dither,
+                    no_trim,
+                    full_bleed,
+                    preview,
+                },
             )
             .await?
         }
@@ -67,12 +84,14 @@ pub async fn run(cli: Cli) -> Result<i32> {
         } => {
             commands::print::calibrate(
                 &cfg,
-                &conn,
-                &task,
-                model,
-                label.as_deref(),
-                density,
-                boundary,
+                commands::print::CalibrateCommand {
+                    conn,
+                    task,
+                    model,
+                    label,
+                    density,
+                    boundary,
+                },
             )
             .await?
         }
@@ -92,17 +111,19 @@ pub async fn run(cli: Cli) -> Result<i32> {
         } => {
             commands::sticker::text(
                 &cfg,
-                &conn,
-                &task,
-                &font,
-                model,
-                &text,
-                align,
-                label.as_deref(),
-                border,
-                density,
-                save,
-                no_print,
+                commands::sticker::TextCommand {
+                    conn,
+                    task,
+                    font,
+                    model,
+                    text,
+                    align,
+                    label,
+                    border,
+                    density,
+                    save,
+                    no_print,
+                },
             )
             .await?
         }
@@ -123,18 +144,20 @@ pub async fn run(cli: Cli) -> Result<i32> {
         } => {
             commands::sticker::qr(
                 &cfg,
-                &conn,
-                &task,
-                &font,
-                model,
-                &url,
-                &text,
-                text_side,
-                label.as_deref(),
-                border,
-                density,
-                save,
-                no_print,
+                commands::sticker::QrCommand {
+                    conn,
+                    task,
+                    font,
+                    model,
+                    url,
+                    text,
+                    text_side,
+                    label,
+                    border,
+                    density,
+                    save,
+                    no_print,
+                },
             )
             .await?
         }
@@ -158,21 +181,23 @@ pub async fn run(cli: Cli) -> Result<i32> {
         } => {
             commands::sticker::wifi(
                 &cfg,
-                &conn,
-                &task,
-                &font,
-                model,
-                &ssid,
-                password,
-                security,
-                hidden,
-                show_password,
-                text_side,
-                label.as_deref(),
-                border,
-                density,
-                save,
-                no_print,
+                commands::sticker::WifiCommand {
+                    conn,
+                    task,
+                    font,
+                    model,
+                    ssid,
+                    password,
+                    security,
+                    hidden,
+                    show_password,
+                    text_side,
+                    label,
+                    border,
+                    density,
+                    save,
+                    no_print,
+                },
             )
             .await?
         }
@@ -187,7 +212,16 @@ pub async fn run(cli: Cli) -> Result<i32> {
             fuzzy,
         } => {
             return commands::doctor::run(
-                &cfg, addr, conn, model, task, seconds, use_config, fuzzy,
+                &cfg,
+                commands::doctor::DoctorCommand {
+                    addr,
+                    conn,
+                    model,
+                    task,
+                    seconds,
+                    use_config,
+                    fuzzy,
+                },
             )
             .await;
         }

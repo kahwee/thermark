@@ -14,14 +14,83 @@ use image::{DynamicImage, GenericImageView, GrayImage, Luma, RgbaImage, imageops
 /// them as three loose arguments made disagreement easy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Raster {
-    pub width: u32,
-    pub height: u32,
-    pub rows: Vec<Packet>,
+    width: u32,
+    height: u32,
+    rows: Vec<Packet>,
 }
 
 impl Raster {
+    /// Construct an encoded page while enforcing page/row invariants.
+    pub fn try_new(width: u32, height: u32, rows: Vec<Packet>) -> Result<Self> {
+        let raster = Self {
+            width,
+            height,
+            rows,
+        };
+        raster.validate()?;
+        Ok(raster)
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn rows(&self) -> &[Packet] {
+        &self.rows
+    }
+
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
+    }
+
+    pub(crate) fn into_parts(self) -> (u32, u32, Vec<Packet>) {
+        (self.width, self.height, self.rows)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts_unchecked(width: u32, height: u32, rows: Vec<Packet>) -> Self {
+        Self {
+            width,
+            height,
+            rows,
+        }
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.width == 0 || self.height == 0 {
+            return Err(Error::InvalidRaster("dimensions must be non-zero".into()));
+        }
+        if u16::try_from(self.width).is_err() || u16::try_from(self.height).is_err() {
+            return Err(Error::ImageTooLarge {
+                width: self.width,
+                height: self.height,
+            });
+        }
+        if self.rows.len() != self.height as usize {
+            return Err(Error::InvalidRaster(format!(
+                "height is {} but raster contains {} row packets",
+                self.height,
+                self.rows.len()
+            )));
+        }
+        for (index, row) in self.rows.iter().enumerate() {
+            let valid_cmd = matches!(
+                row.cmd,
+                x if x == protocol::Cmd::PrintBitmapRow as u8
+                    || x == protocol::Cmd::PrintEmptyRow as u8
+            );
+            let expected = u16::try_from(index).ok().map(u16::to_be_bytes);
+            if !valid_cmd || row.data.get(..2) != expected.as_ref().map(|v| v.as_slice()) {
+                return Err(Error::InvalidRaster(format!(
+                    "invalid packet for row {index}"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -63,11 +132,7 @@ pub fn encode(img: DynamicImage, max_width: u32, threshold: u8, dither: bool) ->
     }
 
     let bw = gray_to_print_bits(&gray, threshold, dither);
-    Ok(Raster {
-        width,
-        height,
-        rows: rows_to_packets(&bw),
-    })
+    Raster::try_new(width, height, rows_to_packets(&bw))
 }
 
 /// Convert a grayscale image to print bits (255 = burn / black).
@@ -149,7 +214,7 @@ fn rows_to_packets(bw: &GrayImage) -> Vec<Packet> {
 /// Crop uniform white space from the edges of an image.
 ///
 /// Artwork usually carries its own margin. Placing it on a label without
-/// trimming means that margin is *added* to the label's own unprintable
+/// trimming means that margin is *added* to the configured registration
 /// inset, so the drawing ends up far smaller than the media allows — a
 /// bulldozer with a 35 px built-in margin lost another 29 rows to it after
 /// scaling, on top of the 40 reserved rows.
@@ -259,7 +324,7 @@ fn scaled_dimensions(img: &DynamicImage, scale: f64) -> (u32, u32) {
     )
 }
 
-/// Cover-fit `img` into the printable area of `label`, cropping overflow.
+/// Cover-fit `img` into the configured content area, cropping overflow.
 ///
 /// Makes content as large as the media allows; `margin` keeps a white border
 /// so heat is less likely to run to the edge. Pass [`SafeArea::NONE`] for full
@@ -297,7 +362,7 @@ pub fn fill_label(img: DynamicImage, label: LabelPx, safe: SafeArea, margin: u32
     DynamicImage::ImageRgba8(canvas)
 }
 
-/// Scale `img` to **fit entirely** inside the printable area, centred there.
+/// Scale `img` to **fit entirely** inside the configured content area.
 ///
 /// Prefer this for photographs so nothing is cropped. Pass [`SafeArea::NONE`]
 /// to use the whole canvas.

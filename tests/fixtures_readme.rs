@@ -96,8 +96,8 @@ fn assert_encodes(name: &str) {
     let path = fixtures_dir().join(name);
     let r = image_encode::encode_path(&path, MAX_W, 127, false)
         .unwrap_or_else(|e| panic!("encode {name}: {e}"));
-    assert_eq!((r.width, r.height), (W, H), "{name} encoded size");
-    assert_eq!(r.rows.len() as u32, H, "{name} one packet per row");
+    assert_eq!((r.width(), r.height()), (W, H), "{name} encoded size");
+    assert_eq!(r.rows().len() as u32, H, "{name} one packet per row");
 }
 
 #[test]

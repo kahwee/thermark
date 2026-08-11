@@ -15,6 +15,8 @@ pub const TAIL: [u8; 2] = [0xAA, 0xAA];
 pub const MAX_DATA_LEN: usize = u8::MAX as usize;
 /// Bytes a frame adds around its payload: head, cmd, len, checksum, tail.
 pub const FRAME_OVERHEAD: usize = 7;
+/// Largest possible encoded frame.
+pub const MAX_FRAME_LEN: usize = FRAME_OVERHEAD + MAX_DATA_LEN;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet {
@@ -123,37 +125,68 @@ impl Packet {
 
     /// Pull zero or more complete packets from a growing receive buffer.
     pub fn drain_buffer(buf: &mut Vec<u8>) -> Vec<Self> {
+        PacketDecoder::drain(buf)
+    }
+}
+
+/// Stateful decoder for arbitrarily fragmented transport reads.
+///
+/// It retains a lone trailing `0x55`, because that byte may be the first half
+/// of a frame header split across two BLE notifications or serial reads.
+#[derive(Debug, Default)]
+pub struct PacketDecoder {
+    buf: Vec<u8>,
+}
+
+impl PacketDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Append bytes and return every complete, valid frame now available.
+    pub fn push(&mut self, bytes: &[u8]) -> Vec<Packet> {
+        self.buf.extend_from_slice(bytes);
+        Self::drain(&mut self.buf)
+    }
+
+    pub fn buffered_len(&self) -> usize {
+        self.buf.len()
+    }
+
+    fn drain(buf: &mut Vec<u8>) -> Vec<Packet> {
         let mut packets = Vec::new();
         loop {
-            // Resync to head if needed
             if let Some(pos) = buf.windows(2).position(|w| w == HEAD) {
                 if pos > 0 {
                     buf.drain(..pos);
                 }
             } else {
+                let keep_prefix = buf.last().copied() == Some(HEAD[0]);
                 buf.clear();
+                if keep_prefix {
+                    buf.push(HEAD[0]);
+                }
                 break;
             }
 
-            if buf.len() < 7 {
+            if buf.len() < FRAME_OVERHEAD {
                 break;
             }
-            let len = buf[3] as usize;
-            let total = 7 + len;
+            let total = FRAME_OVERHEAD + usize::from(buf[3]);
             if buf.len() < total {
                 break;
             }
-            match Self::decode(&buf[..total]) {
-                Ok(p) => {
-                    packets.push(p);
+            match Packet::decode(&buf[..total]) {
+                Ok(packet) => {
+                    packets.push(packet);
                     buf.drain(..total);
                 }
                 Err(_) => {
-                    // Skip one byte and resync
                     buf.drain(..1);
                 }
             }
         }
+        debug_assert!(buf.len() <= MAX_FRAME_LEN);
         packets
     }
 }
@@ -194,6 +227,28 @@ mod tests {
         assert_eq!(pkts[0].cmd, 0x1a);
         assert_eq!(pkts[1].cmd, 0x40);
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn decoder_preserves_header_split_between_reads() {
+        let packet = Packet::new(0x40, vec![0x0b]);
+        let encoded = packet.encode().unwrap();
+        let mut decoder = PacketDecoder::new();
+        assert!(decoder.push(&encoded[..1]).is_empty());
+        assert_eq!(decoder.buffered_len(), 1);
+        assert_eq!(decoder.push(&encoded[1..]), vec![packet]);
+    }
+
+    #[test]
+    fn decoder_accepts_every_single_split_point() {
+        let packet = Packet::new(0x40, vec![0x0b, 0x55, 0xaa]);
+        let encoded = packet.encode().unwrap();
+        for split in 0..=encoded.len() {
+            let mut decoder = PacketDecoder::new();
+            let mut got = decoder.push(&encoded[..split]);
+            got.extend(decoder.push(&encoded[split..]));
+            assert_eq!(got, vec![packet.clone()], "split at {split}");
+        }
     }
 
     #[test]

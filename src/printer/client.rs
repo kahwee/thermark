@@ -4,7 +4,7 @@ use super::info::{Heartbeat, InfoValue, PrintStatus, PrinterSummary, RfidInfo};
 use crate::errors::{Error, PrinterFault, Result};
 use crate::geometry::{LabelMm, SafeArea};
 use crate::image_encode::{self, Raster};
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketDecoder};
 use crate::print_task::{PrintTask, effective_max_width_px};
 use crate::protocol::{self, Cmd, InfoKey, Model};
 use crate::transport::Transport;
@@ -120,6 +120,7 @@ pub struct PrinterClient<T: Transport> {
     model: Model,
     task: PrintTask,
     pacing: Pacing,
+    decoder: PacketDecoder,
 }
 
 /// Power level at or below which dense pages become unreliable.
@@ -207,9 +208,9 @@ pub struct PrintOptions {
     pub margin_px: u32,
     /// Floyd–Steinberg dither instead of hard B/W threshold (photos).
     pub dither: bool,
-    /// Printable insets. Raw images are placed inside this so nothing lands in
-    /// the band the printer cannot reach. Use [`SafeArea::NONE`] for content
-    /// that already accounts for it (rendered stickers, calibration patterns).
+    /// Content/registration insets. Raw images are placed inside this area.
+    /// Use [`SafeArea::NONE`] for content that already accounts for it
+    /// (rendered stickers, calibration patterns).
     pub safe: SafeArea,
     /// Crop the source image's own white border before placing it, so the
     /// artwork's margin is not added to the label's.
@@ -240,6 +241,7 @@ impl<T: Transport> PrinterClient<T> {
             model,
             task: PrintTask::for_model(model),
             pacing: Pacing::REAL,
+            decoder: PacketDecoder::new(),
         }
     }
 
@@ -259,10 +261,6 @@ impl<T: Transport> PrinterClient<T> {
     /// Widest raster this client will accept, given both model and print task.
     pub fn max_width_px(&self) -> u32 {
         effective_max_width_px(self.model, self.task)
-    }
-
-    pub fn into_transport(self) -> T {
-        self.transport
     }
 
     pub fn transport(&self) -> &T {
@@ -324,7 +322,20 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     async fn recv_pkts(&mut self, wait: Duration) -> Result<Vec<Packet>> {
-        self.transport.recv_packets(wait).await
+        let bytes = self.transport.recv_raw(wait).await?;
+        let packets = self.decoder.push(&bytes);
+        for packet in &packets {
+            debug!(
+                cmd = format_args!("{:#04x}", packet.cmd),
+                data = %hex::encode(&packet.data),
+                "RX pkt"
+            );
+        }
+        Ok(packets)
+    }
+
+    pub async fn close(mut self) -> Result<()> {
+        self.transport.close().await
     }
 
     /// Send a request and wait for a matching response command.
@@ -504,18 +515,20 @@ impl<T: Transport> PrinterClient<T> {
     ///
     /// Returns [`Error::PrintNotConfirmed`] if the printer never ACKs PrintEnd.
     pub async fn print_raster(&mut self, raster: Raster, density: Density) -> Result<()> {
-        let (width, height) = (raster.width, raster.height);
+        let (width, height) = (raster.width(), raster.height());
         info!(
             width,
             height,
             task = %self.task,
             density = density.get(),
-            rows = raster.rows.len(),
+            rows = raster.rows().len(),
             "print job"
         );
 
         let rows_u16 = u16::try_from(height).map_err(|_| Error::ImageTooLarge { width, height })?;
         let cols_u16 = u16::try_from(width).map_err(|_| Error::ImageTooLarge { width, height })?;
+        raster.validate()?;
+        let (_, _, rows) = raster.into_parts();
         let max_w = self.max_width_px();
         if width > max_w {
             return Err(Error::ImageTooWide { width, max: max_w });
@@ -563,7 +576,7 @@ impl<T: Transport> PrinterClient<T> {
 
         // Pace by bytes, not rows — see `Pacing::row_pause`.
         let mut unpaced_bytes = 0usize;
-        for pkt in raster.rows {
+        for pkt in rows {
             unpaced_bytes += crate::packet::FRAME_OVERHEAD + pkt.data.len();
             self.send_raw_packet(pkt).await?;
             if unpaced_bytes >= self.pacing.pace_bytes {
@@ -779,6 +792,27 @@ mod tests {
 
         let st = c.transport().first_tx(0x01).expect("start");
         assert_eq!(st.data.len(), 7);
+    }
+
+    #[tokio::test]
+    async fn transceive_decodes_a_header_split_across_transport_reads() {
+        let reply = Packet::new(0x31, vec![0x01]).encode().unwrap();
+        let mut mock = MockTransport::new();
+        mock.auto_reply(false);
+        mock.push_rx_raw(reply[..1].to_vec());
+        mock.push_rx_raw(reply[1..].to_vec());
+        let mut client = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let packet = client
+            .transceive_with(
+                protocol::set_density(3),
+                0x31,
+                2,
+                Duration::from_millis(1),
+                OnTimeout::Resend,
+            )
+            .await
+            .unwrap();
+        assert_eq!(packet.data, vec![0x01]);
     }
 
     #[tokio::test]
@@ -1139,11 +1173,7 @@ mod tests {
         // Construct rows for absurd height via print_rows directly
         let err = c
             .print_raster(
-                Raster {
-                    width: 8,
-                    height: u32::from(u16::MAX) + 1,
-                    rows: vec![],
-                },
+                Raster::from_parts_unchecked(8, u32::from(u16::MAX) + 1, vec![]),
                 Density::NORMAL,
             )
             .await

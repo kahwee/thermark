@@ -39,6 +39,10 @@ pub enum Error {
     #[error("image size {width}x{height}px is out of range for this printer")]
     ImageTooLarge { width: u32, height: u32 },
 
+    /// Encoded raster metadata and row packets disagree.
+    #[error("invalid raster: {0}")]
+    InvalidRaster(String),
+
     /// Job streamed but the printer never confirmed PrintEnd.
     #[error(
         "print job finished without printer confirmation (end_print never succeeded; \

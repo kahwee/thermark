@@ -266,12 +266,12 @@ if the same image prints differently twice, it is power, not geometry.
 thermark info          # battery: 1/4 (low — ...) means charge it
 ```
 
-Beyond that, some white border is physical and no setting removes it:
+Beyond that, side-to-side white border can be physical:
 
 - **Across:** the printhead is 48 mm on a 50 mm label, so ~2 mm is unreachable.
   If it is lopsided rather than even, the roll is off-centre — nudge the guide.
-- **Feed:** the printer starts a little after the label's leading edge and stops
-  before the trailing edge.
+- **Feed:** a charged B1 reaches the full canvas. The default 1 mm top/bottom
+  inset is registration insurance because label positioning varies slightly.
 
 ### How do I find my printer's real printable area?
 
@@ -280,7 +280,8 @@ thermark calibrate --boundary
 ```
 
 Prints one numbered bar per millimetre, each at its own horizontal position.
-Read the highest number whose bar printed completely, then save it:
+Read the highest number whose bar printed completely. If repeated charged runs
+agree that you need a content inset, save it:
 
 ```sh
 thermark config safe-area --last-tick 26 --label 50x30

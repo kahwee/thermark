@@ -16,10 +16,14 @@ use tracing::debug;
 pub trait Transport: Send {
     fn send_raw(&mut self, data: &[u8]) -> impl std::future::Future<Output = Result<()>> + Send;
 
-    fn recv_packets(
+    fn recv_raw(
         &mut self,
         wait: Duration,
-    ) -> impl std::future::Future<Output = Result<Vec<Packet>>> + Send;
+    ) -> impl std::future::Future<Output = Result<Vec<u8>>> + Send;
+
+    fn close(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
 
     fn send_packet(
         &mut self,
@@ -227,9 +231,6 @@ mod ble {
     /// (community reverse-engineering; same UUIDs as B1-class devices).
     pub const PRINTER_SERVICE: Uuid = Uuid::from_u128(0xe7810a71_73ae_499d_8c15_faa9aef0c3f2);
     pub const PRINTER_CHAR: Uuid = Uuid::from_u128(0xbef8d6c9_9c21_4c9e_b632_bd58c1009f9f);
-    /// Back-compat aliases
-    pub const NIIMBOT_SERVICE: Uuid = PRINTER_SERVICE;
-    pub const NIIMBOT_CHAR: Uuid = PRINTER_CHAR;
 
     pub struct BleTransport {
         peripheral: Peripheral,
@@ -238,7 +239,6 @@ mod ble {
         /// [`choose_write_type`].
         write_type: WriteType,
         rx: mpsc::UnboundedReceiver<Vec<u8>>,
-        rx_buf: Vec<u8>,
         notify_task: Option<tokio::task::JoinHandle<()>>,
         /// True after explicit or Drop-time teardown (avoids double disconnect).
         closed: bool,
@@ -395,39 +395,30 @@ mod ble {
                 write_type: choose_write_type(&characteristic),
                 characteristic,
                 rx,
-                rx_buf: Vec::new(),
                 notify_task: Some(notify_task),
                 closed: false,
             })
         }
 
-        /// Graceful teardown: abort notify task and disconnect the peripheral.
-        ///
-        /// Safe to call more than once. Also runs best-effort from [`Drop`] if
-        /// the transport is abandoned after a mid-job error.
-        pub async fn disconnect(mut self) -> Result<()> {
-            self.close().await;
-            Ok(())
-        }
-
-        async fn close(&mut self) {
+        async fn close_inner(&mut self) -> Result<()> {
             if self.closed {
-                return;
+                return Ok(());
             }
             self.closed = true;
             if let Some(task) = self.notify_task.take() {
                 task.abort();
             }
-            if let Err(e) = self.peripheral.disconnect().await {
-                debug!(error = %e, "BLE disconnect (ignored)");
-            } else {
-                debug!("BLE disconnected");
-            }
+            self.peripheral
+                .disconnect()
+                .await
+                .map_err(|e| Error::transport(format!("BLE disconnect: {e}")))?;
+            debug!("BLE disconnected");
+            Ok(())
         }
     }
 
     impl Drop for BleTransport {
-        /// Backstop teardown for paths that skip [`BleTransport::disconnect`]
+        /// Backstop teardown for paths that skip [`Transport::close`]
         /// — a mid-job error, or the whole future being dropped on Ctrl-C.
         ///
         /// This *blocks* on a multi-threaded runtime rather than spawning a
@@ -489,39 +480,31 @@ mod ble {
             Ok(())
         }
 
-        async fn recv_packets(&mut self, wait: Duration) -> Result<Vec<Packet>> {
-            let deadline = tokio::time::Instant::now() + wait;
-            loop {
+        async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
+            if let Ok(first) = self.rx.try_recv() {
+                let mut bytes = first;
                 while let Ok(chunk) = self.rx.try_recv() {
-                    debug!(bytes = %hex::encode(&chunk), "RX chunk");
-                    self.rx_buf.extend_from_slice(&chunk);
+                    bytes.extend_from_slice(&chunk);
                 }
-                let packets = Packet::drain_buffer(&mut self.rx_buf);
-                if !packets.is_empty() {
-                    for p in &packets {
-                        debug!(
-                            cmd = format_args!("{:#04x}", p.cmd),
-                            data = %hex::encode(&p.data),
-                            "RX pkt"
-                        );
-                    }
-                    return Ok(packets);
-                }
-                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if remaining.is_zero() {
-                    return Ok(vec![]);
-                }
-                match timeout(remaining, self.rx.recv()).await {
-                    Ok(Some(chunk)) => {
-                        debug!(bytes = %hex::encode(&chunk), "RX chunk");
-                        self.rx_buf.extend_from_slice(&chunk);
-                    }
-                    Ok(None) => {
-                        return Err(Error::transport("BLE notification channel closed"));
-                    }
-                    Err(_) => return Ok(vec![]),
-                }
+                debug!(bytes = %hex::encode(&bytes), "RX bytes");
+                return Ok(bytes);
             }
+            match timeout(wait, self.rx.recv()).await {
+                Ok(Some(chunk)) => {
+                    let mut bytes = chunk;
+                    while let Ok(chunk) = self.rx.try_recv() {
+                        bytes.extend_from_slice(&chunk);
+                    }
+                    debug!(bytes = %hex::encode(&bytes), "RX bytes");
+                    Ok(bytes)
+                }
+                Ok(None) => Err(Error::transport("BLE notification channel closed")),
+                Err(_) => Ok(Vec::new()),
+            }
+        }
+
+        async fn close(&mut self) -> Result<()> {
+            self.close_inner().await
         }
     }
 
@@ -579,10 +562,7 @@ mod ble {
 }
 
 #[cfg(feature = "ble")]
-pub use ble::{
-    BleDeviceInfo, BleTransport, NIIMBOT_CHAR, NIIMBOT_SERVICE, PRINTER_CHAR, PRINTER_SERVICE,
-    bluetooth_available,
-};
+pub use ble::{BleDeviceInfo, BleTransport, PRINTER_CHAR, PRINTER_SERVICE, bluetooth_available};
 
 #[cfg(test)]
 mod ble_match_tests {
@@ -675,24 +655,32 @@ mod ble_match_tests {
 #[cfg(feature = "serial")]
 mod serial {
     use super::*;
-    use std::io::{Read, Write};
-    use tokio::time::sleep;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::timeout;
+    use tokio_serial::SerialPortBuilderExt;
+
+    trait AsyncSerialIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+    impl<T> AsyncSerialIo for T where T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 
     pub struct SerialTransport {
-        port: Box<dyn serialport::SerialPort>,
-        rx_buf: Vec<u8>,
+        port: Box<dyn AsyncSerialIo>,
     }
 
     impl SerialTransport {
         pub fn open(path: &str) -> Result<Self> {
-            let port = serialport::new(path, 115_200)
-                .timeout(Duration::from_millis(200))
-                .open()
+            let port = tokio_serial::new(path, 115_200)
+                .open_native_async()
                 .map_err(|e| Error::transport(format!("open serial port {path}: {e}")))?;
             Ok(Self {
-                port,
-                rx_buf: Vec::new(),
+                port: Box::new(port),
             })
+        }
+
+        #[cfg(test)]
+        fn from_stream(stream: impl AsyncSerialIo + 'static) -> Self {
+            Self {
+                port: Box::new(stream),
+            }
         }
 
         pub fn list_ports() -> Result<Vec<String>> {
@@ -706,35 +694,86 @@ mod serial {
         async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
             self.port
                 .write_all(data)
+                .await
                 .map_err(|e| Error::transport(format!("serial write: {e}")))?;
-            self.port.flush().ok();
+            self.port
+                .flush()
+                .await
+                .map_err(|e| Error::transport(format!("serial flush: {e}")))?;
             Ok(())
         }
 
-        async fn recv_packets(&mut self, wait: Duration) -> Result<Vec<Packet>> {
-            let start = std::time::Instant::now();
-            loop {
-                let mut tmp = [0u8; 1024];
-                match self.port.read(&mut tmp) {
-                    Ok(n) if n > 0 => {
-                        debug!(bytes = %hex::encode(&tmp[..n]), "RX serial");
-                        self.rx_buf.extend_from_slice(&tmp[..n]);
-                        let packets = Packet::drain_buffer(&mut self.rx_buf);
-                        if !packets.is_empty() {
-                            return Ok(packets);
-                        }
-                    }
-                    Ok(_) | Err(_) => {
-                        if start.elapsed() >= wait {
-                            return Ok(Packet::drain_buffer(&mut self.rx_buf));
-                        }
-                        sleep(Duration::from_millis(20)).await;
-                    }
+        async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
+            let mut tmp = [0u8; 1024];
+            match timeout(wait, self.port.read(&mut tmp)).await {
+                Err(_) => Ok(Vec::new()),
+                Ok(Ok(0)) => Err(Error::transport("serial connection closed")),
+                Ok(Ok(n)) => {
+                    debug!(bytes = %hex::encode(&tmp[..n]), "RX serial");
+                    Ok(tmp[..n].to_vec())
                 }
-                if start.elapsed() >= wait {
-                    return Ok(Packet::drain_buffer(&mut self.rx_buf));
+                Ok(Err(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    Ok(Vec::new())
                 }
+                Ok(Err(e)) => Err(Error::transport(format!("serial read: {e}"))),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        #[tokio::test]
+        async fn reads_partial_data_without_blocking_the_runtime() {
+            let (client, mut peer) = tokio::io::duplex(64);
+            let mut transport = SerialTransport::from_stream(client);
+            peer.write_all(&[0x55]).await.unwrap();
+            assert_eq!(
+                transport.recv_raw(Duration::from_millis(20)).await.unwrap(),
+                vec![0x55]
+            );
+        }
+
+        #[tokio::test]
+        async fn timeout_is_empty_data() {
+            let (client, _peer) = tokio::io::duplex(64);
+            let mut transport = SerialTransport::from_stream(client);
+            assert!(
+                transport
+                    .recv_raw(Duration::from_millis(1))
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+
+        #[tokio::test]
+        async fn disconnect_is_an_error() {
+            let (client, peer) = tokio::io::duplex(64);
+            drop(peer);
+            let mut transport = SerialTransport::from_stream(client);
+            let error = transport
+                .recv_raw(Duration::from_millis(20))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("closed"));
+        }
+
+        #[tokio::test]
+        async fn send_flushes_bytes() {
+            let (client, mut peer) = tokio::io::duplex(64);
+            let mut transport = SerialTransport::from_stream(client);
+            transport.send_raw(&[1, 2, 3]).await.unwrap();
+            let mut bytes = [0; 3];
+            peer.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, [1, 2, 3]);
         }
     }
 }

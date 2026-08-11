@@ -25,7 +25,15 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             left,
             right,
             reset,
-        } => safe_area(last_tick, label.as_deref(), top, bottom, left, right, reset)?,
+        } => safe_area(SafeAreaUpdate {
+            last_tick,
+            label,
+            top,
+            bottom,
+            left,
+            right,
+            reset,
+        })?,
         ConfigCmd::Clear => clear()?,
     }
     Ok(())
@@ -84,7 +92,7 @@ fn set(
     scan_secs: Option<u64>,
     label: Option<&str>,
 ) -> Result<()> {
-    let mut cfg = Config::load().unwrap_or_default();
+    let mut cfg = Config::load()?;
     cfg.apply_set(addr, conn, model, scan_secs);
     if let Some(l) = label {
         // Validate before saving: a bad size here would fail on every later
@@ -101,20 +109,31 @@ fn set(
     Ok(())
 }
 
-/// Update the saved printable insets. Millimetres in, pixels stored.
-#[allow(clippy::too_many_arguments)]
-fn safe_area(
+/// Update saved content/registration insets. Millimetres in, pixels stored.
+struct SafeAreaUpdate {
     last_tick: Option<f64>,
-    label: Option<&str>,
+    label: Option<String>,
     top: Option<f64>,
     bottom: Option<f64>,
     left: Option<f64>,
     right: Option<f64>,
     reset: bool,
-) -> Result<()> {
+}
+
+fn safe_area(update: SafeAreaUpdate) -> Result<()> {
     use thermark::geometry::{LabelMm, PX_PER_MM, SafeArea};
 
-    let mut cfg = Config::load().unwrap_or_default();
+    let SafeAreaUpdate {
+        last_tick,
+        label,
+        top,
+        bottom,
+        left,
+        right,
+        reset,
+    } = update;
+
+    let mut cfg = Config::load()?;
     if reset {
         cfg.safe_area = None;
         cfg.save()?;
@@ -126,10 +145,10 @@ fn safe_area(
     // printed tells us how much of the label the printer actually reaches.
     let bottom = match (last_tick, bottom) {
         (Some(tick), _) => {
-            let height_mm = LabelMm::parse(&cfg.resolve_label(label))?.height_mm;
+            let height_mm = LabelMm::parse(&cfg.resolve_label(label.as_deref()))?.height_mm;
             let lost = (height_mm - tick).max(0.0);
             println!(
-                "last tick {tick} mm on a {height_mm} mm label -> {lost} mm unreachable at the feed edge"
+                "last tick {tick} mm on a {height_mm} mm label -> {lost} mm bottom content inset"
             );
             Some(lost)
         }

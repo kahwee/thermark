@@ -410,7 +410,7 @@ pub struct PrintStatus {
 impl PrintStatus {
     /// Parse the reply body. Needs at least 4 bytes; the 10-byte form carries
     /// an extra fault code at offset 6, which the shorter forms omit entirely.
-    pub(crate) fn parse(data: &[u8]) -> Option<Self> {
+    pub fn parse(data: &[u8]) -> Option<Self> {
         let [p0, p1, print, feed, ..] = *data else {
             return None;
         };

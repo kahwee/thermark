@@ -22,7 +22,7 @@ pub struct QrLabelOptions {
     pub url: String,
     pub side_text: String,
     pub label: LabelPx,
-    /// Printable insets for this printer/media. `SafeArea::default()` is the
+    /// Content/registration insets for this printer/media. `SafeArea::default()` is the
     /// measured B1 value; override from `Config::resolve_safe_area`.
     pub safe: SafeArea,
     pub text_side: TextSide,
@@ -49,8 +49,7 @@ pub struct QrLayout {
     pub qr_side: u32,
 }
 
-/// Breathing room inside the printable area, in px. Purely aesthetic — the
-/// physically unprintable edges are handled by [`SafeArea`].
+/// Breathing room inside the content area, in px. Purely aesthetic.
 const MARGIN: u32 = 4;
 /// Space between the QR and the text column, in px.
 const GAP: u32 = 8;
@@ -63,7 +62,7 @@ const QR_SIDE_MIN: u32 = 64;
 /// Smallest box worth laying text into, on either axis.
 const MIN_TEXT_BOX_PX: u32 = 16;
 
-/// The box every label type composes into: the printable area, inset by the
+/// The box every label type composes into: the label area, inset by the
 /// cosmetic [`MARGIN`].
 ///
 /// **One owner for this calculation.** It was previously computed separately in
@@ -80,7 +79,7 @@ pub fn content_box(label: LabelPx, safe: SafeArea) -> Option<Rect> {
     })
 }
 
-/// Compute the side-by-side layout inside the printable area of `label`.
+/// Compute the side-by-side layout inside the content area of `label`.
 pub fn qr_layout(label: LabelPx, safe: SafeArea) -> Option<QrLayout> {
     let inner = content_box(label, safe)?;
 

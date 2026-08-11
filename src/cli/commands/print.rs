@@ -1,7 +1,7 @@
 //! Raster printing: `print` and `calibrate`.
 
 use anyhow::{Context, Result, bail};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thermark::config::Config;
 use thermark::geometry::LabelMm;
 use thermark::printer::PrintOptions;
@@ -10,29 +10,47 @@ use thermark::types::{Density, Rotation, Threshold};
 use tracing::info;
 
 use crate::cli::args::{ConnArgs, TaskArgs};
-use crate::cli::session::print_file;
+use crate::cli::session::{print_file_resolved, print_gray_resolved, resolve_profile};
 use crate::cli::tips::warn_print_limits;
 
-#[allow(clippy::too_many_arguments)]
-pub async fn print(
-    cfg: &Config,
-    conn: &ConnArgs,
-    task: &TaskArgs,
-    image: &Path,
-    model: Option<Model>,
-    density: Density,
-    rotate: Rotation,
-    threshold: Threshold,
-    fit: bool,
-    label: Option<String>,
-    fill: bool,
-    no_fill: bool,
-    margin: u32,
-    dither: bool,
-    no_trim: bool,
-    full_bleed: bool,
-    preview: Option<PathBuf>,
-) -> Result<()> {
+pub struct PrintCommand {
+    pub conn: ConnArgs,
+    pub task: TaskArgs,
+    pub image: PathBuf,
+    pub model: Option<Model>,
+    pub density: Density,
+    pub rotate: Rotation,
+    pub threshold: Threshold,
+    pub fit: bool,
+    pub label: Option<String>,
+    pub fill: bool,
+    pub no_fill: bool,
+    pub margin: u32,
+    pub dither: bool,
+    pub no_trim: bool,
+    pub full_bleed: bool,
+    pub preview: Option<PathBuf>,
+}
+
+pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
+    let PrintCommand {
+        conn,
+        task,
+        image,
+        model,
+        density,
+        rotate,
+        threshold,
+        fit,
+        label,
+        fill,
+        no_fill,
+        margin,
+        dither,
+        no_trim,
+        full_bleed,
+        preview,
+    } = args;
     if !image.exists() {
         bail!(
             "image not found: {}\n  \
@@ -40,9 +58,10 @@ pub async fn print(
             image.display()
         );
     }
-    warn_print_limits(image, &label, no_fill, dither);
+    warn_print_limits(&image, &label, no_fill, dither);
 
-    let model = cfg.resolve_model(model);
+    let profile = resolve_profile(cfg, model, &task)?;
+    let model = profile.model;
     let label_mm = label.as_deref().map(LabelMm::parse).transpose()?;
     // --no-fill wins over --fill; without a label there is no canvas to fill.
     let use_fill = !no_fill && label_mm.is_some() && fill;
@@ -65,11 +84,7 @@ pub async fn print(
     };
     if let Some(out) = preview {
         // Compose through the exact same path a real print uses, then stop.
-        let max_w = thermark::print_task::effective_max_width_px(
-            model,
-            crate::cli::session::resolve_task(model, task)?,
-        );
-        let composed = thermark::printer::compose_for_label(image, &opts, max_w)?;
+        let composed = thermark::printer::compose_for_label(&image, &opts, profile.max_width_px)?;
         composed
             .to_luma8()
             .save(&out)
@@ -78,7 +93,7 @@ pub async fn print(
         return Ok(());
     }
 
-    print_file(cfg, conn, task, model, image, opts).await?;
+    print_file_resolved(cfg, &conn, model, profile.task, &image, opts).await?;
     println!("OK — sent print job");
     Ok(())
 }
@@ -102,18 +117,16 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
     println!("               ring N complete  ->  that edge needs {step_mm} mm x N of margin.");
     println!("  SIDE ticks = a feed ruler from the top edge: short = 1 mm,");
     println!("               long = 5 mm. Read off the LAST tick that printed —");
-    println!("               that is your usable height; the rest is lost at the");
-    println!("               feed edge. e.g. last long tick at 25 mm on a 30 mm");
-    println!("               label  ->  bottom inset needs ~5 mm (40 px).");
+    println!("               that is the observed reach for this charged run.");
+    println!("               If repeated runs disagree, charge the printer before");
+    println!("               treating the result as a registration margin.");
     println!("  Diagonals  = skew check; the X should meet exactly at the centre cross.");
     println!();
-    println!("Some white border is physical, not a bug:");
+    println!("Some side-to-side white border is physical, not a bug:");
     println!("  Across: the printhead is 48 mm; a 50 mm label keeps ~2 mm.");
     println!("          If it is lopsided, re-centre the roll with the guide.");
-    println!("  Feed:   the printer starts a little after the label's leading");
-    println!("          edge and stops before its trailing edge (~2 mm each on");
-    println!("          B1 + 50x30). No setting fills those; the inset below");
-    println!("          just stops content being silently dropped there.");
+    println!("  Feed:   a charged B1 reaches the whole canvas. The default 1 mm");
+    println!("          top/bottom inset is registration insurance only.");
     println!();
     println!(
         "Canvas {}x{} px. Re-run any time:",
@@ -145,19 +158,28 @@ fn print_boundary_legend(label: thermark::geometry::LabelPx) {
     println!("use the LOWER number.");
 }
 
-pub async fn calibrate(
-    cfg: &Config,
-    conn: &ConnArgs,
-    task: &TaskArgs,
-    model: Option<Model>,
-    label: Option<&str>,
-    density: Density,
-    boundary: bool,
-) -> Result<()> {
-    let model = cfg.resolve_model(model);
-    let label = cfg.resolve_label(label);
+pub struct CalibrateCommand {
+    pub conn: ConnArgs,
+    pub task: TaskArgs,
+    pub model: Option<Model>,
+    pub label: Option<String>,
+    pub density: Density,
+    pub boundary: bool,
+}
+
+pub async fn calibrate(cfg: &Config, args: CalibrateCommand) -> Result<()> {
+    let CalibrateCommand {
+        conn,
+        task,
+        model,
+        label,
+        density,
+        boundary,
+    } = args;
+    let profile = resolve_profile(cfg, model, &task)?;
+    let label = cfg.resolve_label(label.as_deref());
     let label_mm = LabelMm::parse(&label)?;
-    let lp = label_mm.to_pixels(model.max_width_px());
+    let lp = label_mm.to_pixels(profile.max_width_px);
     info!(
         width_px = lp.width_px,
         height_px = lp.height_px,
@@ -166,28 +188,12 @@ pub async fn calibrate(
         "calibration pattern"
     );
 
-    let tmp: PathBuf = std::env::temp_dir().join("thermark_calibrate.png");
-    if boundary {
-        thermark::label::make_boundary_label(lp, None)?.save(&tmp)?;
+    let gray = if boundary {
+        thermark::label::make_boundary_label(lp, None)?
     } else {
-        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area(), None)?.save(&tmp)?;
-    }
-
-    let opts = PrintOptions {
-        density,
-        rotate: Rotation::Deg0,
-        threshold: Threshold::DEFAULT,
-        fit: false,
-        label: Some(label_mm),
-        fill: true,
-        margin_px: 0,
-        dither: false,
-        // Full bleed on purpose: this pattern exists to find the true edges,
-        // so it must not be inset by the value it is measuring, nor trimmed.
-        safe: thermark::geometry::SafeArea::NONE,
-        trim: false,
+        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area(), None)?
     };
-    print_file(cfg, conn, task, model, &tmp, opts).await?;
+    print_gray_resolved(cfg, &conn, profile, &gray, density).await?;
     if boundary {
         println!("OK — boundary probe printed ({label})");
         print_boundary_legend(lp);

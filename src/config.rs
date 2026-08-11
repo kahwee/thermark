@@ -20,6 +20,7 @@ pub const DEFAULT_LABEL: &str = "50x30";
 use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Preferred link type stored in config / resolved for the CLI.
@@ -73,7 +74,7 @@ pub struct Config {
     /// Default BLE scan seconds before connect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan_secs: Option<u64>,
-    /// Measured printable insets for this printer + media, in pixels.
+    /// Content/registration insets for this printer + media, in pixels.
     /// Set it from `thermark calibrate`; see `thermark config safe-area`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_area: Option<SafeArea>,
@@ -163,19 +164,22 @@ impl Config {
                 .map_err(|e| Error::msg(format!("create config dir {}: {e}", parent.display())))?;
         }
         let body = format!("{}\n", self.to_json_pretty()?);
-
-        // Write to a sibling temp file, then rename over the target. A plain
-        // write truncates in place, so an interruption mid-write leaves a
-        // half-written config that every later command fails to parse. Rename
-        // within a directory is atomic, so a reader sees either the old file or
-        // the new one.
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, body)
-            .map_err(|e| Error::msg(format!("write config {}: {e}", tmp.display())))?;
-        fs::rename(&tmp, path).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            Error::msg(format!("replace config {}: {e}", path.display()))
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        // A unique sibling avoids concurrent writers sharing `config.json.tmp`.
+        // Persisting within the same directory keeps the final rename atomic.
+        let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
+            Error::msg(format!(
+                "create temporary config in {}: {e}",
+                parent.display()
+            ))
         })?;
+        tmp.write_all(body.as_bytes())
+            .map_err(|e| Error::msg(format!("write temporary config: {e}")))?;
+        tmp.as_file()
+            .sync_all()
+            .map_err(|e| Error::msg(format!("flush temporary config: {e}")))?;
+        tmp.persist(path)
+            .map_err(|e| Error::msg(format!("replace config {}: {}", path.display(), e.error)))?;
         Ok(())
     }
 
@@ -308,6 +312,29 @@ mod tests {
         let path = dir.path().join("nope.json");
         let cfg = Config::load_from(&path).unwrap();
         assert!(cfg.is_empty());
+    }
+
+    #[test]
+    fn concurrent_saves_use_distinct_atomic_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("config.json"));
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let cfg = Config {
+                        addr: Some(format!("B1-{n}")),
+                        ..Config::default()
+                    };
+                    cfg.save_to(&path)
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+        let loaded = Config::load_from(&path).unwrap();
+        assert!(loaded.addr.unwrap().starts_with("B1-"));
     }
 
     #[test]

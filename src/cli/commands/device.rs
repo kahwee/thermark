@@ -1,17 +1,25 @@
 //! Device discovery and inspection: `scan`, `ports`, `info`, `fonts`, `tasks`, `encode`.
 
 use anyhow::{Context, Result};
+#[cfg(feature = "ble")]
 use std::time::Duration;
-use thermark::config::{Config, ConnPref};
+use thermark::config::Config;
+#[cfg(feature = "ble")]
+use thermark::config::ConnPref;
 use thermark::font;
 use thermark::print_task::hardware_matrix;
 use thermark::protocol::Model;
-use thermark::transport::{BleDeviceInfo, BleTransport, SerialTransport};
+#[cfg(feature = "serial")]
+use thermark::transport::SerialTransport;
+#[cfg(feature = "ble")]
+use thermark::transport::{BleDeviceInfo, BleTransport};
+#[cfg(feature = "ble")]
 use tracing::info;
 
 use crate::cli::args::ConnArgs;
 use crate::cli::session::Session;
 
+#[cfg(feature = "ble")]
 pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result<()> {
     info!(seconds, save, "scanning BLE");
     let devices = BleTransport::scan(Duration::from_secs(seconds)).await?;
@@ -41,7 +49,7 @@ pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
         .name
         .clone()
         .unwrap_or_else(|| pick.candidate.id.clone());
-    let mut cfg = Config::load().unwrap_or_default();
+    let mut cfg = Config::load()?;
     let model = cfg.model;
     cfg.apply_set(&addr, ConnPref::Ble, model, None);
     let path = cfg.save()?;
@@ -53,7 +61,13 @@ pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
     Ok(())
 }
 
+#[cfg(not(feature = "ble"))]
+pub async fn scan(_seconds: u64, _save: bool, _prefer_name: Option<&str>) -> Result<()> {
+    anyhow::bail!("this thermark binary was built without Bluetooth support")
+}
+
 /// Choose a device for `--save`: name substring, else printer-like name, else strongest signal.
+#[cfg(feature = "ble")]
 pub fn pick_scan_device<'a>(
     devices: &'a [BleDeviceInfo],
     prefer_name: Option<&str>,
@@ -80,6 +94,7 @@ pub fn pick_scan_device<'a>(
     })
 }
 
+#[cfg(feature = "serial")]
 pub fn ports() -> Result<()> {
     let ports = SerialTransport::list_ports()?;
     if ports.is_empty() {
@@ -92,14 +107,21 @@ pub fn ports() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(feature = "serial"))]
+pub fn ports() -> Result<()> {
+    anyhow::bail!("this thermark binary was built without USB serial support")
+}
+
 pub async fn info(cfg: &Config, conn: &ConnArgs, model: Option<Model>) -> Result<()> {
     let model = cfg.resolve_model(model);
     let conn = conn.resolve(cfg)?;
     // `info` never runs a print sequence, so the experimental gate does not apply.
     let mut session = Session::connect(&conn, model, thermark::print_task::PrintTask::B1).await?;
     let result = session.fetch_summary().await;
-    session.finish().await;
-    print!("{}", result?);
+    let close_result = session.finish().await;
+    let summary = result?;
+    close_result?;
+    print!("{summary}");
     Ok(())
 }
 
@@ -142,7 +164,7 @@ pub fn encode(cmd: &str, data: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ble"))]
 mod tests {
     use super::*;
     use thermark::transport::BleCandidate;

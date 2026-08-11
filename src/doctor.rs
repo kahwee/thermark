@@ -372,7 +372,9 @@ async fn doctor_ble(
                 {
                     checks.push(Check::pass("serial", serial.to_string()));
                 }
-                client.into_transport().disconnect().await.ok();
+                if let Err(e) = client.close().await {
+                    checks.push(Check::warn("ble_disconnect", format!("{e}")));
+                }
             }
             Err(e) => checks.push(Check::fail("ble_connect", format!("{e}"))),
         }

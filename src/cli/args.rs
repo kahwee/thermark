@@ -7,6 +7,7 @@ use thermark::config::{Config, ConnPref};
 use thermark::label::{TextAlign, TextSide};
 use thermark::print_task::PrintTask;
 use thermark::protocol::Model;
+#[cfg(feature = "ble")]
 use thermark::transport::BleMatchMode;
 use thermark::types::{Density, Rotation, Threshold};
 use thermark::wifi::WifiSecurity;
@@ -75,10 +76,13 @@ pub struct FontArgs {
 }
 
 /// Connection settings after applying config / env defaults.
+#[cfg_attr(not(any(feature = "ble", feature = "serial")), allow(dead_code))]
 pub struct ResolvedConn {
     pub conn: ConnPref,
     pub addr: String,
+    #[cfg(feature = "ble")]
     pub scan_secs: u64,
+    #[cfg(feature = "ble")]
     pub match_mode: BleMatchMode,
 }
 
@@ -87,7 +91,9 @@ impl ConnArgs {
         Ok(ResolvedConn {
             conn: cfg.resolve_connection(self.conn),
             addr: cfg.resolve_addr(self.addr.as_deref())?,
+            #[cfg(feature = "ble")]
             scan_secs: cfg.resolve_scan_secs(self.scan_secs),
+            #[cfg(feature = "ble")]
             match_mode: BleMatchMode::from_fuzzy(self.fuzzy),
         })
     }
@@ -176,8 +182,8 @@ pub enum Commands {
         /// By default it is trimmed so the artwork fills the label.
         #[arg(long, default_value_t = false)]
         no_trim: bool,
-        /// Ignore the measured printable area and use the whole canvas.
-        /// Content near the feed edge will be clipped by the printer.
+        /// Ignore the configured registration inset and use the whole canvas.
+        /// A charged B1 can address the full canvas; edge registration may vary.
         #[arg(long, default_value_t = false)]
         full_bleed: bool,
         /// Write exactly what would be sent to this PNG and do not print.
@@ -390,10 +396,10 @@ pub enum ConfigCmd {
         #[arg(short, long)]
         label: Option<String>,
     },
-    /// Save the printable insets measured with `thermark calibrate`
+    /// Save content/registration insets measured with `thermark calibrate`
     ///
     /// Values are millimetres from each edge. Omitted edges keep their current
-    /// value. The feed (bottom) edge is usually the only non-zero one.
+    /// value. These are placement margins, not assumed hardware limits.
     SafeArea {
         /// Millimetre mark of the LAST ruler tick that printed, from
         /// `thermark calibrate`. Sets the bottom inset for you.

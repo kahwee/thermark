@@ -51,3 +51,9 @@ jobs:
 
     - name: Test library with serial only
       run: cargo test --lib --no-default-features --features serial --verbose
+
+    - name: Build BLE-only binary
+      run: cargo build --bin thermark --no-default-features --features ble --verbose
+
+    - name: Build serial-only binary
+      run: cargo build --bin thermark --no-default-features --features serial --verbose

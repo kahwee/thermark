@@ -1,7 +1,7 @@
 //! Composed stickers: `qr` and `wifi`.
 //!
-//! Both render a label image, save it as PNG, then optionally print it — the
-//! shared half lives in [`save_and_print`].
+//! Each command renders in memory, optionally saves a PNG, then optionally
+//! prints through the shared output path.
 
 use anyhow::{Context, Result};
 use image::GrayImage;
@@ -11,97 +11,85 @@ use thermark::geometry::{LabelMm, LabelPx};
 use thermark::label::{
     self, QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_text_label,
 };
-use thermark::printer::PrintOptions;
 use thermark::protocol::Model;
-use thermark::types::{Density, Rotation, Threshold};
+use thermark::types::Density;
 use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 use tracing::info;
 
 use crate::cli::args::{ConnArgs, FontArgs, TaskArgs};
-use crate::cli::session::print_file;
+use crate::cli::session::{PrintProfile, print_gray_resolved, resolve_profile};
 use crate::cli::tips::{guard_wifi_save_path, resolve_wifi_password};
 
 /// Resolve the model and label geometry shared by both sticker commands.
 fn label_geometry(
     cfg: &Config,
+    task: &TaskArgs,
     model: Option<Model>,
     label: Option<&str>,
-) -> Result<(Model, LabelMm, LabelPx)> {
-    let model = cfg.resolve_model(model);
+) -> Result<(PrintProfile, LabelMm, LabelPx)> {
+    let profile = resolve_profile(cfg, model, task)?;
     let label_mm = LabelMm::parse(&cfg.resolve_label(label))?;
-    let lp = label_mm.to_pixels(model.max_width_px());
-    Ok((model, label_mm, lp))
-}
-
-/// Options a rendered sticker is printed with (no crop, no dither — line art).
-fn sticker_print_options(label: LabelMm, density: Density) -> PrintOptions {
-    PrintOptions {
-        density,
-        rotate: Rotation::Deg0,
-        threshold: Threshold::DEFAULT,
-        fit: false,
-        label: Some(label),
-        fill: false,
-        margin_px: 0,
-        dither: false,
-        // The rendered sticker already lays out inside the printable area;
-        // insetting again here would shrink it twice.
-        safe: thermark::geometry::SafeArea::NONE,
-        // The sticker canvas *is* the layout; cropping it would re-scale and
-        // undo the deliberate placement.
-        trim: false,
-    }
+    let lp = label_mm.to_pixels(profile.max_width_px);
+    Ok((profile, label_mm, lp))
 }
 
 /// Save a rendered sticker, then print it unless `--no-print`.
-#[allow(clippy::too_many_arguments)]
+struct RenderedOutput<'a> {
+    save: Option<&'a PathBuf>,
+    density: Density,
+    no_print: bool,
+    success: &'static str,
+}
+
 async fn save_and_print(
     cfg: &Config,
     conn: &ConnArgs,
-    task: &TaskArgs,
-    model: Model,
+    profile: PrintProfile,
     gray: &GrayImage,
-    png_path: &PathBuf,
-    label_mm: LabelMm,
-    density: Density,
-    no_print: bool,
-    success: &str,
+    output: RenderedOutput<'_>,
 ) -> Result<()> {
-    gray.save(png_path)
-        .with_context(|| format!("save {}", png_path.display()))?;
-    println!("saved {}", png_path.display());
-    if no_print {
+    if let Some(png_path) = output.save {
+        gray.save(png_path)
+            .with_context(|| format!("save {}", png_path.display()))?;
+        println!("saved {}", png_path.display());
+    }
+    if output.no_print {
         return Ok(());
     }
-    print_file(
-        cfg,
-        conn,
-        task,
-        model,
-        png_path,
-        sticker_print_options(label_mm, density),
-    )
-    .await?;
-    println!("{success}");
+    print_gray_resolved(cfg, conn, profile, gray, output.density).await?;
+    println!("{}", output.success);
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn text(
-    cfg: &Config,
-    conn: &ConnArgs,
-    task: &TaskArgs,
-    font: &FontArgs,
-    model: Option<Model>,
-    text: &str,
-    align: TextAlign,
-    label: Option<&str>,
-    border: bool,
-    density: Density,
-    save: Option<PathBuf>,
-    no_print: bool,
-) -> Result<()> {
-    let (model, label_mm, lp) = label_geometry(cfg, model, label)?;
+pub struct TextCommand {
+    pub conn: ConnArgs,
+    pub task: TaskArgs,
+    pub font: FontArgs,
+    pub model: Option<Model>,
+    pub text: String,
+    pub align: TextAlign,
+    pub label: Option<String>,
+    pub border: bool,
+    pub density: Density,
+    pub save: Option<PathBuf>,
+    pub no_print: bool,
+}
+
+pub async fn text(cfg: &Config, args: TextCommand) -> Result<()> {
+    let TextCommand {
+        conn,
+        task,
+        font,
+        model,
+        text,
+        align,
+        label,
+        border,
+        density,
+        save,
+        no_print,
+    } = args;
+    let (profile, _label_mm, lp) = label_geometry(cfg, &task, model, label.as_deref())?;
     let gray = make_text_label(&TextLabelOptions {
         text: text.replace("\\n", "\n"),
         label: lp,
@@ -120,42 +108,55 @@ pub async fn text(
         "text label"
     );
 
-    let png_path = save.unwrap_or_else(|| std::env::temp_dir().join("thermark_text_label.png"));
     save_and_print(
         cfg,
-        conn,
-        task,
-        model,
+        &conn,
+        profile,
         &gray,
-        &png_path,
-        label_mm,
-        density,
-        no_print,
-        "OK — text label printed",
+        RenderedOutput {
+            save: save.as_ref(),
+            density,
+            no_print,
+            success: "OK — text label printed",
+        },
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn qr(
-    cfg: &Config,
-    conn: &ConnArgs,
-    task: &TaskArgs,
-    font: &FontArgs,
-    model: Option<Model>,
-    url: &str,
-    text: &str,
-    text_side: TextSide,
-    label: Option<&str>,
-    border: bool,
-    density: Density,
-    save: Option<PathBuf>,
-    no_print: bool,
-) -> Result<()> {
-    let (model, label_mm, lp) = label_geometry(cfg, model, label)?;
+pub struct QrCommand {
+    pub conn: ConnArgs,
+    pub task: TaskArgs,
+    pub font: FontArgs,
+    pub model: Option<Model>,
+    pub url: String,
+    pub text: String,
+    pub text_side: TextSide,
+    pub label: Option<String>,
+    pub border: bool,
+    pub density: Density,
+    pub save: Option<PathBuf>,
+    pub no_print: bool,
+}
+
+pub async fn qr(cfg: &Config, args: QrCommand) -> Result<()> {
+    let QrCommand {
+        conn,
+        task,
+        font,
+        model,
+        url,
+        text,
+        text_side,
+        label,
+        border,
+        density,
+        save,
+        no_print,
+    } = args;
+    let (profile, _label_mm, lp) = label_geometry(cfg, &task, model, label.as_deref())?;
     let safe = cfg.resolve_safe_area();
     let gray = label::make_qr_label_opts(&QrLabelOptions {
-        url: url.to_string(),
+        url,
         side_text: text.replace("\\n", "\n"),
         label: lp,
         safe,
@@ -175,42 +176,58 @@ pub async fn qr(
         "qr label"
     );
 
-    let png_path = save.unwrap_or_else(|| std::env::temp_dir().join("thermark_qr_label.png"));
     save_and_print(
         cfg,
-        conn,
-        task,
-        model,
+        &conn,
+        profile,
         &gray,
-        &png_path,
-        label_mm,
-        density,
-        no_print,
-        "OK — QR label printed",
+        RenderedOutput {
+            save: save.as_ref(),
+            density,
+            no_print,
+            success: "OK — QR label printed",
+        },
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn wifi(
-    cfg: &Config,
-    conn: &ConnArgs,
-    task: &TaskArgs,
-    font: &FontArgs,
-    model: Option<Model>,
-    ssid: &str,
-    password: String,
-    security: WifiSecurity,
-    hidden: bool,
-    show_password: bool,
-    text_side: TextSide,
-    label: Option<&str>,
-    border: bool,
-    density: Density,
-    save: Option<PathBuf>,
-    no_print: bool,
-) -> Result<()> {
-    let (model, label_mm, lp) = label_geometry(cfg, model, label)?;
+pub struct WifiCommand {
+    pub conn: ConnArgs,
+    pub task: TaskArgs,
+    pub font: FontArgs,
+    pub model: Option<Model>,
+    pub ssid: String,
+    pub password: String,
+    pub security: WifiSecurity,
+    pub hidden: bool,
+    pub show_password: bool,
+    pub text_side: TextSide,
+    pub label: Option<String>,
+    pub border: bool,
+    pub density: Density,
+    pub save: Option<PathBuf>,
+    pub no_print: bool,
+}
+
+pub async fn wifi(cfg: &Config, args: WifiCommand) -> Result<()> {
+    let WifiCommand {
+        conn,
+        task,
+        font,
+        model,
+        ssid,
+        password,
+        security,
+        hidden,
+        show_password,
+        text_side,
+        label,
+        border,
+        density,
+        save,
+        no_print,
+    } = args;
+    let (profile, _label_mm, lp) = label_geometry(cfg, &task, model, label.as_deref())?;
     let password = resolve_wifi_password(password)?;
     if ssid.trim().chars().count() > 24 {
         eprintln!("tip: long SSID names wrap on a 50×30 sticker — shorter names read better");
@@ -219,7 +236,7 @@ pub async fn wifi(
     info!(%ssid, ?security, hidden, show_password, "wifi sticker");
 
     let gray = make_wifi_label(&WifiLabelOptions {
-        ssid: ssid.to_string(),
+        ssid: ssid.clone(),
         password,
         security,
         hidden,
@@ -236,8 +253,9 @@ pub async fn wifi(
         || "building Wi‑Fi sticker (if QR failed: password may be too long for a dense code)",
     )?;
 
-    let png_path = save.unwrap_or_else(|| std::env::temp_dir().join("thermark_wifi_label.png"));
-    guard_wifi_save_path(&png_path)?;
+    if let Some(png_path) = save.as_ref() {
+        guard_wifi_save_path(png_path)?;
+    }
 
     println!("SSID on sticker: {ssid}");
     if show_password {
@@ -251,15 +269,15 @@ pub async fn wifi(
 
     save_and_print(
         cfg,
-        conn,
-        task,
-        model,
+        &conn,
+        profile,
         &gray,
-        &png_path,
-        label_mm,
-        density,
-        no_print,
-        "OK — Wi‑Fi sticker printed",
+        RenderedOutput {
+            save: save.as_ref(),
+            density,
+            no_print,
+            success: "OK — Wi‑Fi sticker printed",
+        },
     )
     .await
 }

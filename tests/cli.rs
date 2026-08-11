@@ -391,6 +391,74 @@ fn info_without_addr_errors_helpfully() {
 }
 
 #[test]
+fn malformed_config_is_reported_and_not_overwritten() {
+    let (_dir, path) = temp_config_path();
+    let original = b"{ definitely not json\n";
+    std::fs::write(&path, original).unwrap();
+
+    thermark_with_config(&path)
+        .args(["config", "set", "-a", "B1-New"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("parse config"));
+
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+#[test]
+fn generated_label_without_save_does_not_announce_temp_file() {
+    let (_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args(["text", "--text", "HELLO", "--no-print"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("saved").not());
+}
+
+#[test]
+fn mismatched_task_limits_preview_and_sticker_canvas_before_printing() {
+    let dir = tempfile::tempdir().unwrap();
+    let preview = dir.path().join("preview.png");
+    let sticker = dir.path().join("sticker.png");
+    let (_cfg_dir, cfg) = temp_config_path();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "-i",
+            "fixtures/sticker_wifi.png",
+            "--label",
+            "50x30",
+            "--task",
+            "d110",
+            "--allow-experimental",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert_eq!(image::open(&preview).unwrap().width(), 96);
+
+    thermark_with_config(&cfg)
+        .args([
+            "text",
+            "--text",
+            "NARROW",
+            "--label",
+            "50x30",
+            "--task",
+            "d110",
+            "--allow-experimental",
+            "--save",
+            sticker.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .success();
+    assert_eq!(image::open(&sticker).unwrap().width(), 96);
+}
+
+#[test]
 fn doctor_use_config_without_saved_addr_fails() {
     let (_dir, path) = temp_config_path();
     thermark_with_config(&path)

@@ -18,7 +18,7 @@ pub struct MockTransport {
     pub tx: Vec<Vec<u8>>,
     /// Parsed TX packets (cmd + data).
     pub tx_packets: Vec<Packet>,
-    rx_queue: Vec<Packet>,
+    rx_queue: Vec<Vec<u8>>,
     /// cmd → error code for In_PrintError (0xDB)
     fail_on: HashMap<u8, u8>,
     /// Commands that auto-reply with success payload `0x00` (rejected).
@@ -124,7 +124,13 @@ impl MockTransport {
     }
 
     pub fn push_rx(&mut self, packet: Packet) {
-        self.rx_queue.push(packet);
+        self.rx_queue
+            .push(packet.encode().expect("mock RX packet must encode"));
+    }
+
+    /// Queue a raw fragment to exercise transport-level packet splitting.
+    pub fn push_rx_raw(&mut self, bytes: impl Into<Vec<u8>>) {
+        self.rx_queue.push(bytes.into());
     }
 
     pub fn auto_reply(&mut self, yes: bool) -> &mut Self {
@@ -211,7 +217,7 @@ impl Transport for MockTransport {
         }
 
         if let Some(code) = self.fail_on.get(&cmd).copied() {
-            self.rx_queue.push(Packet::new(0xdb, vec![code]));
+            self.push_rx(Packet::new(0xdb, vec![code]));
             return Ok(());
         }
 
@@ -225,16 +231,16 @@ impl Transport for MockTransport {
             if self.reject.contains(&cmd) {
                 reply.data = vec![0x00];
             }
-            self.rx_queue.push(reply);
+            self.push_rx(reply);
         }
         Ok(())
     }
 
-    async fn recv_packets(&mut self, _wait: Duration) -> Result<Vec<Packet>> {
+    async fn recv_raw(&mut self, _wait: Duration) -> Result<Vec<u8>> {
         if self.rx_queue.is_empty() {
-            return Ok(vec![]);
+            return Ok(Vec::new());
         }
-        Ok(std::mem::take(&mut self.rx_queue))
+        Ok(self.rx_queue.remove(0))
     }
 }
 
@@ -248,22 +254,23 @@ mod tests {
         let mut m = MockTransport::new();
         m.send_packet(&protocol::set_density(4)).await.unwrap();
         assert_eq!(m.tx_cmds(), vec![0x21]);
-        let rx = m.recv_packets(Duration::from_millis(1)).await.unwrap();
-        assert_eq!(rx.len(), 1);
-        assert_eq!(rx[0].cmd, 0x31);
-        assert_eq!(rx[0].data, vec![0x01]);
+        let rx = m.recv_raw(Duration::from_millis(1)).await.unwrap();
+        let packet = Packet::decode(&rx).unwrap();
+        assert_eq!(packet.cmd, 0x31);
+        assert_eq!(packet.data, vec![0x01]);
     }
 
     #[tokio::test]
     async fn injects_print_error() {
         let mut m = MockTransport::new();
         m.fail_cmd(0x01, 0x02);
-        m.send_packet(&protocol::print_start_simple())
+        m.send_packet(&crate::PrintTask::Simple.print_start(1))
             .await
             .unwrap();
-        let rx = m.recv_packets(Duration::from_millis(1)).await.unwrap();
-        assert_eq!(rx[0].cmd, 0xdb);
-        assert_eq!(rx[0].data, vec![0x02]);
+        let rx = m.recv_raw(Duration::from_millis(1)).await.unwrap();
+        let packet = Packet::decode(&rx).unwrap();
+        assert_eq!(packet.cmd, 0xdb);
+        assert_eq!(packet.data, vec![0x02]);
     }
 
     #[tokio::test]
@@ -271,7 +278,7 @@ mod tests {
         let mut m = MockTransport::new();
         m.mute_cmd(0xf3);
         m.send_packet(&protocol::print_end()).await.unwrap();
-        let rx = m.recv_packets(Duration::from_millis(1)).await.unwrap();
+        let rx = m.recv_raw(Duration::from_millis(1)).await.unwrap();
         assert!(rx.is_empty());
     }
 }

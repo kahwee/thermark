@@ -4,11 +4,12 @@ use thermark::errors::PrinterFault;
 use thermark::geometry::{LabelMm, PX_PER_MM};
 use thermark::label::{TextSide, make_qr_label, max_qr_side, render_qr_square};
 use thermark::packet::Packet;
+use thermark::print_task::PrintTask;
 use thermark::protocol::{self, Model};
 
 #[test]
 fn b1_print_start_roundtrip() {
-    let p = protocol::print_start(Model::B1);
+    let p = PrintTask::B1.print_start(1);
     assert_eq!(p.cmd, 0x01);
     assert_eq!(p.data.len(), 7);
     assert_eq!(&p.data[0..2], &1u16.to_be_bytes());
@@ -22,7 +23,7 @@ fn b1_page_size_matches_50x30() {
     let lp = LabelMm::parse("50x30")
         .unwrap()
         .to_pixels(Model::B1.max_width_px());
-    let p = protocol::set_page_size_b1(lp.height_px as u16, lp.width_px as u16, 1);
+    let p = PrintTask::B1.set_page_size(lp.height_px as u16, lp.width_px as u16, 1);
     assert_eq!(p.cmd, 0x13);
     assert_eq!(p.data.len(), 6);
     let rows = u16::from_be_bytes([p.data[0], p.data[1]]);
@@ -66,8 +67,7 @@ fn qr_label_exact_canvas_and_square_qr() {
         make_qr_label("https://www.youtube.com", "ABC\n123", lp, TextSide::Right).expect("layout");
     assert_eq!(img.dimensions(), (384, 240));
 
-    // The QR fills the *printable* band, which is shorter than the canvas:
-    // the feed edge loses a few mm (see `SafeArea`).
+    // The QR fills the content band inside the default registration inset.
     let safe = thermark::geometry::SafeArea::default();
     let printable_h = lp.height_px - safe.top - safe.bottom;
     let side = max_qr_side(lp, safe);

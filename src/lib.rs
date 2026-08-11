@@ -42,7 +42,8 @@ pub use mock::MockTransport;
 pub use packet::Packet;
 pub use print_task::{PrintTask, SupportStatus, effective_max_width_px, hardware_matrix};
 pub use printer::{
-    Heartbeat, InfoValue, OnTimeout, Pacing, PrintOptions, PrinterClient, PrinterSummary, RfidInfo,
+    Heartbeat, InfoValue, OnTimeout, Pacing, PrintOptions, PrintStatus, PrinterClient,
+    PrinterSummary, RfidInfo,
 };
 pub use protocol::Model;
 pub use transport::{

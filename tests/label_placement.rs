@@ -21,13 +21,13 @@ fn assert_inside_safe_area(img: &image::GrayImage, lp: LabelPx, safe: SafeArea, 
     let bottom = ink.y + ink.h - 1;
     assert!(
         ink.y >= safe.top,
-        "{what}: ink at row {} is above the printable area (top inset {})",
+        "{what}: ink at row {} is above the content area (top inset {})",
         ink.y,
         safe.top
     );
     assert!(
         bottom < h - safe.bottom,
-        "{what}: ink at row {bottom} is in the unprintable feed band (starts {})",
+        "{what}: ink at row {bottom} is below the content area (starts {})",
         h - safe.bottom
     );
 }

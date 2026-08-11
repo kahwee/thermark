@@ -123,17 +123,6 @@ impl Model {
             Self::D11 | Self::D110 => crate::geometry::HEAD_NARROW_PX,
         }
     }
-
-    /// Payload for PrintStart. B1/newer may prefer the 7-byte form; simple `01`
-    /// is widely accepted (verified on B1).
-    pub fn print_start_payload(self) -> Vec<u8> {
-        match self {
-            // 7-byte form from community wiki (total pages = 1)
-            Self::B1 => vec![0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
-            // 1-byte form used by older models, and as a general fallback
-            _ => vec![0x01],
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -177,12 +166,8 @@ pub fn set_label_type(t: u8) -> Packet {
     pkt(Cmd::SetLabelType, vec![t])
 }
 
-pub fn print_start(model: Model) -> Packet {
-    pkt(Cmd::PrintStart, model.print_start_payload())
-}
-
 /// Fallback simple print-start (works on many firmwares).
-pub fn print_start_simple() -> Packet {
+pub(crate) fn print_start_simple() -> Packet {
     pkt(Cmd::PrintStart, vec![0x01])
 }
 
@@ -195,7 +180,7 @@ pub fn cancel_print() -> Packet {
 }
 
 /// Set page size: row count (height) and column count (width), big-endian.
-pub fn set_page_size(rows: u16, cols: u16) -> Packet {
+pub(crate) fn set_page_size(rows: u16, cols: u16) -> Packet {
     let mut data = Vec::with_capacity(4);
     data.extend_from_slice(&rows.to_be_bytes());
     data.extend_from_slice(&cols.to_be_bytes());
@@ -203,7 +188,7 @@ pub fn set_page_size(rows: u16, cols: u16) -> Packet {
 }
 
 /// B1 print-task page size: rows, cols, copies (all u16 BE).
-pub fn set_page_size_b1(rows: u16, cols: u16, copies: u16) -> Packet {
+pub(crate) fn set_page_size_b1(rows: u16, cols: u16, copies: u16) -> Packet {
     let mut data = Vec::with_capacity(6);
     data.extend_from_slice(&rows.to_be_bytes());
     data.extend_from_slice(&cols.to_be_bytes());

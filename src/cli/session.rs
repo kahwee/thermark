@@ -1,14 +1,43 @@
 //! Opening a printer session and running one job through it.
 
-use anyhow::{Context, Result, bail};
+#[cfg(any(feature = "ble", feature = "serial"))]
+use anyhow::Context;
+use anyhow::{Result, bail};
 use std::path::Path;
 use thermark::config::{Config, ConnPref};
 use thermark::print_task::PrintTask;
-use thermark::printer::{Pacing, PrintOptions, PrinterClient, PrinterSummary};
+#[cfg(any(feature = "ble", feature = "serial"))]
+use thermark::printer::Pacing;
+use thermark::printer::{PrintOptions, PrinterClient, PrinterSummary};
 use thermark::protocol::Model;
-use thermark::transport::{BleTransport, SerialTransport};
+#[cfg(feature = "ble")]
+use thermark::transport::BleTransport;
+#[cfg(feature = "serial")]
+use thermark::transport::SerialTransport;
+use thermark::transport::Transport;
 
 use super::args::{ConnArgs, ResolvedConn, TaskArgs};
+
+#[derive(Debug, Clone, Copy)]
+pub struct PrintProfile {
+    pub model: Model,
+    pub task: PrintTask,
+    pub max_width_px: u32,
+}
+
+pub fn resolve_profile(
+    cfg: &Config,
+    model: Option<Model>,
+    args: &TaskArgs,
+) -> Result<PrintProfile> {
+    let model = cfg.resolve_model(model);
+    let task = resolve_task(model, args)?;
+    Ok(PrintProfile {
+        model,
+        task,
+        max_width_px: thermark::effective_max_width_px(model, task),
+    })
+}
 
 /// Row pacing, overridable for diagnosing dense-page truncation.
 ///
@@ -16,6 +45,7 @@ use super::args::{ConnArgs, ResolvedConn, TaskArgs};
 /// truncated while sparse ones do not, which points at the printer dropping
 /// data rather than at a printable-area limit; this makes that testable
 /// without a rebuild.
+#[cfg(any(feature = "ble", feature = "serial"))]
 fn pacing_from_env() -> Pacing {
     match std::env::var("THERMARK_SLOW") {
         Ok(v) if !v.trim().is_empty() && v != "0" => {
@@ -26,65 +56,131 @@ fn pacing_from_env() -> Pacing {
     }
 }
 
-/// An open BLE or USB printer session.
-pub enum Session {
-    Ble(PrinterClient<BleTransport>),
-    Usb(PrinterClient<SerialTransport>),
+/// CLI transport sum type; the protocol client remains transport-agnostic.
+pub enum AnyTransport {
+    #[cfg(feature = "ble")]
+    Ble(BleTransport),
+    #[cfg(feature = "serial")]
+    Usb(SerialTransport),
 }
 
-/// Run the same call against whichever transport is open.
-macro_rules! on_client {
-    ($self:expr, $client:ident => $body:expr) => {
-        match $self {
-            Session::Ble($client) => $body,
-            Session::Usb($client) => $body,
+impl Transport for AnyTransport {
+    #[allow(unused_variables)]
+    async fn send_raw(&mut self, data: &[u8]) -> thermark::Result<()> {
+        match self {
+            #[cfg(feature = "ble")]
+            Self::Ble(transport) => transport.send_raw(data).await,
+            #[cfg(feature = "serial")]
+            Self::Usb(transport) => transport.send_raw(data).await,
+            #[cfg(not(any(feature = "ble", feature = "serial")))]
+            _ => unreachable!("AnyTransport has no variants"),
         }
-    };
+    }
+
+    #[allow(unused_variables)]
+    async fn recv_raw(&mut self, wait: std::time::Duration) -> thermark::Result<Vec<u8>> {
+        match self {
+            #[cfg(feature = "ble")]
+            Self::Ble(transport) => transport.recv_raw(wait).await,
+            #[cfg(feature = "serial")]
+            Self::Usb(transport) => transport.recv_raw(wait).await,
+            #[cfg(not(any(feature = "ble", feature = "serial")))]
+            _ => unreachable!("AnyTransport has no variants"),
+        }
+    }
+
+    async fn close(&mut self) -> thermark::Result<()> {
+        match self {
+            #[cfg(feature = "ble")]
+            Self::Ble(transport) => transport.close().await,
+            #[cfg(feature = "serial")]
+            Self::Usb(transport) => transport.close().await,
+            #[cfg(not(any(feature = "ble", feature = "serial")))]
+            _ => unreachable!("AnyTransport has no variants"),
+        }
+    }
+}
+
+/// An open BLE or USB printer session.
+pub struct Session(PrinterClient<AnyTransport>);
+
+fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
+    match (job, close) {
+        (Err(job), Err(close)) => {
+            tracing::warn!(error = %close, "printer shutdown failed after operation error");
+            Err(job)
+        }
+        (Err(job), Ok(())) => Err(job),
+        (Ok(_), Err(close)) => Err(close),
+        (Ok(value), Ok(())) => Ok(value),
+    }
 }
 
 impl Session {
+    #[allow(unused_variables)]
     pub async fn connect(conn: &ResolvedConn, model: Model, task: PrintTask) -> Result<Self> {
         match conn.conn {
             ConnPref::Ble => {
-                let ble = BleTransport::connect_with(
-                    &conn.addr,
-                    std::time::Duration::from_secs(conn.scan_secs),
-                    conn.match_mode,
-                )
-                .await
-                .context("BLE connect")?;
-                Ok(Self::Ble(
-                    PrinterClient::new(ble, model)
-                        .with_print_task(task)
-                        .with_pacing(pacing_from_env()),
-                ))
+                #[cfg(not(feature = "ble"))]
+                bail!("this thermark binary was built without Bluetooth support");
+                #[cfg(feature = "ble")]
+                {
+                    let ble = BleTransport::connect_with(
+                        &conn.addr,
+                        std::time::Duration::from_secs(conn.scan_secs),
+                        conn.match_mode,
+                    )
+                    .await
+                    .context("BLE connect")?;
+                    Ok(Self(
+                        PrinterClient::new(AnyTransport::Ble(ble), model)
+                            .with_print_task(task)
+                            .with_pacing(pacing_from_env()),
+                    ))
+                }
             }
             ConnPref::Usb => {
-                let ser = SerialTransport::open(&conn.addr)
-                    .with_context(|| format!("open serial {}", conn.addr))?;
-                Ok(Self::Usb(
-                    PrinterClient::new(ser, model)
-                        .with_print_task(task)
-                        .with_pacing(pacing_from_env()),
-                ))
+                #[cfg(not(feature = "serial"))]
+                bail!("this thermark binary was built without USB serial support");
+                #[cfg(feature = "serial")]
+                {
+                    let ser = SerialTransport::open(&conn.addr)
+                        .with_context(|| format!("open serial {}", conn.addr))?;
+                    Ok(Self(
+                        PrinterClient::new(AnyTransport::Usb(ser), model)
+                            .with_print_task(task)
+                            .with_pacing(pacing_from_env()),
+                    ))
+                }
             }
         }
     }
 
     pub async fn fetch_summary(&mut self) -> Result<PrinterSummary> {
-        Ok(on_client!(self, c => c.fetch_summary().await?))
+        Ok(self.0.fetch_summary().await?)
     }
 
     pub async fn print_image_file_opts(&mut self, path: &Path, opts: PrintOptions) -> Result<()> {
-        on_client!(self, c => c.print_image_file_opts(path, opts).await)?;
+        self.0.print_image_file_opts(path, opts).await?;
+        Ok(())
+    }
+
+    pub async fn print_gray_image(
+        &mut self,
+        gray: &image::GrayImage,
+        density: thermark::Density,
+    ) -> Result<()> {
+        if let Ok(rfid) = self.0.rfid_info().await {
+            tracing::info!(%rfid, "RFID");
+        }
+        self.0.preflight_ready().await?;
+        self.0.print_gray_image(gray, density).await?;
         Ok(())
     }
 
     /// Release the link. [`BleTransport`]'s `Drop` is only a backstop.
-    pub async fn finish(self) {
-        if let Self::Ble(c) = self {
-            c.into_transport().disconnect().await.ok();
-        }
+    pub async fn finish(self) -> Result<()> {
+        self.0.close().await.map_err(anyhow::Error::from)
     }
 }
 
@@ -92,20 +188,33 @@ impl Session {
 ///
 /// Disconnect happens before the print result is propagated, so a failed job
 /// still releases the BLE link (only one client may hold it at a time).
-pub async fn print_file(
+pub async fn print_file_resolved(
     cfg: &Config,
     conn: &ConnArgs,
-    task_args: &TaskArgs,
     model: Model,
+    task: PrintTask,
     path: &Path,
     opts: PrintOptions,
 ) -> Result<()> {
-    let task = resolve_task(model, task_args)?;
     let conn = conn.resolve(cfg)?;
     let mut session = Session::connect(&conn, model, task).await?;
     let result = session.print_image_file_opts(path, opts).await;
-    session.finish().await;
-    result
+    let close_result = session.finish().await;
+    combine_job_and_close(result, close_result)
+}
+
+pub async fn print_gray_resolved(
+    cfg: &Config,
+    conn: &ConnArgs,
+    profile: PrintProfile,
+    gray: &image::GrayImage,
+    density: thermark::Density,
+) -> Result<()> {
+    let resolved_conn = conn.resolve(cfg)?;
+    let mut session = Session::connect(&resolved_conn, profile.model, profile.task).await?;
+    let result = session.print_gray_image(gray, density).await;
+    let close_result = session.finish().await;
+    combine_job_and_close(result, close_result)
 }
 
 /// Resolve the print task: `--task` wins, else `--simple-start`, else the
