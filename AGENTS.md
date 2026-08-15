@@ -247,9 +247,10 @@ measurable difference.
 
 1. BLE address match is **exact** by default (full advertising name or id). Short selectors no longer substring-match; use full name from `scan`, or pass `--fuzzy` only if intentional  
 2. Require real printer GATT UUID; no random characteristic fallback  
-3. Stuck CLI holds BLE lock — mostly addressed: Ctrl-C cancels the job and
+3. Stuck CLI holds BLE lock — mostly addressed: Ctrl-C aborts the local job and
    `BleTransport::drop` blocks until disconnect on a multi-threaded runtime.
-   `SIGKILL` still leaves the link held until the printer times out  
+   It does not send the protocol's cancel-print command. `SIGKILL` still leaves
+   the link held until the printer times out
 4. Tiny prints = missing `--label` / wrong canvas, not “broken printer”  
 5. Bitmap 5×7 font had mirrored text bugs — do not use for user labels  
 
@@ -294,6 +295,40 @@ export LLVM_COV=/opt/homebrew/opt/llvm/bin/llvm-cov
 export LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata
 cargo llvm-cov --workspace --summary-only
 ```
+
+## Modernization and simplification
+
+Modernize from evidence, not from file age or line count alone:
+
+1. Check the current stable toolchain and direct crate releases. Keep
+   `rust-version`, `rust-toolchain.toml`, CI, and `Cargo.lock` aligned.
+2. Prefer compatible lockfile updates (`cargo update`) before considering a
+   major dependency bump. Take a major only for a concrete feature, fix, or
+   meaningful deletion.
+3. Run format, Clippy, the full suite, and the feature-specific library tests
+   after dependency or structural changes.
+4. Delete duplicate representations and pass typed values through directly.
+   A good simplification removes translation code; moving the same code into
+   more files is not a simplification.
+5. Keep wrappers only when they enforce a policy boundary (safe printing vs.
+   raw commands, validated geometry, guaranteed disconnect). Do not collapse
+   those boundaries just to reduce line count.
+6. Avoid speculative abstractions. Extract code after a rule has at least two
+   real callers or when one named owner protects an invariant.
+
+Good candidates for future code reduction:
+
+- Define each Clap command's arguments once and pass that parsed struct
+  directly to its handler; avoid unpacking fields in `cli::run` only to repack
+  them into another identical command struct.
+- Keep tests close to their owner, but count production and test code
+  separately before calling a large module a maintenance problem.
+- Remove compatibility aliases only in a deliberate breaking release and only
+  after confirming they no longer protect real scripts.
+
+Do not simplify away the explicit raw-printer API, transport split, pacing
+control flow, effective-width validation, or `label::qr_layout`. Those are
+small boundaries around hardware failure modes and measured invariants.
 
 ---
 

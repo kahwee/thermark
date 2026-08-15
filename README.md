@@ -25,6 +25,9 @@ setup is a B1-class printer with 50×30 mm labels rendered at 384×240 px.
 Experimental models require `--allow-experimental`. Multi-colour printheads and
 colour raster protocols are out of scope.
 
+Requires Rust 1.97 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
+the current stable toolchain for rustup users.
+
 ## Build and set up
 
 ```bash
@@ -35,6 +38,21 @@ cargo build --release
 ./target/release/thermark identify
 ./target/release/thermark doctor --use-config
 ```
+
+For maintenance, keep the lockfile current and run the same checks as CI:
+
+```bash
+cargo update --dry-run
+cargo update
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+```
+
+Direct dependencies intentionally use compatible major-version ranges while
+`Cargo.lock` pins reproducible builds. A major-version bump should earn its
+complexity with a concrete feature, fix, or code deletion; newer by itself is
+not enough.
 
 To capture the exact model, firmware, geometry, and task for a hardware report:
 

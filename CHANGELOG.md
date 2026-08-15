@@ -25,6 +25,9 @@ such change is listed under **Changed** with the old and new spelling.
   PrintEnd to declare an unconfirmed page successful.
 - `PrinterDevice` keeps model, profile, task, and identity coherent inside a
   session. Product scope is explicitly monochrome and B1-first.
+- Updated the lockfile to the latest Rust 1.97-compatible dependency releases.
+- README and agent guidance now document the maintenance baseline and
+  evidence-first rules for modernization and code reduction.
 
 ### Removed
 
