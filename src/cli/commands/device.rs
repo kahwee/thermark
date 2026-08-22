@@ -8,7 +8,6 @@ use thermark::config::Config;
 use thermark::config::ConnPref;
 use thermark::font;
 use thermark::print_task::hardware_matrix;
-use thermark::protocol::Model;
 #[cfg(feature = "serial")]
 use thermark::transport::SerialTransport;
 #[cfg(feature = "ble")]
@@ -112,17 +111,76 @@ pub fn ports() -> Result<()> {
     anyhow::bail!("this thermark binary was built without USB serial support")
 }
 
-pub async fn info(cfg: &Config, conn: &ConnArgs, model: Option<Model>) -> Result<()> {
-    let model = cfg.resolve_model(model);
+pub async fn info(cfg: &Config, conn: &ConnArgs) -> Result<()> {
     let conn = conn.resolve(cfg)?;
-    // `info` never runs a print sequence, so the experimental gate does not apply.
-    let mut session = Session::connect(&conn, model, thermark::print_task::PrintTask::B1).await?;
+    let mut session = Session::connect(
+        &conn,
+        thermark::Model::B1,
+        thermark::PrintTask::B1,
+        true,
+        true,
+    )
+    .await?;
     let result = session.fetch_summary().await;
     let close_result = session.finish().await;
     let summary = result?;
     close_result?;
     print!("{summary}");
     Ok(())
+}
+
+pub async fn identify(cfg: &Config, conn: &ConnArgs) -> Result<()> {
+    let conn = conn.resolve(cfg)?;
+    let session = Session::connect(
+        &conn,
+        thermark::Model::B1,
+        thermark::PrintTask::B1,
+        true,
+        true,
+    )
+    .await?;
+    let result = (|| -> Result<()> {
+        let identity = session
+            .identity()
+            .ok_or_else(|| anyhow::anyhow!("printer did not return an identity"))?;
+        let profile = thermark::profile_for_identity(identity).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unrecognized printer model id {}; add a checked device profile before printing",
+                identity.model_id
+            )
+        })?;
+        println!("model: {}", profile.model);
+        println!("model id: {}", identity.model_id);
+        println!(
+            "protocol: {}",
+            identity
+                .protocol_version
+                .map_or_else(|| "unknown".into(), |v| v.to_string())
+        );
+        println!(
+            "firmware: {}",
+            identity.firmware.as_deref().unwrap_or("unknown")
+        );
+        println!(
+            "hardware: {}",
+            identity.hardware.as_deref().unwrap_or("unknown")
+        );
+        println!("dpi: {}", profile.dpi);
+        println!("max width: {} px", profile.max_width_px);
+        println!("direction: {:?}", profile.direction);
+        println!(
+            "density: {}..={} (default {})",
+            profile.density_min, profile.density_max, profile.density_default
+        );
+        println!(
+            "task: {}",
+            thermark::task_for_identity(identity).map_or("unresolved", |task| task.as_str())
+        );
+        Ok(())
+    })();
+    let close = session.finish().await;
+    result?;
+    close
 }
 
 pub fn fonts() {
@@ -143,11 +201,14 @@ pub fn tasks() {
     for row in hardware_matrix() {
         println!(
             "{:<16} {:<10} {:<14} {}",
-            row.model, row.task, row.status, row.notes
+            row.model,
+            row.task.map_or("-", |task| task.as_str()),
+            row.status,
+            row.notes
         );
     }
     println!();
-    println!("Default: b1 (hardware-tested). Override: --task b1|b21v1|d110|simple");
+    println!("Default: detected profile or b1. Override: --task b1|d11v1|d110|d110mv4");
     println!("Non-b1 tasks require: --allow-experimental");
 }
 

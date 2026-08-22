@@ -29,7 +29,7 @@ fn label_geometry(
 ) -> Result<(PrintProfile, LabelMm, LabelPx)> {
     let profile = resolve_profile(cfg, model, task)?;
     let label_mm = LabelMm::parse(&cfg.resolve_label(label))?;
-    let lp = label_mm.to_pixels(profile.max_width_px);
+    let lp = label_mm.to_pixels(profile.max_width_px, profile.pixels_per_mm);
     Ok((profile, label_mm, lp))
 }
 
@@ -93,7 +93,7 @@ pub async fn text(cfg: &Config, args: TextCommand) -> Result<()> {
     let gray = make_text_label(&TextLabelOptions {
         text: text.replace("\\n", "\n"),
         label: lp,
-        safe: cfg.resolve_safe_area(),
+        safe: cfg.resolve_safe_area(profile.pixels_per_mm),
         align,
         border,
         font_path: font.font.clone(),
@@ -154,7 +154,7 @@ pub async fn qr(cfg: &Config, args: QrCommand) -> Result<()> {
         no_print,
     } = args;
     let (profile, _label_mm, lp) = label_geometry(cfg, &task, model, label.as_deref())?;
-    let safe = cfg.resolve_safe_area();
+    let safe = cfg.resolve_safe_area(profile.pixels_per_mm);
     let gray = label::make_qr_label_opts(&QrLabelOptions {
         url,
         side_text: text.replace("\\n", "\n"),
@@ -242,7 +242,7 @@ pub async fn wifi(cfg: &Config, args: WifiCommand) -> Result<()> {
         hidden,
         show_password,
         label: lp,
-        safe: cfg.resolve_safe_area(),
+        safe: cfg.resolve_safe_area(profile.pixels_per_mm),
         text_side,
         font_path: font.font.clone(),
         font_name: font.font_name.clone(),

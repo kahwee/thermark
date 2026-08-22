@@ -10,7 +10,7 @@ use thermark::label::{
 use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 
 fn label() -> LabelPx {
-    LabelMm::parse("50x30").unwrap().to_pixels(384)
+    LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0)
 }
 
 /// Rows/cols of ink, and whether any lands outside the printable band.
@@ -157,7 +157,7 @@ fn trimmed_artwork_stays_inside_the_printable_area() {
 fn common_media_sizes_all_render_inside_the_printable_area() {
     let safe = SafeArea::default();
     for spec in ["40x20", "40x30", "50x30", "50x80"] {
-        let lp = LabelMm::parse(spec).unwrap().to_pixels(384);
+        let lp = LabelMm::parse(spec).unwrap().to_pixels(384, 8.0);
 
         let text = make_text_label(&TextLabelOptions {
             text: "PANTRY\nrice, dried".into(),
@@ -198,8 +198,8 @@ fn boundary_probe_marks_the_trailing_edge_of_any_media() {
     use thermark::label::{boundary_range, make_boundary_label};
 
     for spec in ["40x20", "40x30", "50x30", "50x80"] {
-        let lp = LabelMm::parse(spec).unwrap().to_pixels(384);
-        let range = boundary_range(lp);
+        let lp = LabelMm::parse(spec).unwrap().to_pixels(384, 8.0);
+        let range = boundary_range(lp, 8.0);
         let height_mm = lp.height_px / 8;
 
         assert_eq!(
@@ -212,7 +212,7 @@ fn boundary_probe_marks_the_trailing_edge_of_any_media() {
             "{spec}: probe needs more than one bar to be readable"
         );
 
-        let img = make_boundary_label(lp, None).unwrap_or_else(|e| panic!("{spec}: {e}"));
+        let img = make_boundary_label(lp, 8.0, None).unwrap_or_else(|e| panic!("{spec}: {e}"));
         let ink = ink_bounds(&img, 127).unwrap_or_else(|| panic!("{spec}: probe drew nothing"));
         let bottom = ink.y + ink.h - 1;
         // Full bleed on purpose — the probe measures the edge, so it must draw

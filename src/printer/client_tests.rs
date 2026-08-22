@@ -100,9 +100,9 @@ async fn print_start_error_cover_open() {
 }
 
 #[tokio::test]
-async fn simple_task_uses_short_print_start() {
+async fn d110_task_uses_short_print_start() {
     let mut c = PrinterClient::new(MockTransport::new(), Model::B1)
-        .with_print_task(PrintTask::Simple)
+        .with_print_task(PrintTask::D110)
         .with_pacing(Pacing::INSTANT);
     let gray = GrayImage::from_pixel(8, 1, Luma([0]));
     c.print_gray_image(&gray, Density::NORMAL).await.unwrap();
@@ -110,6 +110,63 @@ async fn simple_task_uses_short_print_start() {
     assert_eq!(st.data, vec![0x01]);
     let ps = c.transport().first_tx(0x13).unwrap();
     assert_eq!(ps.data.len(), 4);
+}
+
+#[tokio::test]
+async fn d110_sequence_orders_clear_and_quantity_inside_the_job() {
+    let mut c = PrinterClient::new(MockTransport::new(), Model::D110).with_pacing(Pacing::INSTANT);
+    c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap();
+    let cmds = c.transport().tx_cmds();
+    let pos = |cmd| cmds.iter().position(|value| *value == cmd).unwrap();
+    assert!(pos(0x01) < pos(0x20));
+    assert!(pos(0x20) < pos(0x03));
+    assert!(pos(0x13) < pos(0x15));
+    assert_eq!(c.transport().first_tx(0x13).unwrap().data.len(), 4);
+}
+
+#[tokio::test]
+async fn d11v1_uses_height_only_page_size_and_page_index_completion() {
+    let mut c = PrinterClient::new(MockTransport::new(), Model::D11).with_pacing(Pacing::INSTANT);
+    c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap();
+    assert_eq!(c.transport().first_tx(0x13).unwrap().data.len(), 2);
+    assert!(c.transport().tx_cmds().contains(&0x15));
+    assert!(!c.transport().tx_cmds().contains(&0xa3));
+}
+
+#[tokio::test]
+async fn d110mv4_omits_page_start_and_uses_thirteen_byte_page_size() {
+    let mut c = PrinterClient::new(MockTransport::new(), Model::B1Pro).with_pacing(Pacing::INSTANT);
+    c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap();
+    let start = c.transport().first_tx(0x01).unwrap();
+    assert_eq!(start.data.len(), 9);
+    assert_eq!(start.data[7], 1); // clarity/speed mode
+    assert_eq!(c.transport().first_tx(0x13).unwrap().data.len(), 13);
+    let commands = c.transport().tx_cmds();
+    assert!(!commands.contains(&0x03));
+    let position = |cmd| commands.iter().position(|value| *value == cmd).unwrap();
+    assert!(position(0x01) < position(0xa3));
+    assert!(position(0xa3) < position(0x13));
+    assert_eq!(commands.last(), Some(&0xdc));
+}
+
+#[tokio::test]
+async fn detected_identity_replaces_the_provisional_profile() {
+    let mut mock = MockTransport::new();
+    mock.set_model_id(4097);
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+    let identity = c.identify().await.unwrap();
+    let profile = c.apply_identity(&identity, true).unwrap();
+    assert_eq!(profile.model, Model::B1Pro);
+    assert_eq!(c.model(), Model::B1Pro);
+    assert_eq!(c.print_task(), PrintTask::D110MV4);
+    assert_eq!(identity.protocol_version, Some(5));
+    assert_eq!(c.transport().tx_cmds()[0], 0xc1);
 }
 
 #[tokio::test]
@@ -401,17 +458,15 @@ async fn fault_in_the_status_payload_aborts_the_job() {
 }
 
 #[tokio::test]
-async fn a_page_that_stalls_without_a_fault_code_still_completes() {
-    // Progress stuck below 100 with no fault byte. There is nothing to
-    // raise — `end_print` is the authority on completion — so the job must
-    // finish rather than invent an error from the progress numbers.
+async fn a_page_that_stalls_without_a_fault_code_is_not_confirmed() {
     let mut mock = MockTransport::new();
     mock.set_print_status(vec![0x00, 0x01, 73, 0x00]);
     let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
     let gray = GrayImage::from_pixel(8, 1, Luma([0]));
-    c.print_gray_image(&gray, Density::NORMAL)
-        .await
-        .expect("incomplete progress is a warning, not a failure");
+    assert!(matches!(
+        c.print_gray_image(&gray, Density::NORMAL).await,
+        Err(Error::PrintNotConfirmed)
+    ));
 }
 
 #[tokio::test]
@@ -431,15 +486,15 @@ async fn a_complete_page_stops_polling_early() {
 }
 
 #[tokio::test]
-async fn missing_status_reply_still_completes() {
-    // A silent status poll is normal on some firmware — it must not abort.
+async fn missing_status_reply_is_not_confirmed() {
     let mut mock = MockTransport::new();
     mock.mute_cmd(0xa3);
     let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
     let gray = GrayImage::from_pixel(8, 1, Luma([0]));
-    c.print_gray_image(&gray, Density::NORMAL)
-        .await
-        .expect("print should finish without a status reply");
+    assert!(matches!(
+        c.print_gray_image(&gray, Density::NORMAL).await,
+        Err(Error::PrintNotConfirmed)
+    ));
 }
 
 #[tokio::test]

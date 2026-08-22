@@ -201,7 +201,12 @@ pub fn evaluate_rfid(r: &RfidInfo) -> Check {
 
 /// Report the task a print would actually use, honouring an explicit `--task`.
 pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
-    let task = task.unwrap_or_else(|| PrintTask::for_model(model));
+    let Some(task) = task.or_else(|| PrintTask::for_model(model)) else {
+        return Check::warn(
+            "print task",
+            format!("model={model} has no verified default task"),
+        );
+    };
     let (status, label) = if task.hardware_tested() {
         (CheckStatus::Pass, "hardware-tested")
     } else {
@@ -212,7 +217,7 @@ pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
         status,
         format!(
             "model={model} → task={task} ({label}), max width {}px",
-            crate::print_task::effective_max_width_px(model, task)
+            crate::profile::profile_for_model(model).max_width_px
         ),
     )
 }

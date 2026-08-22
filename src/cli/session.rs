@@ -23,6 +23,9 @@ pub struct PrintProfile {
     pub model: Model,
     pub task: PrintTask,
     pub max_width_px: u32,
+    pub pixels_per_mm: f64,
+    pub task_explicit: bool,
+    pub allow_experimental: bool,
 }
 
 pub fn resolve_profile(
@@ -32,10 +35,14 @@ pub fn resolve_profile(
 ) -> Result<PrintProfile> {
     let model = cfg.resolve_model(model);
     let task = resolve_task(model, args)?;
+    let device = thermark::profile_for_model(model);
     Ok(PrintProfile {
         model,
         task,
-        max_width_px: thermark::effective_max_width_px(model, task),
+        max_width_px: device.max_width_px,
+        pixels_per_mm: device.pixels_per_mm(),
+        task_explicit: args.task.is_some(),
+        allow_experimental: args.allow_experimental,
     })
 }
 
@@ -102,7 +109,11 @@ impl Transport for AnyTransport {
 }
 
 /// An open BLE or USB printer session.
-pub struct Session(PrinterClient<AnyTransport>);
+pub struct Session {
+    client: PrinterClient<AnyTransport>,
+    identity: Option<thermark::PrinterIdentity>,
+    allow_experimental: bool,
+}
 
 fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
     match (job, close) {
@@ -118,7 +129,13 @@ fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
 
 impl Session {
     #[allow(unused_variables)]
-    pub async fn connect(conn: &ResolvedConn, model: Model, task: PrintTask) -> Result<Self> {
+    pub async fn connect(
+        conn: &ResolvedConn,
+        model: Model,
+        task: PrintTask,
+        auto_task: bool,
+        allow_experimental: bool,
+    ) -> Result<Self> {
         match conn.conn {
             ConnPref::Ble => {
                 #[cfg(not(feature = "ble"))]
@@ -132,11 +149,9 @@ impl Session {
                     )
                     .await
                     .context("BLE connect")?;
-                    Ok(Self(
-                        PrinterClient::new(AnyTransport::Ble(ble), model)
-                            .with_print_task(task)
-                            .with_pacing(pacing_from_env()),
-                    ))
+                    let client = PrinterClient::new_with_task(AnyTransport::Ble(ble), model, task)
+                        .with_pacing(pacing_from_env());
+                    Self::finish_connect(client, auto_task, allow_experimental).await
                 }
             }
             ConnPref::Usb => {
@@ -146,22 +161,49 @@ impl Session {
                 {
                     let ser = SerialTransport::open(&conn.addr)
                         .with_context(|| format!("open serial {}", conn.addr))?;
-                    Ok(Self(
-                        PrinterClient::new(AnyTransport::Usb(ser), model)
-                            .with_print_task(task)
-                            .with_pacing(pacing_from_env()),
-                    ))
+                    let client = PrinterClient::new_with_task(AnyTransport::Usb(ser), model, task)
+                        .with_pacing(pacing_from_env());
+                    Self::finish_connect(client, auto_task, allow_experimental).await
                 }
             }
         }
     }
 
+    #[cfg(any(feature = "ble", feature = "serial"))]
+    async fn finish_connect(
+        mut client: PrinterClient<AnyTransport>,
+        auto_task: bool,
+        allow_experimental: bool,
+    ) -> Result<Self> {
+        let identity = client.identify().await.ok();
+        if let Some(identity) = &identity {
+            if let Some(profile) = client.apply_identity(identity, auto_task) {
+                tracing::info!(model = %profile.model, model_id = identity.model_id, dpi = profile.dpi, task = ?profile.task, "identified printer");
+            } else {
+                tracing::warn!(
+                    model_id = identity.model_id,
+                    "printer model is not in the profile registry"
+                );
+            }
+        }
+        Ok(Self {
+            client,
+            identity,
+            allow_experimental,
+        })
+    }
+
+    pub fn identity(&self) -> Option<&thermark::PrinterIdentity> {
+        self.identity.as_ref()
+    }
+
     pub async fn fetch_summary(&mut self) -> Result<PrinterSummary> {
-        Ok(self.0.fetch_summary().await?)
+        Ok(self.client.fetch_summary().await?)
     }
 
     pub async fn print_image_file_opts(&mut self, path: &Path, opts: PrintOptions) -> Result<()> {
-        self.0.print_image_file_opts(path, opts).await?;
+        self.ensure_print_allowed()?;
+        self.client.print_image_file_opts(path, opts).await?;
         Ok(())
     }
 
@@ -170,17 +212,29 @@ impl Session {
         gray: &image::GrayImage,
         density: thermark::Density,
     ) -> Result<()> {
-        if let Ok(rfid) = self.0.rfid_info().await {
+        self.ensure_print_allowed()?;
+        if let Ok(rfid) = self.client.rfid_info().await {
             tracing::info!(%rfid, "RFID");
         }
-        self.0.preflight_ready().await?;
-        self.0.print_gray_image(gray, density).await?;
+        self.client.preflight_ready().await?;
+        self.client.print_gray_image(gray, density).await?;
+        Ok(())
+    }
+
+    fn ensure_print_allowed(&self) -> Result<()> {
+        let task = self.client.print_task();
+        if !task.hardware_tested() && !self.allow_experimental {
+            bail!(
+                "detected printer uses experimental task '{task}'. Re-run with \
+                 --allow-experimental if you accept the risk"
+            );
+        }
         Ok(())
     }
 
     /// Release the link. [`BleTransport`]'s `Drop` is only a backstop.
     pub async fn finish(self) -> Result<()> {
-        self.0.close().await.map_err(anyhow::Error::from)
+        self.client.close().await.map_err(anyhow::Error::from)
     }
 }
 
@@ -191,13 +245,19 @@ impl Session {
 pub async fn print_file_resolved(
     cfg: &Config,
     conn: &ConnArgs,
-    model: Model,
-    task: PrintTask,
+    profile: PrintProfile,
     path: &Path,
     opts: PrintOptions,
 ) -> Result<()> {
     let conn = conn.resolve(cfg)?;
-    let mut session = Session::connect(&conn, model, task).await?;
+    let mut session = Session::connect(
+        &conn,
+        profile.model,
+        profile.task,
+        !profile.task_explicit,
+        profile.allow_experimental,
+    )
+    .await?;
     let result = session.print_image_file_opts(path, opts).await;
     let close_result = session.finish().await;
     combine_job_and_close(result, close_result)
@@ -211,29 +271,35 @@ pub async fn print_gray_resolved(
     density: thermark::Density,
 ) -> Result<()> {
     let resolved_conn = conn.resolve(cfg)?;
-    let mut session = Session::connect(&resolved_conn, profile.model, profile.task).await?;
+    let mut session = Session::connect(
+        &resolved_conn,
+        profile.model,
+        profile.task,
+        !profile.task_explicit,
+        profile.allow_experimental,
+    )
+    .await?;
     let result = session.print_gray_image(gray, density).await;
     let close_result = session.finish().await;
     combine_job_and_close(result, close_result)
 }
 
-/// Resolve the print task: `--task` wins, else `--simple-start`, else the
-/// model default.
+/// Resolve the print task: `--task` wins, otherwise use the profile default.
 ///
 /// Non-B1 tasks require `--allow-experimental` so untested sequences are not
 /// used by accident when a model default maps to one.
 pub fn resolve_task(model: Model, args: &TaskArgs) -> Result<PrintTask> {
-    let task = match (args.task, args.simple_start) {
-        (Some(task), _) => task,
-        (None, true) => PrintTask::Simple,
-        (None, false) => PrintTask::for_model(model),
-    };
+    let task = args.task.or_else(|| PrintTask::for_model(model)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "model '{model}' has no verified default print task; identify it and pass --task explicitly"
+        )
+    })?;
     if !task.hardware_tested() {
         if !args.allow_experimental {
             bail!(
                 "print task '{task}' is experimental (not hardware-tested in this project). \
                  Re-run with --allow-experimental if you accept the risk, \
-                 or use --task b1 / --model b1. See: thermark tasks"
+                 or use a hardware-tested profile. See: thermark tasks"
             );
         }
         eprintln!(
@@ -247,33 +313,32 @@ pub fn resolve_task(model: Model, args: &TaskArgs) -> Result<PrintTask> {
 mod tests {
     use super::*;
 
-    fn args(task: Option<PrintTask>, simple: bool, allow: bool) -> TaskArgs {
+    fn args(task: Option<PrintTask>, allow: bool) -> TaskArgs {
         TaskArgs {
-            simple_start: simple,
             task,
             allow_experimental: allow,
         }
     }
 
     #[test]
-    fn explicit_task_beats_simple_start() {
-        let t = resolve_task(Model::B1, &args(Some(PrintTask::B1), true, false)).unwrap();
+    fn explicit_task_is_used() {
+        let t = resolve_task(Model::B1, &args(Some(PrintTask::B1), false)).unwrap();
         assert_eq!(t, PrintTask::B1);
     }
 
     #[test]
     fn experimental_requires_opt_in() {
-        assert!(resolve_task(Model::B1, &args(Some(PrintTask::Simple), false, false)).is_err());
-        assert!(resolve_task(Model::B1, &args(Some(PrintTask::Simple), false, true)).is_ok());
+        assert!(resolve_task(Model::B1, &args(Some(PrintTask::D110), false)).is_err());
+        assert!(resolve_task(Model::B1, &args(Some(PrintTask::D110), true)).is_ok());
     }
 
     #[test]
     fn model_default_is_used_without_flags() {
         assert_eq!(
-            resolve_task(Model::B1, &args(None, false, false)).unwrap(),
+            resolve_task(Model::B1, &args(None, false)).unwrap(),
             PrintTask::B1
         );
         // D110 maps to an experimental task, so it is gated too.
-        assert!(resolve_task(Model::D110, &args(None, false, false)).is_err());
+        assert!(resolve_task(Model::D110, &args(None, false)).is_err());
     }
 }

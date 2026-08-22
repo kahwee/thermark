@@ -61,9 +61,9 @@ pub enum InfoKey {
 
 /// Supported printer models (printhead width and print-start variants).
 ///
-/// **Authoring orientation differs by family.** The reference implementation
-/// tags each model with a print direction: B-series is `"top"`, while the
-/// D11/D110 family is `"left"` and has its canvas rotated 90° clockwise during
+/// **Authoring orientation differs by profile.** The reference implementation
+/// tags each model with a print direction; B18 and the D11/D110 family are
+/// `"left"` and have their canvas rotated 90° clockwise during
 /// encoding, so its *long* edge is the one designed across. thermark does not
 /// rotate — a D110 label is authored as `--label 12x40`, narrow side first, and
 /// the bytes on the wire come out identical. Use `--rotate` if artwork was
@@ -85,9 +85,11 @@ pub enum InfoKey {
 pub enum Model {
     #[default]
     B1,
-    B21,
+    B1Pro,
+    B21Pro,
     B18,
     D11,
+    D11H,
     D110,
 }
 
@@ -95,9 +97,11 @@ impl Model {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::B1 => "b1",
-            Self::B21 => "b21",
+            Self::B1Pro => "b1pro",
+            Self::B21Pro => "b21pro",
             Self::B18 => "b18",
             Self::D11 => "d11",
+            Self::D11H => "d11h",
             Self::D110 => "d110",
         }
     }
@@ -105,28 +109,23 @@ impl Model {
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "b1" => Some(Self::B1),
-            "b21" => Some(Self::B21),
+            "b1pro" | "b1_pro" => Some(Self::B1Pro),
+            "b21pro" | "b21_pro" => Some(Self::B21Pro),
             "b18" => Some(Self::B18),
             "d11" => Some(Self::D11),
+            "d11h" | "d11_h" => Some(Self::D11H),
             "d110" => Some(Self::D110),
             _ => None,
         }
     }
 
-    /// Max printable width in pixels (~203 dpi / 8 px per mm).
-    ///
-    /// The effective limit for a job is this *and* the print task's — use
-    /// [`crate::print_task::effective_max_width_px`].
     pub fn max_width_px(self) -> u32 {
-        match self {
-            Self::B1 | Self::B21 | Self::B18 => crate::geometry::HEAD_WIDE_PX,
-            Self::D11 | Self::D110 => crate::geometry::HEAD_NARROW_PX,
-        }
+        crate::profile::profile_for_model(self).max_width_px
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("unknown model '{0}' (try b1, b21, d11, d110, b18)")]
+#[error("unknown model '{0}' (try b1, b1pro, b21pro, b18, d11, d11h, d110)")]
 pub struct ModelParseError(pub String);
 
 impl std::str::FromStr for Model {
@@ -150,6 +149,10 @@ pub fn info(key: InfoKey) -> Packet {
     pkt(Cmd::PrinterInfo, vec![key as u8])
 }
 
+pub fn connect() -> Packet {
+    pkt(Cmd::Connect, vec![0x01])
+}
+
 pub fn heartbeat() -> Packet {
     pkt(Cmd::Heartbeat, vec![0x01])
 }
@@ -166,11 +169,6 @@ pub fn set_label_type(t: u8) -> Packet {
     pkt(Cmd::SetLabelType, vec![t])
 }
 
-/// Fallback simple print-start (works on many firmwares).
-pub(crate) fn print_start_simple() -> Packet {
-    pkt(Cmd::PrintStart, vec![0x01])
-}
-
 pub fn print_end() -> Packet {
     pkt(Cmd::PrintEnd, vec![0x01])
 }
@@ -179,25 +177,12 @@ pub fn cancel_print() -> Packet {
     pkt(Cmd::CancelPrint, vec![0x01])
 }
 
-/// Set page size: row count (height) and column count (width), big-endian.
-pub(crate) fn set_page_size(rows: u16, cols: u16) -> Packet {
-    let mut data = Vec::with_capacity(4);
-    data.extend_from_slice(&rows.to_be_bytes());
-    data.extend_from_slice(&cols.to_be_bytes());
-    pkt(Cmd::SetPageSize, data)
-}
-
-/// B1 print-task page size: rows, cols, copies (all u16 BE).
-pub(crate) fn set_page_size_b1(rows: u16, cols: u16, copies: u16) -> Packet {
-    let mut data = Vec::with_capacity(6);
-    data.extend_from_slice(&rows.to_be_bytes());
-    data.extend_from_slice(&cols.to_be_bytes());
-    data.extend_from_slice(&copies.to_be_bytes());
-    pkt(Cmd::SetPageSize, data)
-}
-
 pub fn print_status() -> Packet {
     pkt(Cmd::PrintStatus, vec![0x01])
+}
+
+pub fn printer_status_data() -> Packet {
+    Packet::new(0xa5, vec![0x01])
 }
 
 /// Encode one bitmap print row (command 0x85).

@@ -37,9 +37,20 @@ Also works for name badges, line-art stickers, calibration, and batch jobs — s
 | Model | Task | Status |
 |-------|------|--------|
 | **B1** | `b1` | **Tested** |
-| B21 / B18 | `b21v1` | Experimental (`--allow-experimental`) |
-| D11 / D110 | `d110` | Experimental |
-| other | `simple` | Experimental |
+| B1 Pro / B21 Pro / D11_H | `d110mv4` | Experimental (`--allow-experimental`) |
+| D11 | `d11v1` | Experimental; firmware variants exist |
+| D110 | `d110` | Experimental |
+| B18 | unresolved | 96 px geometry known; packet capture needed |
+
+The profile registry and job lifecycles are cross-checked against
+[NiimBlueLib's model data](https://niim-docs.pages.dev/documents/NIIMBOT_model_characteristics.html),
+[packet generators](https://github.com/MultiMote/niimbluelib/blob/main/src/packets/packet_generator.ts),
+and the [community print-task captures](https://printers.niim.blue/interfacing/print-tasks/).
+Identity detection follows the independently exercised
+[niimbot-web-bluetooth flow](https://github.com/iscarelli/niimbot-web-bluetooth).
+B2 Pro is deliberately not registered: its
+[current capture](https://github.com/MultiMote/niimbluelib/issues/22) uses a
+separate two-colour `0xA7`/LZO raster pipeline that thermark does not implement.
 
 ## Install / build
 
@@ -60,6 +71,7 @@ Quit any official label app (one BLE client at a time).
 
 ```bash
 ./target/release/thermark scan --save          # full device name → config
+./target/release/thermark identify             # model id → DPI, width, task
 ./target/release/thermark doctor --use-config  # lid / paper / battery
 ```
 
@@ -188,8 +200,8 @@ Preview QR without printing: `qr ... --save /tmp/out.png --no-print`.
 
 | | |
 |--|--|
-| Resolution | ~**8 px/mm** (203 dpi) |
-| Max width (B1) | **384 px** (~48 mm) |
+| Resolution | model profile: **203 or 300 dpi** |
+| Max width | model profile: **96–591 px** for registered models |
 | 50×30 mm sticker | **384×240 px** |
 
 Any size works — pass `--label WxH` in mm. Common rolls:
@@ -201,9 +213,9 @@ Any size works — pass `--label WxH` in mm. Common rolls:
 | `50x30` | 384×240 | 216 px | 14.3 KB |
 | `50x80` | 384×640 | 237 px | 38.1 KB |
 
-Width is clamped to the printhead, so 50 mm media prints 48 mm wide (384 px) —
-the 2 mm is liner, not a bug. Height is unconstrained: the protocol carries the
-row count in a `u16`, and nothing in the format caps a page.
+Width and millimetre conversion come from the detected model profile. On B1,
+50 mm media is clamped to its 384 px head; 300 dpi models use their own DPI and
+usable width. Height is bounded only by the protocol's `u16` row count.
 
 ## Doctor
 
@@ -317,9 +329,9 @@ it.
 
 Just change `--label`; everything derives from it. Two things to know:
 
-- **Width is clamped to 384 px (~48 mm).** 50 mm media prints 48 mm wide. Media
-  wider than that gets cropped, not scaled — thermark cannot make the printhead
-  bigger.
+- **Width is clamped to the detected profile.** On B1 that is 384 px; narrow
+  D11/D110/B18 profiles are 96 px, while supported 300 dpi profiles have their
+  own measured limits.
 - **Narrow media runs out of room for a QR beside text.** The limit is width,
   not height: 40×20 and even 25×15 lay out fine, but 12 mm D110 tape leaves less
   than the 64 px of QR that survives thermal printing, so `qr` errors out rather

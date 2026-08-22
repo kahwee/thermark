@@ -74,7 +74,13 @@ fn encode_rfid_probe() {
 #[test]
 fn bad_model_rejected() {
     thermark()
-        .args(["info", "-a", "x", "--model", "not-a-model"])
+        .args([
+            "print",
+            "-i",
+            "fixtures/sticker_wifi.png",
+            "--model",
+            "not-a-model",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("possible values"));
@@ -101,7 +107,7 @@ fn experimental_task_requires_allow_flag() {
             // Product smoke fixture (guest Wi‑Fi demo)
             "fixtures/sticker_wifi.png",
             "--task",
-            "simple",
+            "d110",
         ])
         .assert()
         .failure()
@@ -119,7 +125,7 @@ fn experimental_model_default_requires_allow_flag() {
             "-i",
             "fixtures/sticker_wifi.png",
             "--model",
-            "b21",
+            "b21pro",
         ])
         .assert()
         .failure()
@@ -379,14 +385,14 @@ fn config_set_merges_model_and_connection() {
     let (_dir, path) = temp_config_path();
 
     thermark_with_config(&path)
-        .args(["config", "set", "-a", "B1-A", "-c", "usb", "-m", "b21"])
+        .args(["config", "set", "-a", "B1-A", "-c", "usb", "-m", "b21pro"])
         .assert()
         .success();
 
     let body = std::fs::read_to_string(&path).unwrap();
     assert!(body.contains("B1-A"));
     assert!(body.contains("usb"));
-    assert!(body.contains("b21"));
+    assert!(body.contains("b21pro"));
 
     thermark_with_config(&path)
         .args(["config", "set", "-a", "B1-B", "-c", "ble"])
@@ -397,7 +403,7 @@ fn config_set_merges_model_and_connection() {
     assert!(body.contains("B1-B"));
     assert!(body.contains("ble"));
     assert!(
-        body.contains("b21"),
+        body.contains("b21pro"),
         "model should be preserved on merge: {body}"
     );
 }
@@ -448,7 +454,7 @@ fn generated_label_without_save_does_not_announce_temp_file() {
 }
 
 #[test]
-fn mismatched_task_limits_preview_and_sticker_canvas_before_printing() {
+fn task_override_does_not_change_physical_profile_geometry() {
     let dir = tempfile::tempdir().unwrap();
     let preview = dir.path().join("preview.png");
     let sticker = dir.path().join("sticker.png");
@@ -469,7 +475,7 @@ fn mismatched_task_limits_preview_and_sticker_canvas_before_printing() {
         ])
         .assert()
         .success();
-    assert_eq!(image::open(&preview).unwrap().width(), 96);
+    assert_eq!(image::open(&preview).unwrap().width(), 384);
 
     thermark_with_config(&cfg)
         .args([
@@ -487,7 +493,7 @@ fn mismatched_task_limits_preview_and_sticker_canvas_before_printing() {
         ])
         .assert()
         .success();
-    assert_eq!(image::open(&sticker).unwrap().width(), 96);
+    assert_eq!(image::open(&sticker).unwrap().width(), 384);
 }
 
 #[test]

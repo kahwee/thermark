@@ -218,7 +218,7 @@ fn all_fixtures_open_and_encode() {
 
 #[test]
 fn wifi_demo_layout_api_matches_canvas() {
-    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W);
+    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
     let img = make_wifi_label(&WifiLabelOptions {
         ssid: "Demo-Guest".into(),
         password: "demo-not-real".into(),
@@ -242,7 +242,7 @@ fn wifi_demo_layout_api_matches_canvas() {
 
 #[test]
 fn link_sticker_layout_is_full_canvas_square_qr() {
-    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W);
+    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
     let img = make_qr_label_opts(&QrLabelOptions {
         url: "https://example.com/o/1042".into(),
         side_text: "ORDER #1042\nShip by Fri\nPriority".into(),
@@ -330,8 +330,8 @@ async fn wifi_fixture_mock_print_streams_rows() {
 #[test]
 #[ignore = "writes fixtures/sticker_calibrate.png"]
 fn regenerate_calibrate() {
-    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W);
-    let img = image_encode::calibration_pattern(lp, None);
+    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
+    let img = image_encode::calibration_pattern(lp, None, 8.0);
     let path = fixtures_dir().join("sticker_calibrate.png");
     img.save(&path).unwrap();
     println!("wrote {}", path.display());

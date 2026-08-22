@@ -4,11 +4,89 @@ use super::client::PrinterClient;
 use super::info::{Heartbeat, InfoValue, PrinterSummary, RfidInfo};
 use super::raw::OnTimeout;
 use crate::errors::{Error, Result};
+use crate::profile::PrinterIdentity;
 use crate::protocol::{self, Cmd, InfoKey};
 use crate::transport::Transport;
 use std::time::Duration;
 
 impl<T: Transport> PrinterClient<T> {
+    pub async fn identify(&mut self) -> Result<PrinterIdentity> {
+        let connect_result = self
+            .transceive_with(
+                protocol::connect(),
+                0xc2,
+                1,
+                Duration::from_millis(250),
+                OnTimeout::Resend,
+            )
+            .await
+            .ok()
+            .and_then(|packet| packet.data.first().copied());
+        let model_packet = self
+            .transceive_with(
+                protocol::info(InfoKey::DeviceType),
+                0x48,
+                8,
+                Duration::from_millis(200),
+                OnTimeout::Resend,
+            )
+            .await?;
+        let model_id = match model_packet.data.as_slice() {
+            [value] => u16::from(*value) << 8,
+            [hi, lo] => u16::from_be_bytes([*hi, *lo]),
+            data => {
+                return Err(Error::msg(format!(
+                    "invalid model-id response: {} bytes",
+                    data.len()
+                )));
+            }
+        };
+        let protocol_version = match connect_result {
+            Some(1 | 2) => connect_result,
+            Some(3) => self
+                .transceive_with(
+                    protocol::printer_status_data(),
+                    0xb5,
+                    2,
+                    Duration::from_millis(250),
+                    OnTimeout::Resend,
+                )
+                .await
+                .ok()
+                .and_then(|packet| parse_protocol_version(&packet.data)),
+            _ => None,
+        };
+        let firmware = self
+            .get_info(InfoKey::SoftVersion)
+            .await
+            .ok()
+            .map(|v| v.to_string());
+        let hardware = self
+            .get_info(InfoKey::HardVersion)
+            .await
+            .ok()
+            .map(|v| v.to_string());
+        Ok(PrinterIdentity {
+            model_id,
+            protocol_version,
+            firmware,
+            hardware,
+        })
+    }
+
+    pub fn apply_identity(
+        &mut self,
+        identity: &PrinterIdentity,
+        update_task: bool,
+    ) -> Option<&'static crate::profile::PrinterProfile> {
+        let profile = crate::profile::profile_for_identity(identity)?;
+        self.model = profile.model;
+        self.profile = profile;
+        if update_task && let Some(task) = crate::profile::task_for_identity(identity) {
+            self.task = task;
+        }
+        Some(profile)
+    }
     pub async fn get_info(&mut self, key: InfoKey) -> Result<InfoValue> {
         let request = protocol::info(key);
         let response_cmd = (Cmd::PrinterInfo as u8).wrapping_add(key as u8);
@@ -90,5 +168,33 @@ impl<T: Transport> PrinterClient<T> {
                 .next()
                 .unwrap_or_else(|| Error::msg("printer returned no summary data")))
         }
+    }
+}
+
+fn parse_protocol_version(data: &[u8]) -> Option<u8> {
+    if data.len() < 13 {
+        return None;
+    }
+    let raw = u16::from(data[11]) * 100 + u16::from(data[12]);
+    Some(match raw {
+        204..=299 => 3,
+        300..=301 => 4,
+        302.. => 5,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::parse_protocol_version;
+    #[test]
+    fn parses_protocol_generations() {
+        for (raw, expected) in [(204, 3), (300, 4), (302, 5)] {
+            let mut data = [0u8; 13];
+            data[11] = (raw / 100) as u8;
+            data[12] = (raw % 100) as u8;
+            assert_eq!(parse_protocol_version(&data), Some(expected));
+        }
+        assert_eq!(parse_protocol_version(&[0; 13]), None);
     }
 }

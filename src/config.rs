@@ -256,7 +256,8 @@ impl Config {
         }
         if let Some(safe_area) = self.safe_area {
             let label = LabelMm::parse(&self.resolve_label(None))?;
-            let pixels = label.to_pixels(self.resolve_model(None).max_width_px());
+            let profile = crate::profile::profile_for_model(self.resolve_model(None));
+            let pixels = label.to_pixels(profile.max_width_px, profile.pixels_per_mm());
             if safe_area.content(pixels).is_none() {
                 return Err(Error::msg(
                     "configured safe-area insets consume the entire label",
@@ -320,9 +321,10 @@ impl Config {
             .unwrap_or_else(|| DEFAULT_LABEL.to_string())
     }
 
-    /// Measured safe area if one was saved, else the built-in default.
-    pub fn resolve_safe_area(&self) -> SafeArea {
-        self.safe_area.unwrap_or_default()
+    /// Saved safe area, or the standard 1 mm registration margin at this DPI.
+    pub fn resolve_safe_area(&self, pixels_per_mm: f64) -> SafeArea {
+        self.safe_area
+            .unwrap_or_else(|| SafeArea::registration(pixels_per_mm))
     }
 
     /// Prefer CLI scan seconds when provided; else config; else 4.
@@ -427,7 +429,7 @@ mod tests {
         let mut cfg = Config {
             addr: Some("old".into()),
             connection: Some(ConnPref::Usb),
-            model: Some(Model::B21),
+            model: Some(Model::B1Pro),
             scan_secs: Some(9),
             safe_area: None,
             label: None,
@@ -435,7 +437,7 @@ mod tests {
         cfg.apply_set("B1-New", ConnPref::Ble, None, None).unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
         assert_eq!(cfg.connection, Some(ConnPref::Ble));
-        assert_eq!(cfg.model, Some(Model::B21));
+        assert_eq!(cfg.model, Some(Model::B1Pro));
         assert_eq!(cfg.scan_secs, Some(9));
     }
 
@@ -499,12 +501,12 @@ mod tests {
         let cfg = Config {
             connection: Some(ConnPref::Usb),
             scan_secs: Some(8),
-            model: Some(Model::B21),
+            model: Some(Model::B1Pro),
             ..Default::default()
         };
         assert_eq!(cfg.resolve_connection(None), ConnPref::Usb);
         assert_eq!(cfg.resolve_connection(Some(ConnPref::Ble)), ConnPref::Ble);
-        assert_eq!(cfg.resolve_model(None), Model::B21);
+        assert_eq!(cfg.resolve_model(None), Model::B1Pro);
         assert_eq!(cfg.resolve_model(Some(Model::B1)), Model::B1);
         assert_eq!(cfg.resolve_scan_secs(None), 8);
         assert_eq!(cfg.resolve_scan_secs(Some(0)), 1);

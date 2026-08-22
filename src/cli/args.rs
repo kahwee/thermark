@@ -50,13 +50,10 @@ pub struct ConnArgs {
 /// Which on-wire print sequence to use. Flattened into every printing command.
 #[derive(Debug, Clone, clap::Args)]
 pub struct TaskArgs {
-    /// Force simple 1-byte PrintStart (experimental)
-    #[arg(long, default_value_t = false)]
-    pub simple_start: bool,
-    /// Print task: b1 (tested), b21v1, d110, simple (experimental)
+    /// Print task override: b1, d11v1, d110, or d110mv4
     #[arg(long, value_enum)]
     pub task: Option<PrintTask>,
-    /// Allow experimental print tasks (non-B1); required for b21v1/d110/simple
+    /// Allow a task not hardware-tested by thermark
     #[arg(long, default_value_t = false)]
     pub allow_experimental: bool,
 }
@@ -147,9 +144,11 @@ pub enum Commands {
     Info {
         #[command(flatten)]
         conn: ConnArgs,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
+    },
+    /// Identify the connected printer and resolve its capability profile
+    Identify {
+        #[command(flatten)]
+        conn: ConnArgs,
     },
     /// Print an image (PNG/JPEG/…)
     Print {

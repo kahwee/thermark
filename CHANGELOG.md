@@ -10,6 +10,31 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Added
+
+- `thermark identify` reads model ID, protocol generation, firmware and
+  hardware versions, then resolves DPI, print width, direction, density range,
+  media types, and print task from a checked-in device profile.
+- Profiles for B1 Pro, B21 Pro, B18, D11_H, and D110.
+- Complete D110M_V4, D11_V1, and D110 job sequences, including their distinct
+  page-size payloads, PageStart behavior, PrintQuantity, completion signal,
+  and heartbeat workaround.
+
+### Changed
+
+- **BREAKING:** geometry conversion now requires pixels-per-millimetre; 300 dpi
+  profiles no longer render through the B1-only 8 px/mm conversion.
+- **BREAKING:** supported task names are now `b1`, `d11v1`, `d110`, and
+  `d110mv4`. Model profiles, rather than tasks, own physical geometry.
+- B18 is correctly registered as a 96 px, left-feed, density 1–3 device. Its
+  default task remains unresolved until a hardware capture establishes it.
+- Incomplete or missing completion status now fails safely instead of allowing
+  PrintEnd to declare an unconfirmed page successful.
+
+### Removed
+
+- Legacy `simple` and `b21v1` task paths and their CLI aliases.
+
 ## [0.31.0] - 2026-08-10
 
 ### Added

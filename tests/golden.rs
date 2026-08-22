@@ -44,7 +44,7 @@ fn golden_font() -> Option<PathBuf> {
 const ACTUAL_DIR: &str = "target/golden-actual";
 
 fn label() -> LabelPx {
-    LabelMm::parse("50x30").unwrap().to_pixels(384)
+    LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0)
 }
 
 /// Deterministic stand-in for user artwork: a shape with its own white margin,
@@ -76,11 +76,11 @@ fn cases() -> Vec<Case> {
         // ── Geometry: no font needed, always runs ────────────────────────
         Case {
             name: "calibration_pattern_50x30",
-            render: || Some(calibration_pattern(label(), Some(SafeArea::default()))),
+            render: || Some(calibration_pattern(label(), Some(SafeArea::default()), 8.0)),
         },
         Case {
             name: "calibration_pattern_full_bleed",
-            render: || Some(calibration_pattern(label(), None)),
+            render: || Some(calibration_pattern(label(), None, 8.0)),
         },
         Case {
             name: "art_contain_safe",
@@ -207,12 +207,13 @@ fn cases() -> Vec<Case> {
         Case {
             name: "calibration_numbered",
             render: || {
-                make_calibration_label(label(), SafeArea::default(), golden_font().as_deref()).ok()
+                make_calibration_label(label(), SafeArea::default(), 8.0, golden_font().as_deref())
+                    .ok()
             },
         },
         Case {
             name: "boundary_probe",
-            render: || make_boundary_label(label(), golden_font().as_deref()).ok(),
+            render: || make_boundary_label(label(), 8.0, golden_font().as_deref()).ok(),
         },
     ]
 }

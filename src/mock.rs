@@ -34,6 +34,8 @@ pub struct MockTransport {
     /// Override the `PrintStatus` (0xa3) reply body.
     print_status: Option<Vec<u8>>,
     recv_error: Option<String>,
+    page_index_pending: bool,
+    model_id: u16,
 }
 
 impl Default for MockTransport {
@@ -56,6 +58,8 @@ impl MockTransport {
             heartbeat: None,
             print_status: None,
             recv_error: None,
+            page_index_pending: false,
+            model_id: 4096,
         }
     }
 
@@ -67,6 +71,11 @@ impl MockTransport {
     /// like on the wire.
     pub fn set_print_status(&mut self, body: Vec<u8>) -> &mut Self {
         self.print_status = Some(body);
+        self
+    }
+
+    pub fn set_model_id(&mut self, model_id: u16) -> &mut Self {
+        self.model_id = model_id;
         self
     }
 
@@ -158,6 +167,7 @@ impl MockTransport {
     fn synthesize_reply(&self, cmd: u8, data: &[u8]) -> Option<Packet> {
         match cmd {
             0x83..=0x85 => None,
+            0xc1 => Some(Packet::new(0xc2, vec![0x03])),
             0x21 => Some(Packet::new(0x31, vec![0x01])),
             0x23 => Some(Packet::new(0x33, vec![0x01])),
             0x01 => Some(Packet::new(0x02, vec![0x01])),
@@ -173,6 +183,12 @@ impl MockTransport {
                     vec![0x00, 0x01, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
                 }),
             )),
+            0xa5 => {
+                let mut data = vec![0; 13];
+                data[11] = 3;
+                data[12] = 2;
+                Some(Packet::new(0xb5, data))
+            }
             0xdc => {
                 let mut d = vec![0u8; 13];
                 if let Some(hb) = self.heartbeat {
@@ -192,7 +208,7 @@ impl MockTransport {
                     0x0b => b"TESTMOCK01".to_vec(),
                     0x09 | 0x0c => vec![0x05, 0x00],
                     0x0a => vec![0x03],
-                    0x08 => vec![0x10, 0x00],
+                    0x08 => self.model_id.to_be_bytes().to_vec(),
                     _ => vec![0x01],
                 };
                 Some(Packet::new(0x40u8.wrapping_add(key), body))
@@ -240,6 +256,9 @@ impl Transport for MockTransport {
             }
             self.push_rx(reply);
         }
+        if cmd == 0xe3 {
+            self.page_index_pending = true;
+        }
         Ok(())
     }
 
@@ -248,6 +267,10 @@ impl Transport for MockTransport {
             return Err(Error::transport(message.clone()));
         }
         if self.rx_queue.is_empty() {
+            if self.page_index_pending {
+                self.page_index_pending = false;
+                return Ok(Packet::new(0xe0, vec![0x00, 0x01]).encode()?);
+            }
             return Ok(Vec::new());
         }
         Ok(self.rx_queue.remove(0))
@@ -274,7 +297,7 @@ mod tests {
     async fn injects_print_error() {
         let mut m = MockTransport::new();
         m.fail_cmd(0x01, 0x02);
-        m.send_packet(&crate::PrintTask::Simple.print_start(1))
+        m.send_packet(&crate::PrintTask::D110.print_start(1))
             .await
             .unwrap();
         let rx = m.recv_raw(Duration::from_millis(1)).await.unwrap();

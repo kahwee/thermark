@@ -24,7 +24,7 @@ fn b1_print_start_roundtrip() {
 fn b1_page_size_matches_50x30() {
     let lp = LabelMm::parse("50x30")
         .unwrap()
-        .to_pixels(Model::B1.max_width_px());
+        .to_pixels(Model::B1.max_width_px(), 8.0);
     let p = PrintTask::B1.set_page_size(lp.height_px as u16, lp.width_px as u16, 1);
     assert_eq!(p.cmd, 0x13);
     assert_eq!(p.data.len(), 6);
@@ -58,13 +58,13 @@ fn model_max_widths() {
     assert_eq!(Model::B1.max_width_px(), 384);
     assert_eq!(Model::D11.max_width_px(), 96);
     assert_eq!(Model::parse("b1"), Some(Model::B1));
-    assert_eq!(Model::parse("B21"), Some(Model::B21));
+    assert_eq!(Model::parse("B21PRO"), Some(Model::B21Pro));
     assert!(Model::parse("nope").is_none());
 }
 
 #[test]
 fn qr_label_exact_canvas_and_square_qr() {
-    let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+    let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
     let img =
         make_qr_label("https://www.youtube.com", "ABC\n123", lp, TextSide::Right).expect("layout");
     assert_eq!(img.dimensions(), (384, 240));
@@ -89,7 +89,7 @@ fn qr_label_exact_canvas_and_square_qr() {
 fn px_per_mm_constant() {
     assert!((PX_PER_MM - 8.0).abs() < f64::EPSILON);
     // 50mm * 8 = 400, clamped to 384
-    assert_eq!(LabelMm::new(50.0, 30.0).to_pixels(384).width_px, 384);
+    assert_eq!(LabelMm::new(50.0, 30.0).to_pixels(384, 8.0).width_px, 384);
 }
 
 #[test]

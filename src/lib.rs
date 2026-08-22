@@ -1,6 +1,6 @@
 //! # thermark
 //!
-//! Local **sticker printing** for pocket thermal label printers (B1, B21, D11, …)
+//! Local **sticker printing** for pocket thermal label printers (B1, B1 Pro, D11, …)
 //! over Bluetooth LE or USB serial — no vendor app, no cloud.
 //!
 //! Typical jobs: **guest Wi‑Fi join stickers**, QR + text links, inventory tags,
@@ -28,6 +28,7 @@ pub mod mock;
 pub mod packet;
 pub mod print_task;
 pub mod printer;
+pub mod profile;
 pub mod protocol;
 pub mod transport;
 pub mod types;
@@ -40,10 +41,14 @@ pub use image_encode::Raster;
 pub use label::{TextAlign, TextLabelOptions, TextSide, make_qr_label_opts, make_text_label};
 pub use mock::MockTransport;
 pub use packet::Packet;
-pub use print_task::{PrintTask, SupportStatus, effective_max_width_px, hardware_matrix};
+pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
 pub use printer::{
     Heartbeat, InfoValue, OnTimeout, Pacing, PrintOptions, PrintStatus, PrinterClient,
     PrinterSummary, RawPrinter, RfidInfo,
+};
+pub use profile::{
+    PROFILES, PrintDirection, PrinterIdentity, PrinterProfile, profile_for_identity,
+    profile_for_model, task_for_identity,
 };
 pub use protocol::Model;
 pub use transport::{

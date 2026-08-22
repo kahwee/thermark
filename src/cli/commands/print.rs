@@ -61,7 +61,6 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
     warn_print_limits(&image, &label, no_fill, dither);
 
     let profile = resolve_profile(cfg, model, &task)?;
-    let model = profile.model;
     let label_mm = label.as_deref().map(LabelMm::parse).transpose()?;
     // --no-fill wins over --fill; without a label there is no canvas to fill.
     let use_fill = !no_fill && label_mm.is_some() && fill;
@@ -78,13 +77,18 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
         safe: if full_bleed {
             thermark::geometry::SafeArea::NONE
         } else {
-            cfg.resolve_safe_area()
+            cfg.resolve_safe_area(profile.pixels_per_mm)
         },
         trim: !no_trim,
     };
     if let Some(out) = preview {
         // Compose through the exact same path a real print uses, then stop.
-        let composed = thermark::printer::compose_for_label(&image, &opts, profile.max_width_px)?;
+        let composed = thermark::printer::compose_for_label(
+            &image,
+            &opts,
+            profile.max_width_px,
+            profile.pixels_per_mm,
+        )?;
         composed
             .to_luma8()
             .save(&out)
@@ -93,16 +97,20 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
         return Ok(());
     }
 
-    print_file_resolved(cfg, &conn, model, profile.task, &image, opts).await?;
+    print_file_resolved(cfg, &conn, profile, &image, opts).await?;
     println!("OK — sent print job");
     Ok(())
 }
 
 /// Explain how to read the pattern, so a re-run needs no other reference.
-fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geometry::SafeArea) {
-    use thermark::image_encode::{CALIBRATION_RING_STEP_PX, CALIBRATION_RINGS};
+fn print_calibration_legend(
+    lp: thermark::geometry::LabelPx,
+    safe: thermark::geometry::SafeArea,
+    pixels_per_mm: f64,
+) {
+    use thermark::image_encode::CALIBRATION_RINGS;
 
-    let step_mm = CALIBRATION_RING_STEP_PX as f64 / thermark::geometry::PX_PER_MM;
+    let step_mm = (0.5 * pixels_per_mm).round().max(1.0) / pixels_per_mm;
     println!();
     println!("How to read it:");
     println!(
@@ -122,11 +130,11 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
     println!("               treating the result as a registration margin.");
     println!("  Diagonals  = skew check; the X should meet exactly at the centre cross.");
     println!();
-    println!("Some side-to-side white border is physical, not a bug:");
-    println!("  Across: the printhead is 48 mm; a 50 mm label keeps ~2 mm.");
+    println!("Some side-to-side white border can be physical, not a bug:");
+    println!("  Across: media wider than the profile's printhead is clamped.");
     println!("          If it is lopsided, re-centre the roll with the guide.");
-    println!("  Feed:   a charged B1 reaches the whole canvas. The default 1 mm");
-    println!("          top/bottom inset is registration insurance only.");
+    println!("  Feed:   the default 1 mm top/bottom inset is registration");
+    println!("          insurance; use the boundary probe before changing it.");
     println!();
     println!(
         "Canvas {}x{} px. Re-run any time:",
@@ -136,8 +144,8 @@ fn print_calibration_legend(lp: thermark::geometry::LabelPx, safe: thermark::geo
 }
 
 /// How to read the boundary probe.
-fn print_boundary_legend(label: thermark::geometry::LabelPx) {
-    let range = thermark::label::boundary_range(label);
+fn print_boundary_legend(label: thermark::geometry::LabelPx, pixels_per_mm: f64) {
+    let range = thermark::label::boundary_range(label, pixels_per_mm);
     let (from, to) = (range.start(), range.end());
     println!();
     println!("One numbered bar per millimetre, {from}..{to} mm from the top.");
@@ -179,7 +187,7 @@ pub async fn calibrate(cfg: &Config, args: CalibrateCommand) -> Result<()> {
     let profile = resolve_profile(cfg, model, &task)?;
     let label = cfg.resolve_label(label.as_deref());
     let label_mm = LabelMm::parse(&label)?;
-    let lp = label_mm.to_pixels(profile.max_width_px);
+    let lp = label_mm.to_pixels(profile.max_width_px, profile.pixels_per_mm);
     info!(
         width_px = lp.width_px,
         height_px = lp.height_px,
@@ -189,17 +197,26 @@ pub async fn calibrate(cfg: &Config, args: CalibrateCommand) -> Result<()> {
     );
 
     let gray = if boundary {
-        thermark::label::make_boundary_label(lp, None)?
+        thermark::label::make_boundary_label(lp, profile.pixels_per_mm, None)?
     } else {
-        thermark::label::make_calibration_label(lp, cfg.resolve_safe_area(), None)?
+        thermark::label::make_calibration_label(
+            lp,
+            cfg.resolve_safe_area(profile.pixels_per_mm),
+            profile.pixels_per_mm,
+            None,
+        )?
     };
     print_gray_resolved(cfg, &conn, profile, &gray, density).await?;
     if boundary {
         println!("OK — boundary probe printed ({label})");
-        print_boundary_legend(lp);
+        print_boundary_legend(lp, profile.pixels_per_mm);
         return Ok(());
     }
     println!("OK — calibration printed ({label})");
-    print_calibration_legend(lp, cfg.resolve_safe_area());
+    print_calibration_legend(
+        lp,
+        cfg.resolve_safe_area(profile.pixels_per_mm),
+        profile.pixels_per_mm,
+    );
     Ok(())
 }

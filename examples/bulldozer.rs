@@ -85,7 +85,7 @@ fn main() {
 
     // Bottom edge clips on this hardware, so the artwork sits inside the
     // measured safe area rather than centred on the raw canvas.
-    let label = LabelMm::parse("50x30").unwrap().to_pixels(384);
+    let label = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
     let safe = SafeArea::default();
     let area = safe.content(label).expect("50x30 has a printable area");
     let (w, h) = (label.width_px, label.height_px);

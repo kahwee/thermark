@@ -4,7 +4,8 @@ use super::pacing::Pacing;
 use super::raw::RawPrinter;
 use crate::errors::{Error, Result};
 use crate::packet::PacketDecoder;
-use crate::print_task::{PrintTask, effective_max_width_px};
+use crate::print_task::PrintTask;
+use crate::profile::{PrinterProfile, profile_for_model};
 use crate::protocol::Model;
 use crate::transport::Transport;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use tracing::{info, warn};
 pub struct PrinterClient<T: Transport> {
     pub(crate) transport: T,
     pub(crate) model: Model,
+    pub(crate) profile: &'static PrinterProfile,
     pub(crate) task: PrintTask,
     pub(crate) pacing: Pacing,
     pub(crate) decoder: PacketDecoder,
@@ -48,10 +50,17 @@ fn warn_if_battery_low(power_level: Option<u8>) {
 
 impl<T: Transport> PrinterClient<T> {
     pub fn new(transport: T, model: Model) -> Self {
+        let task = PrintTask::for_model(model)
+            .expect("model has no default print task; construct with new_with_task");
+        Self::new_with_task(transport, model, task)
+    }
+
+    pub fn new_with_task(transport: T, model: Model, task: PrintTask) -> Self {
         Self {
             transport,
             model,
-            task: PrintTask::for_model(model),
+            profile: profile_for_model(model),
+            task,
             pacing: Pacing::REAL,
             decoder: PacketDecoder::new(),
         }
@@ -69,9 +78,13 @@ impl<T: Transport> PrinterClient<T> {
         self
     }
 
-    /// Widest raster this client will accept, given both model and print task.
+    /// Widest raster this model profile will accept.
     pub fn max_width_px(&self) -> u32 {
-        effective_max_width_px(self.model, self.task)
+        self.profile.max_width_px
+    }
+
+    pub fn profile(&self) -> &'static PrinterProfile {
+        self.profile
     }
 
     pub fn transport(&self) -> &T {

@@ -15,19 +15,20 @@ pub fn compose_for_label(
     path: &Path,
     opts: &PrintOptions,
     max_width_px: u32,
+    pixels_per_mm: f64,
 ) -> Result<image::DynamicImage> {
     let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
     if opts.trim {
         img = image_encode::trim_white(img, opts.threshold.get());
     }
 
-    match opts.label.map(|l| l.to_pixels(max_width_px)) {
+    match opts.label.map(|l| l.to_pixels(max_width_px, pixels_per_mm)) {
         Some(lp) => {
             info!(
                 width_px = lp.width_px,
                 height_px = lp.height_px,
-                width_mm = lp.mm().width_mm,
-                height_mm = lp.mm().height_mm,
+                width_mm = lp.mm(pixels_per_mm).width_mm,
+                height_mm = lp.mm(pixels_per_mm).height_mm,
                 max_w = max_width_px,
                 fill = opts.fill,
                 margin_px = opts.margin_px,

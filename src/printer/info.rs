@@ -362,10 +362,6 @@ impl std::fmt::Display for PrinterSummary {
                 writeln!(f, "    rfid:   {v}  (1=RFID ok)")?;
             }
         }
-        writeln!(
-            f,
-            "  geometry:     8 px/mm (~203 dpi), B1 max width 384 px (~48 mm)"
-        )?;
         Ok(())
     }
 }

@@ -468,7 +468,11 @@ pub const CALIBRATION_RULER_MINOR_PX: u32 = 12;
 /// sides, the configured [`SafeArea`] is inside the real printable region and
 /// labels will not clip. The thin rings around it measure how much headroom
 /// (or shortfall) there is.
-pub fn calibration_pattern(label: LabelPx, safe: Option<SafeArea>) -> GrayImage {
+pub fn calibration_pattern(
+    label: LabelPx,
+    safe: Option<SafeArea>,
+    pixels_per_mm: f64,
+) -> GrayImage {
     let w = label.width_px;
     let h = label.height_px;
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
@@ -491,8 +495,9 @@ pub fn calibration_pattern(label: LabelPx, safe: Option<SafeArea>) -> GrayImage 
     }
 
     // Concentric rings, 1px each so a clipped ring is unambiguous.
+    let ring_step = (0.5 * pixels_per_mm).round().max(1.0) as u32;
     for ring in 0..CALIBRATION_RINGS {
-        let inset = ring * CALIBRATION_RING_STEP_PX;
+        let inset = ring * ring_step;
         if inset * 2 + 1 >= w.min(h) {
             break;
         }
@@ -511,18 +516,17 @@ pub fn calibration_pattern(label: LabelPx, safe: Option<SafeArea>) -> GrayImage 
     // Feed ruler down both sides: a minor tick every 1 mm, a long major tick
     // every 5 mm. Read off where the print stops to get the exact loss at the
     // feed edge — the rings only resolve 0.5 mm near the very edge.
-    let px_per_mm = crate::geometry::PX_PER_MM as u32;
-    for mm in 0..=(h / px_per_mm) {
-        let y = mm * px_per_mm;
+    let ruler_scale = pixels_per_mm / crate::geometry::PX_PER_MM;
+    let major_len = (f64::from(CALIBRATION_RULER_MAJOR_PX) * ruler_scale).round() as u32;
+    let minor_len = (f64::from(CALIBRATION_RULER_MINOR_PX) * ruler_scale).round() as u32;
+    let height_mm = (f64::from(h) / pixels_per_mm).floor() as u32;
+    for mm in 0..=height_mm {
+        let y = (f64::from(mm) * pixels_per_mm).round() as u32;
         if y >= h {
             break;
         }
         let major = mm % 5 == 0;
-        let len = if major {
-            CALIBRATION_RULER_MAJOR_PX
-        } else {
-            CALIBRATION_RULER_MINOR_PX
-        };
+        let len = if major { major_len } else { minor_len };
         let thick = if major { 3 } else { 1 };
         for t in 0..thick {
             let yy = (y + t).min(h - 1);
@@ -641,7 +645,7 @@ mod tests {
     #[test]
     fn fill_label_exact_size() {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(50, 50, Luma([0])));
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let out = fill_label(src, lp, SafeArea::NONE, 0);
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
     }
@@ -650,7 +654,7 @@ mod tests {
     fn contain_label_centers_with_white_margins() {
         // Tall image → letterbox left/right on a wide label.
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(40, 80, Luma([0])));
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let out = contain_label(src, lp, SafeArea::NONE, 0).to_luma8();
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
         // Corners of canvas should stay white (letterbox / padding).
@@ -665,7 +669,7 @@ mod tests {
     #[test]
     fn contain_label_respects_margin() {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(200, 200, Luma([0])));
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let margin = 16u32;
         let out = contain_label(src, lp, SafeArea::NONE, margin).to_luma8();
         // Outer margin ring must be white.
@@ -680,7 +684,7 @@ mod tests {
         // The bug this pins: `thermark print` scaled images across the whole
         // canvas, so the bottom rows landed in the band the printer never
         // reaches and were silently lost.
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let safe = SafeArea::B1;
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
 
@@ -728,7 +732,7 @@ mod tests {
     fn trimmed_art_fills_the_printable_band() {
         // The bug this pins: the artwork's own margin was *added* to the
         // label's inset, so the drawing came out far smaller than the media.
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let safe = SafeArea::B1;
         let mut g = GrayImage::from_pixel(384, 240, Luma([255]));
         for y in 60..180 {
@@ -756,7 +760,7 @@ mod tests {
     #[test]
     fn safe_area_none_still_fills_the_whole_canvas() {
         // Calibration depends on this: it must reach the true edges.
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
         let g = fill_label(src, lp, SafeArea::NONE, 0).to_luma8();
         assert_eq!(g.get_pixel(0, 0)[0], 0);

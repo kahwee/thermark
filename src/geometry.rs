@@ -1,9 +1,9 @@
 //! Print geometry helpers.
 //!
-//! Community-tested resolution: **8 pixels per mm** (~203 dpi).
-//! B1-class printhead max width: **384 px** (≈ 48 mm; marketing often says 50 mm).
+//! Millimetre conversion is driven by the connected printer profile. The B1
+//! uses 203 dpi; newer profiles may use 300 dpi and wider or narrower heads.
 
-/// Pixels per millimeter (community measurement).
+/// B1 pixels per millimetre, retained for B1-specific artwork constants.
 pub const PX_PER_MM: f64 = 8.0;
 
 /// Printhead widths in pixels. Both [`crate::protocol::Model`] and
@@ -21,18 +21,18 @@ pub const MAX_DIMENSION_MM: f64 = 1000.0;
 ///
 /// Non-finite input yields 1 px; validate with [`LabelMm::parse`] to get an
 /// error instead.
-pub fn mm_to_px(mm: f64) -> u32 {
+pub fn mm_to_px(mm: f64, pixels_per_mm: f64) -> u32 {
     if !mm.is_finite() {
         return 1;
     }
-    (mm * PX_PER_MM)
+    (mm * pixels_per_mm)
         .round()
-        .clamp(1.0, MAX_DIMENSION_MM * PX_PER_MM) as u32
+        .clamp(1.0, MAX_DIMENSION_MM * pixels_per_mm) as u32
 }
 
 /// Convert pixels to millimetres.
-pub fn px_to_mm(px: u32) -> f64 {
-    px as f64 / PX_PER_MM
+pub fn px_to_mm(px: u32, pixels_per_mm: f64) -> f64 {
+    px as f64 / pixels_per_mm
 }
 
 /// Label size in millimetres (across printhead × along feed).
@@ -87,19 +87,19 @@ impl LabelMm {
     }
 
     /// Pixel size clamped to the model printhead width.
-    pub fn to_pixels(self, max_width_px: u32) -> LabelPx {
+    pub fn to_pixels(self, max_width_px: u32, pixels_per_mm: f64) -> LabelPx {
         // Rows are packed one bit per pixel, so the width must land on a byte
         // boundary. `checked_next_multiple_of` says that directly and returns
         // `None` on overflow, where `div_ceil(8) * 8` could wrap — the bug that
         // made `--label infx30` silently print an 8px-wide label.
-        let w = mm_to_px(self.width_mm)
+        let w = mm_to_px(self.width_mm, pixels_per_mm)
             .checked_next_multiple_of(8)
             .unwrap_or(max_width_px)
             .min(max_width_px);
 
         LabelPx {
             width_px: w.max(8),
-            height_px: mm_to_px(self.height_mm).max(1),
+            height_px: mm_to_px(self.height_mm, pixels_per_mm).max(1),
         }
     }
 }
@@ -168,13 +168,23 @@ impl SafeArea {
 
     /// Build from millimetres (what `thermark calibrate`'s ruler reads out).
     pub fn from_mm(top: f64, bottom: f64, left: f64, right: f64) -> Self {
-        let px = |mm: f64| (mm.max(0.0) * PX_PER_MM).round() as u32;
+        Self::from_mm_at(top, bottom, left, right, PX_PER_MM)
+    }
+
+    /// Build from millimetres at a printer profile's resolution.
+    pub fn from_mm_at(top: f64, bottom: f64, left: f64, right: f64, pixels_per_mm: f64) -> Self {
+        let px = |mm: f64| (mm.max(0.0) * pixels_per_mm).round() as u32;
         Self {
             top: px(top),
             bottom: px(bottom),
             left: px(left),
             right: px(right),
         }
+    }
+
+    /// The standard 1 mm feed-registration margin at this resolution.
+    pub fn registration(pixels_per_mm: f64) -> Self {
+        Self::from_mm_at(1.0, 1.0, 0.0, 0.0, pixels_per_mm)
     }
 
     /// The reliably printable rectangle of `label`, or `None` if the insets
@@ -207,8 +217,11 @@ pub struct LabelPx {
 }
 
 impl LabelPx {
-    pub fn mm(self) -> LabelMm {
-        LabelMm::new(px_to_mm(self.width_px), px_to_mm(self.height_px))
+    pub fn mm(self, pixels_per_mm: f64) -> LabelMm {
+        LabelMm::new(
+            px_to_mm(self.width_px, pixels_per_mm),
+            px_to_mm(self.height_px, pixels_per_mm),
+        )
     }
 }
 
@@ -225,7 +238,7 @@ mod tests {
     #[test]
     fn fifty_by_thirty() {
         let l = LabelMm::parse("50x30").unwrap();
-        let p = l.to_pixels(384);
+        let p = l.to_pixels(384, 8.0);
         assert_eq!(p.width_px, 384);
         assert_eq!(p.height_px, 240);
     }
@@ -238,15 +251,34 @@ mod tests {
 
     #[test]
     fn width_multiple_of_eight() {
-        let p = LabelMm::new(49.0, 30.0).to_pixels(384);
+        let p = LabelMm::new(49.0, 30.0).to_pixels(384, 8.0);
         assert_eq!(p.width_px % 8, 0);
     }
 
     #[test]
     fn mm_px_roundtrip_approx() {
-        let px = mm_to_px(30.0);
+        let px = mm_to_px(30.0, 8.0);
         assert_eq!(px, 240);
-        assert!((px_to_mm(240) - 30.0).abs() < 0.01);
+        assert!((px_to_mm(240, 8.0) - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn three_hundred_dpi_geometry_is_not_forced_to_eight_px_per_mm() {
+        let profile = crate::profile::profile_for_model(crate::Model::D11H);
+        let pixels =
+            LabelMm::new(15.0, 30.0).to_pixels(profile.max_width_px, profile.pixels_per_mm());
+        assert_eq!(pixels.width_px, 142);
+        assert_eq!(pixels.height_px, 354);
+    }
+
+    #[test]
+    fn registration_margin_tracks_profile_resolution() {
+        assert_eq!(SafeArea::registration(8.0), SafeArea::B1);
+        let area = SafeArea::registration(300.0 / 25.4);
+        assert_eq!(
+            (area.top, area.bottom, area.left, area.right),
+            (12, 12, 0, 0)
+        );
     }
 
     #[test]
@@ -279,7 +311,7 @@ mod tests {
         // `LabelMm::new` is public and unvalidated, so the pixel math must be
         // total on its own.
         for mm in [f64::INFINITY, f64::NAN, f64::MAX, 1e300, -1.0] {
-            let p = LabelMm::new(mm, mm).to_pixels(384);
+            let p = LabelMm::new(mm, mm).to_pixels(384, 8.0);
             assert!(p.width_px.is_multiple_of(8) && p.width_px <= 384);
             assert!(p.height_px >= 1);
         }
@@ -287,7 +319,7 @@ mod tests {
 
     #[test]
     fn safe_area_insets_correctly() {
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let safe = SafeArea::B1;
         // Deliberately asserts no particular asymmetry. An earlier version
         // required `bottom > top`, encoding a "the feed edge is unreachable"
@@ -330,7 +362,7 @@ mod tests {
 
     #[test]
     fn narrow_label_under_max() {
-        let p = LabelMm::parse("30x20").unwrap().to_pixels(384);
+        let p = LabelMm::parse("30x20").unwrap().to_pixels(384, 8.0);
         assert_eq!(p.width_px, 240);
         assert_eq!(p.height_px, 160);
     }

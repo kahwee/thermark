@@ -241,25 +241,26 @@ fn draw_border(img: &mut GrayImage) {
 pub fn make_calibration_label(
     label: LabelPx,
     safe: SafeArea,
+    pixels_per_mm: f64,
     font_path: Option<&std::path::Path>,
 ) -> Result<GrayImage> {
-    use crate::geometry::PX_PER_MM;
-
-    let mut img = crate::image_encode::calibration_pattern(label, Some(safe));
+    let mut img = crate::image_encode::calibration_pattern(label, Some(safe), pixels_per_mm);
     let font = match load_font(font_path, None) {
         Ok(f) => f,
         // No system font: the geometric pattern is still perfectly usable.
         Err(_) => return Ok(img),
     };
 
-    let px_per_mm = PX_PER_MM as u32;
-    let size = 13.0f32;
+    let scale = pixels_per_mm / crate::geometry::PX_PER_MM;
+    let size = (13.0 * scale) as f32;
     // Clear of the ruler ticks, derived from their length rather than a second
     // constant that has to be kept in agreement by hand.
-    let inset = crate::image_encode::CALIBRATION_RULER_MAJOR_PX + 4;
+    let inset =
+        ((crate::image_encode::CALIBRATION_RULER_MAJOR_PX + 4) as f64 * scale).round() as u32;
 
-    for mm in (0..=(label.height_px / px_per_mm)).step_by(5) {
-        let y = mm * px_per_mm;
+    let height_mm = (f64::from(label.height_px) / pixels_per_mm).floor() as u32;
+    for mm in (0..=height_mm).step_by(5) {
+        let y = (f64::from(mm) * pixels_per_mm).round() as u32;
         if y >= label.height_px {
             break;
         }
@@ -286,9 +287,9 @@ pub fn make_calibration_label(
 
 /// How many millimetres the boundary probe covers, ending at the label's edge.
 ///
-/// Thirteen bars is what fits across a 384 px head while leaving each numeral
-/// room; the window is placed at the *end* of the label because that is the
-/// edge in question.
+/// Thirteen bars leaves each numeral room on the narrowest supported probe;
+/// the window is placed at the *end* of the label because that is the edge in
+/// question.
 pub const BOUNDARY_SPAN_MM: u32 = 13;
 
 /// Millimetre range the boundary probe marks on `label`: the last
@@ -297,9 +298,11 @@ pub const BOUNDARY_SPAN_MM: u32 = 13;
 /// Derived from the label rather than fixed. A hardcoded 17..29 drew three
 /// bars on 40x20 media and probed the middle of a 50x80 label — nowhere near
 /// the edge it exists to measure.
-pub fn boundary_range(label: LabelPx) -> std::ops::RangeInclusive<u32> {
-    let px_per_mm = crate::geometry::PX_PER_MM as u32;
-    let last = (label.height_px / px_per_mm).saturating_sub(1);
+pub fn boundary_range(label: LabelPx, pixels_per_mm: f64) -> std::ops::RangeInclusive<u32> {
+    let last = (f64::from(label.height_px) / pixels_per_mm)
+        .floor()
+        .max(1.0) as u32
+        - 1;
     let first = last.saturating_sub(BOUNDARY_SPAN_MM - 1);
     first..=last
 }
@@ -315,16 +318,14 @@ pub fn boundary_range(label: LabelPx) -> std::ops::RangeInclusive<u32> {
 /// see is the answer**, with no counting and no scale estimation.
 pub fn make_boundary_label(
     label: LabelPx,
+    pixels_per_mm: f64,
     font_path: Option<&std::path::Path>,
 ) -> Result<GrayImage> {
-    use crate::geometry::PX_PER_MM;
-
     let (w, h) = (label.width_px, label.height_px);
     let mut img = GrayImage::from_pixel(w, h, Luma([255]));
     let font = load_font(font_path, None)?;
 
-    let px_per_mm = PX_PER_MM as u32;
-    let range = boundary_range(label);
+    let range = boundary_range(label, pixels_per_mm);
     let steps = range.end() - range.start() + 1;
     let slot = w / steps.max(1);
     let bar_w = slot.saturating_sub(4).max(1);
@@ -332,15 +333,16 @@ pub fn make_boundary_label(
 
     for (i, mm) in range.enumerate() {
         let i = i as u32;
-        let y = mm * px_per_mm;
-        if y + px_per_mm > h {
+        let y = (f64::from(mm) * pixels_per_mm).round() as u32;
+        let next_y = (f64::from(mm + 1) * pixels_per_mm).round() as u32;
+        if next_y > h {
             break;
         }
         let x0 = i * slot;
 
         // Bar: 1 mm tall, so its own thickness cannot be mistaken for a
         // neighbour's.
-        for yy in y..(y + px_per_mm).min(h) {
+        for yy in y..next_y.min(h) {
             for xx in x0..(x0 + bar_w).min(w) {
                 img.put_pixel(xx, yy, Luma([0]));
             }
@@ -519,7 +521,7 @@ mod tests {
 
     #[test]
     fn label_text_is_left_to_right_abc() {
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let img = make_qr_label("https://www.youtube.com", "ABC", lp, TextSide::Right).unwrap();
         assert_eq!(img.dimensions(), (384, 240));
 
@@ -557,7 +559,7 @@ mod tests {
     fn qr_layout_is_the_only_source_of_layout_math() {
         // `max_qr_side` must report exactly what the renderer uses, or the two
         // copies of this math drift.
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let layout = qr_layout(lp, SafeArea::default()).expect("50x30 fits");
         assert_eq!(max_qr_side(lp, SafeArea::default()), layout.qr_side);
         assert!(layout.text_col_w <= lp.width_px / 2);
@@ -602,7 +604,7 @@ mod tests {
 
     #[test]
     fn qr_stays_clear_of_the_clipped_bottom_edge() {
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let layout = qr_layout(lp, SafeArea::default()).unwrap();
         let safe = SafeArea::default();
         // The QR must end above the band the printer cannot reach.
@@ -616,7 +618,7 @@ mod tests {
 
     #[test]
     fn text_label_renders_and_stays_in_the_safe_area() {
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let Ok(img) = make_text_label(&TextLabelOptions {
             text: "HELLO\nWORLD".into(),
             label: lp,
@@ -640,7 +642,7 @@ mod tests {
 
     #[test]
     fn text_label_rejects_empty_text() {
-        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384);
+        let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         assert!(
             make_text_label(&TextLabelOptions {
                 text: "   ".into(),

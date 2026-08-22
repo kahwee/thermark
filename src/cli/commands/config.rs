@@ -122,7 +122,7 @@ struct SafeAreaUpdate {
 
 fn safe_area(update: SafeAreaUpdate) -> Result<()> {
     use anyhow::bail;
-    use thermark::geometry::{LabelMm, MAX_DIMENSION_MM, PX_PER_MM, SafeArea};
+    use thermark::geometry::{LabelMm, MAX_DIMENSION_MM, SafeArea};
 
     let SafeAreaUpdate {
         last_tick,
@@ -174,9 +174,11 @@ fn safe_area(update: SafeAreaUpdate) -> Result<()> {
         (None, b) => b,
     };
 
-    let current = cfg.resolve_safe_area();
+    let profile = thermark::profile_for_model(cfg.resolve_model(None));
+    let pixels_per_mm = profile.pixels_per_mm();
+    let current = cfg.resolve_safe_area(pixels_per_mm);
     let px = |mm: Option<f64>, fallback: u32| {
-        mm.map(|v| (v.max(0.0) * PX_PER_MM).round() as u32)
+        mm.map(|v| (v.max(0.0) * pixels_per_mm).round() as u32)
             .unwrap_or(fallback)
     };
     let updated = SafeArea {
@@ -185,7 +187,7 @@ fn safe_area(update: SafeAreaUpdate) -> Result<()> {
         left: px(left, current.left),
         right: px(right, current.right),
     };
-    let label_px = label_mm.to_pixels(cfg.resolve_model(None).max_width_px());
+    let label_px = label_mm.to_pixels(profile.max_width_px, profile.pixels_per_mm());
     if updated.content(label_px).is_none() {
         bail!(
             "safe-area insets consume the entire {}x{} mm label",
@@ -195,7 +197,7 @@ fn safe_area(update: SafeAreaUpdate) -> Result<()> {
     }
     cfg.safe_area = Some(updated);
     let path = cfg.save()?;
-    let mm = |v: u32| v as f64 / PX_PER_MM;
+    let mm = |v: u32| v as f64 / pixels_per_mm;
     println!(
         "safe area: top {:.1}mm  bottom {:.1}mm  left {:.1}mm  right {:.1}mm",
         mm(updated.top),
