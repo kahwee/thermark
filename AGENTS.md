@@ -42,6 +42,7 @@ cargo test --test fixtures_readme   # sticker fixtures + boundary checks
 
 # One-time setup (full BLE advertising name → config.json)
 ./target/release/thermark scan --save
+./target/release/thermark identify --json > local/printer-identity.json
 ./target/release/thermark doctor --use-config
 
 # Stickers (fixtures/ product demos; personal art → local/prints/)
@@ -74,7 +75,7 @@ Experimental print tasks need `--allow-experimental`.
 | `errors.rs` | Print error 0xDB reason codes |
 | `transport.rs`, `transport/` | Common transport/matching + BLE and serial implementations |
 | `printer/` | Client core, safe print jobs, queries, validated pacing, explicit raw API |
-| `geometry.rs` | 8 px/mm, `LabelMm` / `LabelPx`, `HEAD_*_PX` widths |
+| `geometry.rs` | Profile-aware mm/pixel conversion, label and safe-area geometry |
 | `image_encode.rs` | Image → `Raster` (rows + dimensions together) |
 | `font.rs` | System TTF/TTC (`ab_glyph`), named fonts |
 | `label.rs` | Square QR + side text; `qr_layout` owns the geometry |
@@ -86,9 +87,9 @@ Experimental print tasks need `--allow-experimental`.
 
 ### Invariants worth keeping
 
-- **Widths:** size canvases and check rasters with
-  `print_task::effective_max_width_px(model, task)` — never `Model::max_width_px`
-  alone, or a mismatched `--model`/`--task` encodes before failing.
+- **Widths:** physical geometry belongs to `PrinterProfile`; print tasks describe
+  wire behavior only. Compose and validate through the connected client's
+  profile so model, DPI, and width cannot drift apart.
 - **Layout:** QR-beside-text geometry lives only in `label::qr_layout`.
 - **Printer names:** the "looks like a label printer" heuristic lives only in
   `transport::name_looks_like_label_printer`.
@@ -256,16 +257,18 @@ measurable difference.
 
 ## Print tasks
 
-`PrintTask` in `src/print_task.rs` selects on-wire sequence:
+`PrintTask` in `src/print_task.rs` selects the on-wire sequence. It does not own
+physical geometry.
 
 | Task | Hardware-tested here? |
 |------|------------------------|
-| `B1` | **Yes** |
-| `B21V1`, `D110`, `Simple` | No (experimental) |
+| `b1` | **Yes** |
+| `d11v1`, `d110`, `d110mv4` | No (experimental) |
 
 `PrinterClient` defaults via `PrintTask::for_model`. Override: `--task` / `.with_print_task()`.
 
-CLI: experimental tasks (`b21v1`, `d110`, `simple`, or models that map to them) require `--allow-experimental` on `print` / `qr` / `calibrate`. Library API is unrestricted.
+CLI: every non-B1 task requires `--allow-experimental` on printing commands.
+Library API is unrestricted.
 
 ## Tests
 

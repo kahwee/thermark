@@ -12,29 +12,19 @@ such change is listed under **Changed** with the old and new spelling.
 
 ### Added
 
-- `thermark identify` reads model ID, protocol generation, firmware and
-  hardware versions, then resolves DPI, print width, direction, density range,
-  media types, and print task from a checked-in device profile.
-- `thermark identify --json` emits a stable, shareable monochrome hardware
-  report suitable for saving under the gitignored `local/` directory.
-- Profiles for B1 Pro, B21 Pro, B18, D11_H, and D110.
-- Complete D110M_V4, D11_V1, and D110 job sequences, including their distinct
-  page-size payloads, PageStart behavior, PrintQuantity, completion signal,
-  and heartbeat workaround.
+- Printer identification with human-readable and JSON hardware reports.
+- Experimental monochrome profiles and complete job sequences for the B1 Pro,
+  B21 Pro, D11, D11_H, and D110 families; B18 geometry is recognized but its
+  print task remains unresolved.
 
 ### Changed
 
-- **BREAKING:** geometry conversion now requires pixels-per-millimetre; 300 dpi
-  profiles no longer render through the B1-only 8 px/mm conversion.
-- **BREAKING:** supported task names are now `b1`, `d11v1`, `d110`, and
-  `d110mv4`. Model profiles, rather than tasks, own physical geometry.
-- B18 is correctly registered as a 96 px, left-feed, density 1–3 device. Its
-  default task remains unresolved until a hardware capture establishes it.
+- **BREAKING:** geometry conversion is profile-aware and supported task names
+  are now `b1`, `d11v1`, `d110`, and `d110mv4`.
 - Incomplete or missing completion status now fails safely instead of allowing
   PrintEnd to declare an unconfirmed page successful.
-- Model, profile, selected task, and detected identity now live in one
-  `PrinterDevice` object so they cannot drift independently inside a session.
-- The supported product scope is explicitly monochrome and B1-first.
+- `PrinterDevice` keeps model, profile, task, and identity coherent inside a
+  session. Product scope is explicitly monochrome and B1-first.
 
 ### Removed
 
