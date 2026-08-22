@@ -79,13 +79,7 @@ impl<T: Transport> PrinterClient<T> {
         identity: &PrinterIdentity,
         update_task: bool,
     ) -> Option<&'static crate::profile::PrinterProfile> {
-        let profile = crate::profile::profile_for_identity(identity)?;
-        self.model = profile.model;
-        self.profile = profile;
-        if update_task && let Some(task) = crate::profile::task_for_identity(identity) {
-            self.task = task;
-        }
-        Some(profile)
+        self.device.identify(identity.clone(), update_task)
     }
     pub async fn get_info(&mut self, key: InfoKey) -> Result<InfoValue> {
         let request = protocol::info(key);

@@ -15,6 +15,8 @@ such change is listed under **Changed** with the old and new spelling.
 - `thermark identify` reads model ID, protocol generation, firmware and
   hardware versions, then resolves DPI, print width, direction, density range,
   media types, and print task from a checked-in device profile.
+- `thermark identify --json` emits a stable, shareable monochrome hardware
+  report suitable for saving under the gitignored `local/` directory.
 - Profiles for B1 Pro, B21 Pro, B18, D11_H, and D110.
 - Complete D110M_V4, D11_V1, and D110 job sequences, including their distinct
   page-size payloads, PageStart behavior, PrintQuantity, completion signal,
@@ -30,6 +32,9 @@ such change is listed under **Changed** with the old and new spelling.
   default task remains unresolved until a hardware capture establishes it.
 - Incomplete or missing completion status now fails safely instead of allowing
   PrintEnd to declare an unconfirmed page successful.
+- Model, profile, selected task, and detected identity now live in one
+  `PrinterDevice` object so they cannot drift independently inside a session.
+- The supported product scope is explicitly monochrome and B1-first.
 
 ### Removed
 

@@ -27,7 +27,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
         } => commands::device::scan(seconds, save, name.as_deref()).await?,
         Commands::Ports => commands::device::ports()?,
         Commands::Info { conn } => commands::device::info(&cfg, &conn).await?,
-        Commands::Identify { conn } => commands::device::identify(&cfg, &conn).await?,
+        Commands::Identify { conn, json } => commands::device::identify(&cfg, &conn, json).await?,
         Commands::Fonts => commands::device::fonts(),
         Commands::Tasks => commands::device::tasks(),
         Commands::Encode { cmd, data } => commands::device::encode(&cmd, &data)?,

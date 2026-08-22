@@ -10,13 +10,79 @@ pub enum PrintDirection {
     Left,
 }
 
+impl PrintDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Left => "left",
+        }
+    }
+}
+
 /// Facts reported by a connected printer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PrinterIdentity {
     pub model_id: u16,
     pub protocol_version: Option<u8>,
     pub firmware: Option<String>,
     pub hardware: Option<String>,
+}
+
+/// One coherent view of the connected printer.
+///
+/// Keeping the profile, selected protocol task, and observed identity together
+/// prevents the client from accidentally updating one without the others.
+#[derive(Debug, Clone)]
+pub struct PrinterDevice {
+    profile: &'static PrinterProfile,
+    task: PrintTask,
+    identity: Option<PrinterIdentity>,
+}
+
+impl PrinterDevice {
+    pub fn configured(model: Model, task: PrintTask) -> Self {
+        Self {
+            profile: profile_for_model(model),
+            task,
+            identity: None,
+        }
+    }
+
+    pub fn identify(
+        &mut self,
+        identity: PrinterIdentity,
+        update_task: bool,
+    ) -> Option<&'static PrinterProfile> {
+        self.identity = Some(identity);
+        let identity = self.identity.as_ref().expect("identity was just stored");
+        let profile = profile_for_identity(identity)?;
+        let detected_task = task_for_identity(identity);
+        self.profile = profile;
+        if update_task && let Some(task) = detected_task {
+            self.task = task;
+        }
+        Some(profile)
+    }
+
+    pub const fn model(&self) -> Model {
+        self.profile.model
+    }
+
+    pub const fn profile(&self) -> &'static PrinterProfile {
+        self.profile
+    }
+
+    pub const fn task(&self) -> PrintTask {
+        self.task
+    }
+
+    pub fn set_task(&mut self, task: PrintTask) {
+        self.task = task;
+    }
+
+    pub fn identity(&self) -> Option<&PrinterIdentity> {
+        self.identity.as_ref()
+    }
 }
 
 /// Capabilities and protocol behavior for one printer model.
@@ -196,5 +262,34 @@ mod tests {
             ..identity
         };
         assert_eq!(task_for_identity(&later), Some(PrintTask::D11V1));
+    }
+
+    #[test]
+    fn device_updates_profile_task_and_identity_together() {
+        let mut device = PrinterDevice::configured(Model::B1, PrintTask::B1);
+        let identity = PrinterIdentity {
+            model_id: 4097,
+            protocol_version: Some(5),
+            firmware: Some("2.12".into()),
+            hardware: Some("2.01".into()),
+        };
+        device.identify(identity.clone(), true).unwrap();
+        assert_eq!(device.model(), Model::B1Pro);
+        assert_eq!(device.task(), PrintTask::D110MV4);
+        assert_eq!(device.identity(), Some(&identity));
+    }
+
+    #[test]
+    fn device_keeps_unknown_identity_without_claiming_a_profile() {
+        let mut device = PrinterDevice::configured(Model::B1, PrintTask::B1);
+        let identity = PrinterIdentity {
+            model_id: 0xffff,
+            protocol_version: None,
+            firmware: None,
+            hardware: None,
+        };
+        assert_eq!(device.identify(identity.clone(), true), None);
+        assert_eq!(device.identity(), Some(&identity));
+        assert_eq!(device.model(), Model::B1);
     }
 }

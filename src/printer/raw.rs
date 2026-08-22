@@ -130,7 +130,7 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub(crate) async fn start_print(&mut self) -> Result<bool> {
-        let req = self.task.print_start(1);
+        let req = self.print_task().print_start(1);
         let pkt = self
             .transceive(
                 req,
@@ -164,7 +164,7 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub(crate) async fn set_page_size(&mut self, rows: u16, cols: u16) -> Result<bool> {
-        let req = self.task.set_page_size(rows, cols, 1);
+        let req = self.print_task().set_page_size(rows, cols, 1);
         let pkt = self
             .transceive(
                 req,

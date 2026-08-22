@@ -142,6 +142,16 @@ fn print_help_mentions_allow_experimental() {
 }
 
 #[test]
+fn identify_help_offers_json_hardware_capture() {
+    thermark()
+        .args(["identify", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--json"))
+        .stdout(predicate::str::contains("machine-readable"));
+}
+
+#[test]
 fn print_help_mentions_dither_and_no_fill() {
     thermark()
         .args(["print", "--help"])

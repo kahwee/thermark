@@ -3,6 +3,9 @@
 Local, scriptable stickers for pocket thermal printers over **Bluetooth LE** or **USB**. No vendor app, no cloud, no account.
 
 Hardware-tested on a real **B1-class** 50×30 mm printer (**384×240 px** at 8 px/mm).
+thermark is intentionally **monochrome only**: one black thermal layer on white
+media. Multi-colour heads, colour separation, and compressed colour protocols
+are out of scope.
 
 ---
 
@@ -72,8 +75,14 @@ Quit any official label app (one BLE client at a time).
 ```bash
 ./target/release/thermark scan --save          # full device name → config
 ./target/release/thermark identify             # model id → DPI, width, task
+./target/release/thermark identify --json \
+  > local/printer-identity.json                 # shareable hardware capture
 ./target/release/thermark doctor --use-config  # lid / paper / battery
 ```
+
+For this project, B1 is the primary product path: it is the only model verified
+on owned hardware. Other monochrome profiles stay explicitly experimental until
+someone runs the same fixtures on the physical printer.
 
 Config: macOS `~/Library/Application Support/thermark/config.json` · Linux `~/.config/thermark/config.json`  
 Address priority: **`-a`** → **`THERMARK_ADDR`** → **config**. Match is **exact** name/id; **`--fuzzy`** only if you mean it.

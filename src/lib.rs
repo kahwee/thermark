@@ -47,7 +47,7 @@ pub use printer::{
     PrinterSummary, RawPrinter, RfidInfo,
 };
 pub use profile::{
-    PROFILES, PrintDirection, PrinterIdentity, PrinterProfile, profile_for_identity,
+    PROFILES, PrintDirection, PrinterDevice, PrinterIdentity, PrinterProfile, profile_for_identity,
     profile_for_model, task_for_identity,
 };
 pub use protocol::Model;

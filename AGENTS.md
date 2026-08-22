@@ -10,6 +10,12 @@ Guidance for coding agents working in this repository.
 
 **Positioning:** local tool for stickers on real objects — **scan to join (Wi‑Fi)** and **scan to open (URL)** first; inventory, badges, line-art second. Offline, scriptable, no cloud.
 
+**Scope:** monochrome direct-thermal output only. Do not add colour-layer
+separation, compressed colour raster protocols, or multi-colour media support.
+The owned B1 is the primary product path and the only path considered
+hardware-verified; all other monochrome profiles stay experimental until run
+on the corresponding physical printer.
+
 - Crate / binary: **`thermark`**
 - Do **not** put vendor brand names in the package or product name
 - Not AirPrint / CUPS — custom binary protocol (B1-class)
@@ -64,6 +70,7 @@ Experimental print tasks need `--allow-experimental`.
 | `config.rs` | User `config.json` (default BLE addr) |
 | `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
+| `profile.rs` | `PrinterDevice` aggregate, detected identity, physical capabilities |
 | `errors.rs` | Print error 0xDB reason codes |
 | `transport.rs`, `transport/` | Common transport/matching + BLE and serial implementations |
 | `printer/` | Client core, safe print jobs, queries, validated pacing, explicit raw API |

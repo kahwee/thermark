@@ -20,10 +20,12 @@ impl<T: Transport> PrinterClient<T> {
     /// Print a validated raster using the complete task sequence.
     pub async fn print_raster(&mut self, raster: Raster, density: Density) -> Result<()> {
         let (width, height) = (raster.width(), raster.height());
+        let task = self.print_task();
+        let profile = self.profile();
         info!(
             width,
             height,
-            task = %self.task,
+            task = %task,
             density = density.get(),
             row_packets = raster.rows().len(),
             "print job"
@@ -41,13 +43,13 @@ impl<T: Transport> PrinterClient<T> {
             });
         }
 
-        if !self.profile.supports_density(density.get()) {
+        if !profile.supports_density(density.get()) {
             return Err(Error::msg(format!(
                 "density {} is outside the {}..={} range for {}",
                 density.get(),
-                self.profile.density_min,
-                self.profile.density_max,
-                self.model
+                profile.density_min,
+                profile.density_max,
+                profile.model
             )));
         }
 
@@ -67,7 +69,7 @@ impl<T: Transport> PrinterClient<T> {
             Cmd::PrintStart as u8,
         )?;
 
-        if self.task.uses_print_clear() {
+        if task.uses_print_clear() {
             let packet = self
                 .transceive_with(
                     protocol::pkt(Cmd::PrintClear, vec![0x01]),
@@ -83,10 +85,10 @@ impl<T: Transport> PrinterClient<T> {
                 Cmd::PrintClear as u8,
             )?;
         }
-        if self.task.uses_page_start() {
+        if task.uses_page_start() {
             Self::require_ack(self.start_page().await?, "start_page", Cmd::PageStart as u8)?;
         }
-        if self.task.pre_page_status() {
+        if task.pre_page_status() {
             self.send_raw_packet(protocol::print_status()).await?;
             self.maybe_sleep(Duration::from_millis(30)).await;
         }
@@ -95,7 +97,7 @@ impl<T: Transport> PrinterClient<T> {
             "set_page_size",
             Cmd::SetPageSize as u8,
         )?;
-        if self.task.uses_print_quantity() {
+        if task.uses_print_quantity() {
             let packet = self
                 .transceive_with(
                     protocol::pkt(Cmd::PrintQuantity, 1u16.to_be_bytes().to_vec()),
@@ -125,13 +127,13 @@ impl<T: Transport> PrinterClient<T> {
         Self::require_ack(self.end_page().await?, "end_page", Cmd::PageEnd as u8)?;
         self.maybe_sleep(self.pacing.after_page_end()).await;
 
-        self.wait_for_completion(self.task.completion()).await?;
+        self.wait_for_completion(task.completion()).await?;
 
         let attempts = self.pacing.end_print_tries().get();
         for _ in 0..attempts {
             match self.end_print().await {
                 Ok(true) => {
-                    if self.task.heartbeat_after_end() {
+                    if task.heartbeat_after_end() {
                         self.send_raw_packet(protocol::pkt(Cmd::Heartbeat, vec![0x01]))
                             .await?;
                     }
@@ -231,7 +233,7 @@ impl<T: Transport> PrinterClient<T> {
 
     pub async fn print_image_file_opts(&mut self, path: &Path, opts: PrintOptions) -> Result<()> {
         let max_width = self.max_width_px();
-        let image = compose_for_label(path, &opts, max_width, self.profile.pixels_per_mm())?;
+        let image = compose_for_label(path, &opts, max_width, self.profile().pixels_per_mm())?;
         let raster = image_encode::encode(image, max_width, opts.threshold.get(), opts.dither)?;
 
         if let Ok(rfid) = self.rfid_info().await {

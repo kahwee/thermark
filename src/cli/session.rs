@@ -111,7 +111,6 @@ impl Transport for AnyTransport {
 /// An open BLE or USB printer session.
 pub struct Session {
     client: PrinterClient<AnyTransport>,
-    identity: Option<thermark::PrinterIdentity>,
     allow_experimental: bool,
 }
 
@@ -188,13 +187,12 @@ impl Session {
         }
         Ok(Self {
             client,
-            identity,
             allow_experimental,
         })
     }
 
     pub fn identity(&self) -> Option<&thermark::PrinterIdentity> {
-        self.identity.as_ref()
+        self.client.identity()
     }
 
     pub async fn fetch_summary(&mut self) -> Result<PrinterSummary> {

@@ -5,7 +5,7 @@ use super::raw::RawPrinter;
 use crate::errors::{Error, Result};
 use crate::packet::PacketDecoder;
 use crate::print_task::PrintTask;
-use crate::profile::{PrinterProfile, profile_for_model};
+use crate::profile::{PrinterDevice, PrinterIdentity, PrinterProfile};
 use crate::protocol::Model;
 use crate::transport::Transport;
 use std::time::Duration;
@@ -13,9 +13,7 @@ use tracing::{info, warn};
 
 pub struct PrinterClient<T: Transport> {
     pub(crate) transport: T,
-    pub(crate) model: Model,
-    pub(crate) profile: &'static PrinterProfile,
-    pub(crate) task: PrintTask,
+    pub(crate) device: PrinterDevice,
     pub(crate) pacing: Pacing,
     pub(crate) decoder: PacketDecoder,
 }
@@ -58,9 +56,7 @@ impl<T: Transport> PrinterClient<T> {
     pub fn new_with_task(transport: T, model: Model, task: PrintTask) -> Self {
         Self {
             transport,
-            model,
-            profile: profile_for_model(model),
-            task,
+            device: PrinterDevice::configured(model, task),
             pacing: Pacing::REAL,
             decoder: PacketDecoder::new(),
         }
@@ -68,7 +64,7 @@ impl<T: Transport> PrinterClient<T> {
 
     /// Override the print-task sequence (default comes from [`PrintTask::for_model`]).
     pub fn with_print_task(mut self, task: PrintTask) -> Self {
-        self.task = task;
+        self.device.set_task(task);
         self
     }
 
@@ -80,11 +76,11 @@ impl<T: Transport> PrinterClient<T> {
 
     /// Widest raster this model profile will accept.
     pub fn max_width_px(&self) -> u32 {
-        self.profile.max_width_px
+        self.device.profile().max_width_px
     }
 
     pub fn profile(&self) -> &'static PrinterProfile {
-        self.profile
+        self.device.profile()
     }
 
     pub fn transport(&self) -> &T {
@@ -92,11 +88,15 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub fn model(&self) -> Model {
-        self.model
+        self.device.model()
     }
 
     pub fn print_task(&self) -> PrintTask {
-        self.task
+        self.device.task()
+    }
+
+    pub fn identity(&self) -> Option<&PrinterIdentity> {
+        self.device.identity()
     }
 
     /// Access individual protocol operations for diagnostics and experiments.

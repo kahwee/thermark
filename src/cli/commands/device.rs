@@ -18,6 +18,79 @@ use tracing::info;
 use crate::cli::args::ConnArgs;
 use crate::cli::session::Session;
 
+#[derive(serde::Serialize)]
+struct DensityReport {
+    min: u8,
+    max: u8,
+    default: u8,
+}
+
+/// Presentation object shared by human and JSON identity output.
+#[derive(serde::Serialize)]
+struct PrinterReport<'a> {
+    model: thermark::Model,
+    model_id: u16,
+    protocol_version: Option<u8>,
+    firmware: Option<&'a str>,
+    hardware: Option<&'a str>,
+    dpi: u16,
+    max_width_px: u32,
+    print_direction: &'static str,
+    density: DensityReport,
+    task: Option<&'static str>,
+    color_mode: &'static str,
+}
+
+impl<'a> PrinterReport<'a> {
+    fn new(
+        identity: &'a thermark::PrinterIdentity,
+        profile: &'static thermark::PrinterProfile,
+    ) -> Self {
+        Self {
+            model: profile.model,
+            model_id: identity.model_id,
+            protocol_version: identity.protocol_version,
+            firmware: identity.firmware.as_deref(),
+            hardware: identity.hardware.as_deref(),
+            dpi: profile.dpi,
+            max_width_px: profile.max_width_px,
+            print_direction: profile.direction.as_str(),
+            density: DensityReport {
+                min: profile.density_min,
+                max: profile.density_max,
+                default: profile.density_default,
+            },
+            task: thermark::task_for_identity(identity).map(|value| value.as_str()),
+            color_mode: "monochrome",
+        }
+    }
+}
+
+impl std::fmt::Display for PrinterReport<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "model: {}", self.model)?;
+        writeln!(f, "model id: {}", self.model_id)?;
+        writeln!(
+            f,
+            "protocol: {}",
+            self.protocol_version
+                .map_or_else(|| "unknown".into(), |value| value.to_string())
+        )?;
+        writeln!(f, "firmware: {}", self.firmware.unwrap_or("unknown"))?;
+        writeln!(f, "hardware: {}", self.hardware.unwrap_or("unknown"))?;
+        writeln!(f, "dpi: {}", self.dpi)?;
+        writeln!(f, "max width: {} px", self.max_width_px)?;
+        writeln!(f, "direction: {}", self.print_direction)?;
+        writeln!(
+            f,
+            "density: {}..={} (default {})",
+            self.density.min, self.density.max, self.density.default
+        )?;
+        writeln!(f, "task: {}", self.task.unwrap_or("unresolved"))?;
+        writeln!(f, "color mode: {}", self.color_mode)
+    }
+}
+
 #[cfg(feature = "ble")]
 pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result<()> {
     info!(seconds, save, "scanning BLE");
@@ -129,7 +202,7 @@ pub async fn info(cfg: &Config, conn: &ConnArgs) -> Result<()> {
     Ok(())
 }
 
-pub async fn identify(cfg: &Config, conn: &ConnArgs) -> Result<()> {
+pub async fn identify(cfg: &Config, conn: &ConnArgs, json: bool) -> Result<()> {
     let conn = conn.resolve(cfg)?;
     let session = Session::connect(
         &conn,
@@ -149,33 +222,12 @@ pub async fn identify(cfg: &Config, conn: &ConnArgs) -> Result<()> {
                 identity.model_id
             )
         })?;
-        println!("model: {}", profile.model);
-        println!("model id: {}", identity.model_id);
-        println!(
-            "protocol: {}",
-            identity
-                .protocol_version
-                .map_or_else(|| "unknown".into(), |v| v.to_string())
-        );
-        println!(
-            "firmware: {}",
-            identity.firmware.as_deref().unwrap_or("unknown")
-        );
-        println!(
-            "hardware: {}",
-            identity.hardware.as_deref().unwrap_or("unknown")
-        );
-        println!("dpi: {}", profile.dpi);
-        println!("max width: {} px", profile.max_width_px);
-        println!("direction: {:?}", profile.direction);
-        println!(
-            "density: {}..={} (default {})",
-            profile.density_min, profile.density_max, profile.density_default
-        );
-        println!(
-            "task: {}",
-            thermark::task_for_identity(identity).map_or("unresolved", |task| task.as_str())
-        );
+        let report = PrinterReport::new(identity, profile);
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{report}");
+        }
         Ok(())
     })();
     let close = session.finish().await;
@@ -223,6 +275,30 @@ pub fn encode(cmd: &str, data: &str) -> Result<()> {
     let pkt = thermark::Packet::try_new(cmd, data).context("data too long for one packet")?;
     println!("{}", hex::encode(pkt.encode()?));
     Ok(())
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+
+    #[test]
+    fn b1_report_is_monochrome_and_machine_readable() {
+        let identity = thermark::PrinterIdentity {
+            model_id: 4096,
+            protocol_version: Some(5),
+            firmware: Some("5.18".into()),
+            hardware: Some("5.10".into()),
+        };
+        let report =
+            PrinterReport::new(&identity, thermark::profile_for_model(thermark::Model::B1));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["model"], "b1");
+        assert_eq!(json["model_id"], 4096);
+        assert_eq!(json["max_width_px"], 384);
+        assert_eq!(json["task"], "b1");
+        assert_eq!(json["color_mode"], "monochrome");
+        assert!(report.to_string().contains("firmware: 5.18"));
+    }
 }
 
 #[cfg(all(test, feature = "ble"))]

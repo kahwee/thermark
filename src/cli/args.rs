@@ -149,6 +149,9 @@ pub enum Commands {
     Identify {
         #[command(flatten)]
         conn: ConnArgs,
+        /// Emit stable machine-readable output for bug reports and captures
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Print an image (PNG/JPEG/…)
     Print {
