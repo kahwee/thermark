@@ -247,6 +247,29 @@ pub fn gray_to_print_bits(gray: &GrayImage, threshold: u8, dither: bool) -> Gray
     bw
 }
 
+/// Render validated print bits as a viewable black-on-white image.
+///
+/// This uses the same dimension checks and threshold/dither traversal as
+/// [`encode_gray`], while mapping a burn bit to black instead of the encoder's
+/// internal `255 = burn` mask convention.
+pub fn render_print_preview(
+    gray: &GrayImage,
+    max_width: u32,
+    threshold: u8,
+    dither: bool,
+) -> Result<GrayImage> {
+    let (width, height) = gray.dimensions();
+    validate_encode_dimensions(width, height, max_width)?;
+
+    let mut preview = GrayImage::from_pixel(width, height, Luma([255]));
+    for_each_print_bit(gray, threshold, dither, |x, y, burn| {
+        if burn {
+            preview.get_pixel_mut(x, y)[0] = 0;
+        }
+    });
+    Ok(preview)
+}
+
 /// Visit thresholded pixels in row-major order without materialising a second
 /// image. Dithering keeps only the current and next error rows, so memory is
 /// proportional to page width instead of width × height.

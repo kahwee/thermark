@@ -1,21 +1,11 @@
 //! `thermark doctor` — host + printer readiness.
 
 use anyhow::{Context, Result};
-use thermark::config::{Config, ConnPref};
+use thermark::config::Config;
 use thermark::doctor::{self, DoctorOptions};
-use thermark::print_task::PrintTask;
-use thermark::protocol::Model;
 use thermark::transport::BleMatchMode;
 
-pub struct DoctorCommand {
-    pub addr: Option<String>,
-    pub conn: Option<ConnPref>,
-    pub model: Option<Model>,
-    pub task: Option<PrintTask>,
-    pub seconds: u64,
-    pub use_config: bool,
-    pub fuzzy: bool,
-}
+use crate::cli::args::DoctorCommand;
 
 pub async fn run(cfg: &Config, args: DoctorCommand) -> Result<i32> {
     let DoctorCommand {

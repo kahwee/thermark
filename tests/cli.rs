@@ -529,6 +529,98 @@ fn task_override_does_not_change_physical_profile_geometry() {
 }
 
 #[test]
+fn print_preview_shows_hard_threshold_burn_bits_as_black() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("threshold-input.png");
+    let preview = dir.path().join("threshold-preview.png");
+    let cfg = dir.path().join("config.json");
+    image::GrayImage::from_raw(4, 1, vec![0, 127, 128, 255])
+        .unwrap()
+        .save(&input)
+        .unwrap();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            input.to_str().unwrap(),
+            "--threshold",
+            "127",
+            "--no-trim",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let pixels = image::open(preview).unwrap().into_luma8().into_raw();
+    assert_eq!(pixels, [0, 0, 255, 255]);
+}
+
+#[test]
+fn print_preview_matches_encoder_dither_bits_and_has_binary_pixels() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("dither-input.png");
+    let preview = dir.path().join("dither-preview.png");
+    let cfg = dir.path().join("config.json");
+    let source = image::GrayImage::from_fn(17, 11, |x, y| {
+        image::Luma([((x * 31 + y * 47 + x * y) % 256) as u8])
+    });
+    source.save(&input).unwrap();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            input.to_str().unwrap(),
+            "--threshold",
+            "103",
+            "--dither",
+            "--no-trim",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let actual = image::open(preview).unwrap().into_luma8();
+    let mut expected = thermark::image_encode::gray_to_print_bits(&source, 103, true);
+    for pixel in expected.pixels_mut() {
+        pixel[0] = 255 - pixel[0];
+    }
+    assert_eq!(actual, expected);
+    assert!(actual.pixels().all(|pixel| matches!(pixel[0], 0 | 255)));
+    assert!(actual.pixels().any(|pixel| pixel[0] == 0));
+    assert!(actual.pixels().any(|pixel| pixel[0] == 255));
+}
+
+#[test]
+fn print_preview_rejects_dimensions_the_encoder_cannot_send() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("too-wide.png");
+    let preview = dir.path().join("too-wide-preview.png");
+    let cfg = dir.path().join("config.json");
+    image::GrayImage::from_pixel(385, 1, image::Luma([0]))
+        .save(&input)
+        .unwrap();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            input.to_str().unwrap(),
+            "--no-trim",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("exceeds printer max"));
+
+    assert!(!preview.exists());
+}
+
+#[test]
 fn doctor_use_config_without_saved_addr_fails() {
     let (_dir, path) = temp_config_path();
     thermark_with_config(&path)

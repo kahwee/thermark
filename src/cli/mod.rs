@@ -39,13 +39,19 @@ pub fn run_sync(cli: &Cli) -> Option<Result<i32>> {
 
 /// Dispatch a parsed command. Returns the process exit code.
 pub async fn run(cli: Cli) -> Result<i32> {
+    // `main` takes this path before creating Tokio. Keep the guard here too so
+    // direct callers still share the same dispatcher instead of duplicating
+    // the synchronous command implementations below.
+    if let Some(result) = run_sync(&cli) {
+        return result;
+    }
+
     match cli.command {
         Commands::Scan {
             seconds,
             save,
             name,
         } => commands::device::scan(seconds, save, name.as_deref()).await?,
-        Commands::Ports => commands::device::ports()?,
         Commands::Info { conn } => {
             let cfg = Config::load()?;
             commands::device::info(&cfg, &conn).await?
@@ -54,209 +60,36 @@ pub async fn run(cli: Cli) -> Result<i32> {
             let cfg = Config::load()?;
             commands::device::identify(&cfg, &conn, json).await?
         }
-        Commands::Fonts => commands::device::fonts(),
-        Commands::Tasks => commands::device::tasks(),
-        Commands::Encode { cmd, data } => commands::device::encode(&cmd, &data)?,
-        Commands::Config { action } => commands::config::run(&action)?,
-
-        Commands::Print {
-            conn,
-            task,
-            image,
-            model,
-            density,
-            rotate,
-            threshold,
-            fit,
-            label,
-            fill,
-            no_fill,
-            margin,
-            dither,
-            no_trim,
-            full_bleed,
-            preview,
-        } => {
+        Commands::Print(args) => {
             let cfg = Config::load()?;
-            commands::print::print(
-                &cfg,
-                commands::print::PrintCommand {
-                    conn,
-                    task,
-                    image,
-                    model,
-                    density,
-                    rotate,
-                    threshold,
-                    fit,
-                    label,
-                    fill,
-                    no_fill,
-                    margin,
-                    dither,
-                    no_trim,
-                    full_bleed,
-                    preview,
-                },
-            )
-            .await?
+            commands::print::print(&cfg, args).await?
         }
-
-        Commands::Calibrate {
-            conn,
-            task,
-            model,
-            label,
-            density,
-            boundary,
-        } => {
+        Commands::Calibrate(args) => {
             let cfg = Config::load()?;
-            commands::print::calibrate(
-                &cfg,
-                commands::print::CalibrateCommand {
-                    conn,
-                    task,
-                    model,
-                    label,
-                    density,
-                    boundary,
-                },
-            )
-            .await?
+            commands::print::calibrate(&cfg, args).await?
         }
-
-        Commands::Text {
-            conn,
-            task,
-            font,
-            model,
-            text,
-            align,
-            label,
-            border,
-            density,
-            save,
-            no_print,
-        } => {
+        Commands::Text(args) => {
             let cfg = Config::load()?;
-            commands::sticker::text(
-                &cfg,
-                commands::sticker::TextCommand {
-                    conn,
-                    task,
-                    font,
-                    model,
-                    text,
-                    align,
-                    label,
-                    border,
-                    density,
-                    save,
-                    no_print,
-                },
-            )
-            .await?
+            commands::sticker::text(&cfg, args).await?
         }
-
-        Commands::Qr {
-            conn,
-            task,
-            font,
-            model,
-            url,
-            text,
-            text_side,
-            label,
-            border,
-            density,
-            save,
-            no_print,
-        } => {
+        Commands::Qr(args) => {
             let cfg = Config::load()?;
-            commands::sticker::qr(
-                &cfg,
-                commands::sticker::QrCommand {
-                    conn,
-                    task,
-                    font,
-                    model,
-                    url,
-                    text,
-                    text_side,
-                    label,
-                    border,
-                    density,
-                    save,
-                    no_print,
-                },
-            )
-            .await?
+            commands::sticker::qr(&cfg, args).await?
         }
-
-        Commands::Wifi {
-            conn,
-            task,
-            font,
-            model,
-            ssid,
-            password,
-            security,
-            hidden,
-            show_password,
-            text_side,
-            label,
-            border,
-            density,
-            save,
-            no_print,
-        } => {
+        Commands::Wifi(args) => {
             let cfg = Config::load()?;
-            commands::sticker::wifi(
-                &cfg,
-                commands::sticker::WifiCommand {
-                    conn,
-                    task,
-                    font,
-                    model,
-                    ssid,
-                    password,
-                    security,
-                    hidden,
-                    show_password,
-                    text_side,
-                    label,
-                    border,
-                    density,
-                    save,
-                    no_print,
-                },
-            )
-            .await?
+            commands::sticker::wifi(&cfg, args).await?
         }
-
-        Commands::Doctor {
-            addr,
-            conn,
-            model,
-            task,
-            seconds,
-            use_config,
-            fuzzy,
-        } => {
+        Commands::Doctor(args) => {
             let cfg = Config::load()?;
-            return commands::doctor::run(
-                &cfg,
-                commands::doctor::DoctorCommand {
-                    addr,
-                    conn,
-                    model,
-                    task,
-                    seconds,
-                    use_config,
-                    fuzzy,
-                },
-            )
-            .await;
+            return commands::doctor::run(&cfg, args).await;
+        }
+        Commands::Ports
+        | Commands::Fonts
+        | Commands::Tasks
+        | Commands::Encode { .. }
+        | Commands::Config { .. } => {
+            unreachable!("synchronous commands are dispatched before starting the runtime")
         }
     }
 

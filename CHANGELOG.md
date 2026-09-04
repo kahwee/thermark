@@ -16,6 +16,11 @@ such change is listed under **Changed** with the old and new spelling.
 - Experimental monochrome profiles and complete job sequences for the B1 Pro,
   B21 Pro, D11, D11_H, and D110 families; B18 geometry is recognized but its
   print task remains unresolved.
+- A reproducible `image_pipeline` benchmark for hard-threshold encoding,
+  dithering, cover placement, and white-border trimming.
+- `image_encode::encode_gray`, a borrowed grayscale entry point that lets label
+  renderers encode without cloning a page-sized image, and
+  `render_print_preview` for validated black-on-white print pixels.
 
 ### Changed
 
@@ -25,11 +30,42 @@ such change is listed under **Changed** with the old and new spelling.
   PrintEnd to declare an unconfirmed page successful.
 - `PrinterDevice` keeps model, profile, task, and identity coherent inside a
   session. Product scope is explicitly monochrome and B1-first.
-- BLE discovery and `doctor` now explain the macOS case where another client
-  owns a connected printer session and exposes a matching serial endpoint.
-- Updated the lockfile to the latest Rust 1.97-compatible dependency releases.
+- BLE discovery and `doctor` now report the macOS case where a configured
+  printer is absent from BLE discovery but a matching serial endpoint exists.
+  The diagnostic correctly presents competing-session ownership as a likely
+  cause rather than proof of either ownership or serial compatibility.
+- Cover placement crops before resampling, white-border trimming avoids a
+  full-image format conversion for common 8-bit inputs, and raster encoding
+  packs rows while thresholding. Floyd–Steinberg error storage is now
+  proportional to image width rather than width × height.
+- Offline inspection commands bypass Tokio and tracing startup, and commands
+  that do not use configuration no longer load it. Release builds strip
+  symbols, and unused `qrcode` and `uuid` dependency features are disabled.
+- CLI command arguments now have one Clap-owned representation that handlers
+  consume directly, removing the duplicate command structs and dispatch-time
+  unpacking/repacking layer without changing the command-line surface.
+- Normal print sessions query only the identity needed for profile/task
+  selection and no longer perform an informational RFID query. `identify` and
+  `info` retain their detailed reports.
+- Exact BLE peripheral IDs can finish discovery as soon as the matching device
+  advertises. Exact and fuzzy name selectors still use the full scan window so
+  duplicate names remain an error rather than selecting an arbitrary printer.
+- Updated the minimum Rust version to 1.98 and refreshed the lockfile with
+  compatible dependency releases.
 - README and agent guidance now document the maintenance baseline and
-  evidence-first rules for modernization and code reduction.
+  evidence-first rules for modernization, benchmarking, and code reduction.
+
+### Fixed
+
+- `print --preview` now applies the selected threshold and dithering before
+  saving, with burn bits shown as black ink, so the PNG matches the final
+  monochrome page sent to the printer.
+- Raster encoding rejects dimensions and row payloads that cannot fit the
+  protocol's `u16` coordinates or one-byte frame length before indices or
+  lengths can wrap.
+- Image-pipeline optimizations preserve the established pixel output, including
+  high-bit-depth trim thresholds, tiny cover-fit inputs, and run splitting at
+  255 repeated rows.
 
 ### Removed
 
@@ -352,9 +388,9 @@ No rendering change — `compare-render.sh` reports every output identical.
 
 ### Changed
 
-- **`rust-version` is now `1.97`**, the current stable, so new language
-  features can be used without checking an older floor first. This is a
-  minimum, not a request for a toolchain: anyone below it cannot build, which
+- **`rust-version` was raised to `1.97`**, the then-current stable, so new
+  language features can be used without checking an older floor first. This is
+  a minimum, not a request for a toolchain: anyone below it cannot build, which
   is a deliberate trade for a personal CLI rather than a library others pin.
 
 ### Added

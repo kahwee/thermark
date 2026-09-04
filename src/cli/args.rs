@@ -124,6 +124,218 @@ pub fn parse_scan_seconds(s: &str) -> std::result::Result<u64, String> {
 
 // ─── Commands ───────────────────────────────────────────────────────────────
 
+#[derive(Debug, clap::Args)]
+pub struct PrintCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    /// Image path
+    #[arg(short, long)]
+    pub image: PathBuf,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Print density 1..=5 (default 3 = normal; use 4 for denser/darker)
+    #[arg(short, long, default_value = "3", value_parser = parse_density)]
+    pub density: Density,
+    /// Rotate clockwise: 0, 90, 180, 270
+    #[arg(short, long, default_value = "0", value_parser = parse_rotation)]
+    pub rotate: Rotation,
+    /// Black/white threshold after invert (0–255)
+    #[arg(long, default_value = "127", value_parser = parse_threshold)]
+    pub threshold: Threshold,
+    /// Scale image down to fit printhead width only
+    #[arg(long, default_value_t = false)]
+    pub fit: bool,
+    /// Physical label size in mm, e.g. 50x30 (width x height). Scales content to this canvas.
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Cover the label (may crop). Default on. Use --no-fill to fit the whole image centered.
+    #[arg(long, default_value_t = true)]
+    pub fill: bool,
+    /// Fit the whole image on the label with white margins (no crop). Best for photos.
+    #[arg(long, default_value_t = false)]
+    pub no_fill: bool,
+    /// White margin inset in pixels (each side). Avoids edge bleed; good with photos.
+    #[arg(long, default_value_t = 0)]
+    pub margin: u32,
+    /// Floyd–Steinberg dither instead of hard B/W (recommended for photographs)
+    #[arg(long, default_value_t = false)]
+    pub dither: bool,
+    /// Keep the image's own white border instead of cropping it.
+    /// By default it is trimmed so the artwork fills the label.
+    #[arg(long, default_value_t = false)]
+    pub no_trim: bool,
+    /// Ignore the configured registration inset and use the whole canvas.
+    /// A charged B1 can address the full canvas; edge registration may vary.
+    #[arg(long, default_value_t = false)]
+    pub full_bleed: bool,
+    /// Write the final monochrome print pixels to this PNG and do not print.
+    /// Lets you check placement without a printer or a wasted label.
+    #[arg(long)]
+    pub preview: Option<PathBuf>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct CalibrateCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Density 1..=5 (default 4 = darker for full-bleed calibration)
+    #[arg(short, long, default_value = "4", value_parser = parse_density)]
+    pub density: Density,
+    /// Print the boundary probe instead: one numbered bar per millimetre,
+    /// so the last one you can see is exactly where the printer stops.
+    #[arg(long, default_value_t = false)]
+    pub boundary: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct TextCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    #[command(flatten)]
+    pub font: FontArgs,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Text to print (use \\n for new lines)
+    #[arg(long)]
+    pub text: String,
+    /// Horizontal alignment: left, center (default), right
+    #[arg(long, value_enum, default_value_t = TextAlign::Center)]
+    pub align: TextAlign,
+    /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Draw a 1px outer border
+    #[arg(long, default_value_t = false)]
+    pub border: bool,
+    /// Density 1..=5 (default 4 = darker for crisp text)
+    #[arg(short, long, default_value = "4", value_parser = parse_density)]
+    pub density: Density,
+    /// Also save PNG to this path
+    #[arg(long)]
+    pub save: Option<PathBuf>,
+    /// Only generate PNG, do not print
+    #[arg(long, default_value_t = false)]
+    pub no_print: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct QrCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    #[command(flatten)]
+    pub font: FontArgs,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// URL or text encoded in the QR
+    #[arg(long, default_value = "https://example.com")]
+    pub url: String,
+    /// Text drawn beside the QR (use \\n for new lines)
+    #[arg(long, default_value = "ABC\nHELLO")]
+    pub text: String,
+    /// Put text on left or right of the square QR
+    #[arg(long, value_enum, default_value_t = TextSide::Right)]
+    pub text_side: TextSide,
+    /// Label size mm, e.g. 50x30 (default: config, else 50x30)
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Draw a 1px outer border (usually unnecessary)
+    #[arg(long, default_value_t = false)]
+    pub border: bool,
+    /// Density 1..=5 (default 4 = darker for small QR/text)
+    #[arg(short, long, default_value = "4", value_parser = parse_density)]
+    pub density: Density,
+    /// Also save PNG to this path
+    #[arg(long)]
+    pub save: Option<PathBuf>,
+    /// Only generate PNG, do not print
+    #[arg(long, default_value_t = false)]
+    pub no_print: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct WifiCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    #[command(flatten)]
+    pub font: FontArgs,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Network name (SSID) — shown on the sticker
+    #[arg(long)]
+    pub ssid: String,
+    /// Wi‑Fi password (or set THERMARK_WIFI_PASSWORD — preferred, avoids shell history)
+    #[arg(long, default_value = "")]
+    pub password: String,
+    /// Security: wpa (default), wep, nopass
+    #[arg(long, value_enum, default_value_t = WifiSecurity::Wpa)]
+    pub security: WifiSecurity,
+    /// Hidden SSID
+    #[arg(long, default_value_t = false)]
+    pub hidden: bool,
+    /// Also print password in cleartext under the SSID (less secure)
+    #[arg(long, default_value_t = false)]
+    pub show_password: bool,
+    #[arg(long, value_enum, default_value_t = TextSide::Right)]
+    pub text_side: TextSide,
+    #[arg(long)]
+    pub label: Option<String>,
+    #[arg(long, default_value_t = false)]
+    pub border: bool,
+    #[arg(short, long, default_value = "4", value_parser = parse_density)]
+    pub density: Density,
+    /// Save PNG (use a path outside the git repo for real credentials)
+    #[arg(long)]
+    pub save: Option<PathBuf>,
+    /// Only generate PNG, do not print
+    #[arg(long, default_value_t = false)]
+    pub no_print: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct DoctorCommand {
+    /// BLE name / id, or serial path (default: saved config / THERMARK_ADDR; omit for host-only)
+    #[arg(short, long)]
+    pub addr: Option<String>,
+    /// Connection type when connecting
+    #[arg(short = 'c', long, value_enum)]
+    pub conn: Option<ConnPref>,
+    /// Printer model (default: config or b1)
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Print task to report on (default: model's default)
+    #[arg(long, value_enum)]
+    pub task: Option<PrintTask>,
+    /// BLE scan seconds
+    #[arg(short, long, default_value_t = 5, value_parser = parse_scan_seconds)]
+    pub seconds: u64,
+    /// Use saved default printer even without -a (connect + sensors)
+    #[arg(long, default_value_t = false)]
+    pub use_config: bool,
+    /// Allow substring BLE name matching when connecting (default: exact only)
+    #[arg(long, default_value_t = false)]
+    pub fuzzy: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Scan for thermal label printers over Bluetooth LE
@@ -154,191 +366,19 @@ pub enum Commands {
         json: bool,
     },
     /// Print an image (PNG/JPEG/…)
-    Print {
-        #[command(flatten)]
-        conn: ConnArgs,
-        #[command(flatten)]
-        task: TaskArgs,
-        /// Image path
-        #[arg(short, long)]
-        image: PathBuf,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// Print density 1..=5 (default 3 = normal; use 4 for denser/darker)
-        #[arg(short, long, default_value = "3", value_parser = parse_density)]
-        density: Density,
-        /// Rotate clockwise: 0, 90, 180, 270
-        #[arg(short, long, default_value = "0", value_parser = parse_rotation)]
-        rotate: Rotation,
-        /// Black/white threshold after invert (0–255)
-        #[arg(long, default_value = "127", value_parser = parse_threshold)]
-        threshold: Threshold,
-        /// Scale image down to fit printhead width only
-        #[arg(long, default_value_t = false)]
-        fit: bool,
-        /// Physical label size in mm, e.g. 50x30 (width x height). Scales content to this canvas.
-        #[arg(long)]
-        label: Option<String>,
-        /// Cover the label (may crop). Default on. Use --no-fill to fit the whole image centered.
-        #[arg(long, default_value_t = true)]
-        fill: bool,
-        /// Fit the whole image on the label with white margins (no crop). Best for photos.
-        #[arg(long, default_value_t = false)]
-        no_fill: bool,
-        /// White margin inset in pixels (each side). Avoids edge bleed; good with photos.
-        #[arg(long, default_value_t = 0)]
-        margin: u32,
-        /// Floyd–Steinberg dither instead of hard B/W (recommended for photographs)
-        #[arg(long, default_value_t = false)]
-        dither: bool,
-        /// Keep the image's own white border instead of cropping it.
-        /// By default it is trimmed so the artwork fills the label.
-        #[arg(long, default_value_t = false)]
-        no_trim: bool,
-        /// Ignore the configured registration inset and use the whole canvas.
-        /// A charged B1 can address the full canvas; edge registration may vary.
-        #[arg(long, default_value_t = false)]
-        full_bleed: bool,
-        /// Write exactly what would be sent to this PNG and do not print.
-        /// Lets you check placement without a printer or a wasted label.
-        #[arg(long)]
-        preview: Option<PathBuf>,
-    },
+    Print(PrintCommand),
     /// Print a full-bleed calibration pattern for a label size (find true print area)
-    Calibrate {
-        #[command(flatten)]
-        conn: ConnArgs,
-        #[command(flatten)]
-        task: TaskArgs,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
-        #[arg(long)]
-        label: Option<String>,
-        /// Density 1..=5 (default 4 = darker for full-bleed calibration)
-        #[arg(short, long, default_value = "4", value_parser = parse_density)]
-        density: Density,
-        /// Print the boundary probe instead: one numbered bar per millimetre,
-        /// so the last one you can see is exactly where the printer stops.
-        #[arg(long, default_value_t = false)]
-        boundary: bool,
-    },
+    Calibrate(CalibrateCommand),
     /// Print a text-only sticker (no QR) — auto-fitted to fill the label
-    Text {
-        #[command(flatten)]
-        conn: ConnArgs,
-        #[command(flatten)]
-        task: TaskArgs,
-        #[command(flatten)]
-        font: FontArgs,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// Text to print (use \\n for new lines)
-        #[arg(long)]
-        text: String,
-        /// Horizontal alignment: left, center (default), right
-        #[arg(long, value_enum, default_value_t = TextAlign::Center)]
-        align: TextAlign,
-        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
-        #[arg(long)]
-        label: Option<String>,
-        /// Draw a 1px outer border
-        #[arg(long, default_value_t = false)]
-        border: bool,
-        /// Density 1..=5 (default 4 = darker for crisp text)
-        #[arg(short, long, default_value = "4", value_parser = parse_density)]
-        density: Density,
-        /// Also save PNG to this path
-        #[arg(long)]
-        save: Option<PathBuf>,
-        /// Only generate PNG, do not print
-        #[arg(long, default_value_t = false)]
-        no_print: bool,
-    },
+    Text(TextCommand),
     /// Design + print a square QR with side text (fills the label)
-    Qr {
-        #[command(flatten)]
-        conn: ConnArgs,
-        #[command(flatten)]
-        task: TaskArgs,
-        #[command(flatten)]
-        font: FontArgs,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// URL or text encoded in the QR
-        #[arg(long, default_value = "https://example.com")]
-        url: String,
-        /// Text drawn beside the QR (use \\n for new lines)
-        #[arg(long, default_value = "ABC\nHELLO")]
-        text: String,
-        /// Put text on left or right of the square QR
-        #[arg(long, value_enum, default_value_t = TextSide::Right)]
-        text_side: TextSide,
-        /// Label size mm, e.g. 50x30 (default: config, else 50x30)
-        #[arg(long)]
-        label: Option<String>,
-        /// Draw a 1px outer border (usually unnecessary)
-        #[arg(long, default_value_t = false)]
-        border: bool,
-        /// Density 1..=5 (default 4 = darker for small QR/text)
-        #[arg(short, long, default_value = "4", value_parser = parse_density)]
-        density: Density,
-        /// Also save PNG to this path
-        #[arg(long)]
-        save: Option<PathBuf>,
-        /// Only generate PNG, do not print
-        #[arg(long, default_value_t = false)]
-        no_print: bool,
-    },
+    Qr(QrCommand),
     /// Guest Wi‑Fi sticker: scan-to-join QR + clear network name
     ///
     /// QR uses the standard WIFI: payload (phones join on scan). Side text shows
     /// the SSID large; password stays in the QR unless --show-password.
     /// Do not commit real credentials — print locally or --save outside the repo.
-    Wifi {
-        #[command(flatten)]
-        conn: ConnArgs,
-        #[command(flatten)]
-        task: TaskArgs,
-        #[command(flatten)]
-        font: FontArgs,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// Network name (SSID) — shown on the sticker
-        #[arg(long)]
-        ssid: String,
-        /// Wi‑Fi password (or set THERMARK_WIFI_PASSWORD — preferred, avoids shell history)
-        #[arg(long, default_value = "")]
-        password: String,
-        /// Security: wpa (default), wep, nopass
-        #[arg(long, value_enum, default_value_t = WifiSecurity::Wpa)]
-        security: WifiSecurity,
-        /// Hidden SSID
-        #[arg(long, default_value_t = false)]
-        hidden: bool,
-        /// Also print password in cleartext under the SSID (less secure)
-        #[arg(long, default_value_t = false)]
-        show_password: bool,
-        #[arg(long, value_enum, default_value_t = TextSide::Right)]
-        text_side: TextSide,
-        #[arg(long)]
-        label: Option<String>,
-        #[arg(long, default_value_t = false)]
-        border: bool,
-        #[arg(short, long, default_value = "4", value_parser = parse_density)]
-        density: Density,
-        /// Save PNG (use a path outside the git repo for real credentials)
-        #[arg(long)]
-        save: Option<PathBuf>,
-        /// Only generate PNG, do not print
-        #[arg(long, default_value_t = false)]
-        no_print: bool,
-    },
+    Wifi(WifiCommand),
     /// List system fonts this tool can use
     Fonts,
     /// Show print-task / hardware support matrix
@@ -349,29 +389,7 @@ pub enum Commands {
         action: ConfigCmd,
     },
     /// Diagnose host + printer readiness (Bluetooth, scan, sensors)
-    Doctor {
-        /// BLE name / id, or serial path (default: saved config / THERMARK_ADDR; omit for host-only)
-        #[arg(short, long)]
-        addr: Option<String>,
-        /// Connection type when connecting
-        #[arg(short = 'c', long, value_enum)]
-        conn: Option<ConnPref>,
-        /// Printer model (default: config or b1)
-        #[arg(short, long, value_enum)]
-        model: Option<Model>,
-        /// Print task to report on (default: model's default)
-        #[arg(long, value_enum)]
-        task: Option<PrintTask>,
-        /// BLE scan seconds
-        #[arg(short, long, default_value_t = 5, value_parser = parse_scan_seconds)]
-        seconds: u64,
-        /// Use saved default printer even without -a (connect + sensors)
-        #[arg(long, default_value_t = false)]
-        use_config: bool,
-        /// Allow substring BLE name matching when connecting (default: exact only)
-        #[arg(long, default_value_t = false)]
-        fuzzy: bool,
-    },
+    Doctor(DoctorCommand),
     /// Encode a packet to hex (debug)
     Encode {
         /// Command byte (hex, e.g. 1a)

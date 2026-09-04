@@ -1,36 +1,14 @@
 //! Raster printing: `print` and `calibrate`.
 
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
 use thermark::config::Config;
 use thermark::geometry::LabelMm;
 use thermark::printer::PrintOptions;
-use thermark::protocol::Model;
-use thermark::types::{Density, Rotation, Threshold};
 use tracing::info;
 
-use crate::cli::args::{ConnArgs, TaskArgs};
+use crate::cli::args::{CalibrateCommand, PrintCommand};
 use crate::cli::session::{print_file_resolved, print_gray_resolved, resolve_profile};
 use crate::cli::tips::warn_print_limits;
-
-pub struct PrintCommand {
-    pub conn: ConnArgs,
-    pub task: TaskArgs,
-    pub image: PathBuf,
-    pub model: Option<Model>,
-    pub density: Density,
-    pub rotate: Rotation,
-    pub threshold: Threshold,
-    pub fit: bool,
-    pub label: Option<String>,
-    pub fill: bool,
-    pub no_fill: bool,
-    pub margin: u32,
-    pub dither: bool,
-    pub no_trim: bool,
-    pub full_bleed: bool,
-    pub preview: Option<PathBuf>,
-}
 
 pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
     let PrintCommand {
@@ -89,8 +67,14 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
             profile.max_width_px,
             profile.pixels_per_mm,
         )?;
-        composed
-            .to_luma8()
+        let gray = composed.into_luma8();
+        let visible = thermark::image_encode::render_print_preview(
+            &gray,
+            profile.max_width_px,
+            opts.threshold.get(),
+            opts.dither,
+        )?;
+        visible
             .save(&out)
             .with_context(|| format!("save {}", out.display()))?;
         println!("preview written to {} (nothing printed)", out.display());
@@ -164,15 +148,6 @@ fn print_boundary_legend(label: thermark::geometry::LabelPx, pixels_per_mm: f64)
     println!();
     println!("Registration varies slightly between labels, so if two runs differ,");
     println!("use the LOWER number.");
-}
-
-pub struct CalibrateCommand {
-    pub conn: ConnArgs,
-    pub task: TaskArgs,
-    pub model: Option<Model>,
-    pub label: Option<String>,
-    pub density: Density,
-    pub boundary: bool,
 }
 
 pub async fn calibrate(cfg: &Config, args: CalibrateCommand) -> Result<()> {

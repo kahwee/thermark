@@ -8,15 +8,13 @@ use image::GrayImage;
 use std::path::PathBuf;
 use thermark::config::Config;
 use thermark::geometry::{LabelMm, LabelPx};
-use thermark::label::{
-    self, QrLabelOptions, TextAlign, TextLabelOptions, TextSide, make_text_label,
-};
+use thermark::label::{self, QrLabelOptions, TextLabelOptions, make_text_label};
 use thermark::protocol::Model;
 use thermark::types::Density;
-use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
+use thermark::wifi::{WifiLabelOptions, make_wifi_label};
 use tracing::info;
 
-use crate::cli::args::{ConnArgs, FontArgs, TaskArgs};
+use crate::cli::args::{ConnArgs, QrCommand, TaskArgs, TextCommand, WifiCommand};
 use crate::cli::session::{PrintProfile, print_gray_resolved, resolve_profile};
 use crate::cli::tips::{guard_wifi_save_path, resolve_wifi_password};
 
@@ -59,20 +57,6 @@ async fn save_and_print(
     print_gray_resolved(cfg, conn, profile, gray, output.density).await?;
     println!("{}", output.success);
     Ok(())
-}
-
-pub struct TextCommand {
-    pub conn: ConnArgs,
-    pub task: TaskArgs,
-    pub font: FontArgs,
-    pub model: Option<Model>,
-    pub text: String,
-    pub align: TextAlign,
-    pub label: Option<String>,
-    pub border: bool,
-    pub density: Density,
-    pub save: Option<PathBuf>,
-    pub no_print: bool,
 }
 
 pub async fn text(cfg: &Config, args: TextCommand) -> Result<()> {
@@ -121,21 +105,6 @@ pub async fn text(cfg: &Config, args: TextCommand) -> Result<()> {
         },
     )
     .await
-}
-
-pub struct QrCommand {
-    pub conn: ConnArgs,
-    pub task: TaskArgs,
-    pub font: FontArgs,
-    pub model: Option<Model>,
-    pub url: String,
-    pub text: String,
-    pub text_side: TextSide,
-    pub label: Option<String>,
-    pub border: bool,
-    pub density: Density,
-    pub save: Option<PathBuf>,
-    pub no_print: bool,
 }
 
 pub async fn qr(cfg: &Config, args: QrCommand) -> Result<()> {
@@ -189,24 +158,6 @@ pub async fn qr(cfg: &Config, args: QrCommand) -> Result<()> {
         },
     )
     .await
-}
-
-pub struct WifiCommand {
-    pub conn: ConnArgs,
-    pub task: TaskArgs,
-    pub font: FontArgs,
-    pub model: Option<Model>,
-    pub ssid: String,
-    pub password: String,
-    pub security: WifiSecurity,
-    pub hidden: bool,
-    pub show_password: bool,
-    pub text_side: TextSide,
-    pub label: Option<String>,
-    pub border: bool,
-    pub density: Density,
-    pub save: Option<PathBuf>,
-    pub no_print: bool,
 }
 
 pub async fn wifi(cfg: &Config, args: WifiCommand) -> Result<()> {

@@ -29,6 +29,8 @@ on the corresponding physical printer.
 | Common label | **50×30 mm** → **384×240 px** |
 
 macOS CoreBluetooth uses **UUID** device ids, not classic MACs.
+The owned B1-over-BLE path is hardware-verified. USB serial is implemented and
+mock-tested, but has not been verified against the owned printer.
 
 ---
 
@@ -113,7 +115,7 @@ not proof that the printer accepts thermark's serial protocol.
 - Write without response; notifications for replies
 - B1: 7-byte PrintStart; 6-byte SetPageSize (rows, cols, copies)
 - rows = image height (feed); cols = width ≤ 384
-- `0xDB` first byte = `PrinterErrorCode` (0x01 cover, 0x02 no paper, …)
+- `0xDB` first byte = `PrinterFault` (0x01 cover, 0x02 no paper, …)
 - Info response cmd = `0x40 + key`
 
 Protocol notes: see the command table in `src/protocol.rs`.
@@ -184,11 +186,11 @@ printable area — not conclusions that have not been verified on hardware.
 
 ---
 
-## Protocol behaviours not yet implemented
+## Protocol behaviour and deliberate omissions
 
-Known properties of the NIIMBOT protocol that thermark does not currently use,
-with the reasoning for each. Eight items. Row-repeat coalescing is implemented;
-the encoder splits long runs at the one-byte repeat limit of 255.
+Reference points that are optional, deliberately omitted, already implemented,
+or easy to misinterpret. Keep each status explicit. Row-repeat coalescing is
+implemented; the encoder splits long runs at the one-byte repeat limit of 255.
 
 1. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply `0xd3`.
    Conventionally slotted every 200 rows (`row % 200 == 199`), but it is
@@ -233,11 +235,12 @@ the encoder splits long runs at the one-byte repeat limit of 255.
    2. Deliberately not exposed; there is no way to make that non-destructive to
    a roll.
 
-8. **RFID tells you the consumable, not its size** — see the paper-size FAQ in
-    the README. `consumablesType` could auto-select the label type instead of
-    thermark's hardcoded `set_label_type(1)`, which is the one place a wrong
-    default costs a mis-feed on continuous stock. Not implemented; needs a roll
-    of continuous paper to verify.
+8. **RFID tells you the consumable, not its size** — see
+   [Label size and RFID](README.md#label-size-and-rfid). `consumablesType` could
+   auto-select the label type instead of thermark's hardcoded
+   `set_label_type(1)`, which is the one place a wrong default costs a mis-feed
+   on continuous stock. Not implemented; needs a roll of continuous paper to
+   verify.
 
 No label-height limit exists in the protocol — no preset table, no clamp, no
 per-model maximum. Page height is bounded only by the `u16` row count. 50x80
@@ -286,6 +289,7 @@ cargo test
 cargo test --test golden              # 13 stored renders, pixel-exact
 UPDATE_GOLDEN=1 cargo test --test golden   # accept new output, deliberately
 scripts/compare-render.sh v0.12.0     # byte-compare renders against a ref
+cargo bench --bench image_pipeline    # CPU-only image-pipeline medians
 ```
 
 Rendering changes are invisible until a label prints, so verify without media:
@@ -296,6 +300,10 @@ printable-band invariant. Print only to confirm a *deliberate* visual change.
 - Pure logic: packets, geometry, layout, fonts
 - **Mock transport** (`src/mock.rs`): full print job command order, 0xDB errors, summary
 - Live BLE print remains manual
+
+Compare benchmark runs on the same host. The benchmark does not measure peak
+RSS; use separate processes for memory measurements so allocator state from one
+case cannot affect another.
 
 ```bash
 # coverage (needs Homebrew llvm + cargo-llvm-cov)
@@ -326,9 +334,6 @@ Modernize from evidence, not from file age or line count alone:
 
 Good candidates for future code reduction:
 
-- Define each Clap command's arguments once and pass that parsed struct
-  directly to its handler; avoid unpacking fields in `cli::run` only to repack
-  them into another identical command struct.
 - Keep tests close to their owner, but count production and test code
   separately before calling a large module a maintenance problem.
 - Remove compatibility aliases only in a deliberate breaking release and only

@@ -5,6 +5,9 @@ or USB serial. No vendor app, cloud service, or account.
 
 thermark is intentionally **monochrome** and **B1-first**. The primary tested
 setup is a B1-class printer with 50×30 mm labels rendered at 384×240 px.
+The B1-over-BLE path is the only hardware-verified transport in this repository.
+USB serial is implemented and mock-tested, but has not been verified against
+the owned printer.
 
 ## What it does
 
@@ -25,7 +28,7 @@ setup is a B1-class printer with 50×30 mm labels rendered at 384×240 px.
 Experimental models require `--allow-experimental`. Multi-colour printheads and
 colour raster protocols are out of scope.
 
-Requires Rust 1.97 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
+Requires Rust 1.98 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
 the current stable toolchain for rustup users.
 
 ## Build and set up
@@ -39,14 +42,26 @@ cargo build --release
 ./target/release/thermark doctor --use-config
 ```
 
-For maintenance, keep the lockfile current and run the same checks as CI:
+Refresh compatible dependency versions deliberately, then review the lockfile
+diff:
 
 ```bash
 cargo update --dry-run
 cargo update
+```
+
+Before pushing, run the validation and feature matrix used by CI:
+
+```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+cargo clippy --all-targets -- -D warnings
+cargo build
+cargo test
+cargo test --lib --no-default-features
+cargo test --lib --no-default-features --features ble
+cargo test --lib --no-default-features --features serial
+cargo build --bin thermark --no-default-features --features ble
+cargo build --bin thermark --no-default-features --features serial
 ```
 
 Direct dependencies intentionally use compatible major-version ranges while
@@ -68,10 +83,10 @@ are UUIDs rather than classic MAC addresses.
 ### macOS Bluetooth ownership
 
 macOS can show a printer as **Connected** while thermark reports that it is not
-discoverable. That means another Bluetooth client—often a vendor app or a
-system-managed session—already owns the printer's BLE GATT connection. A BLE
-peripheral cannot be used by two clients at once, and thermark cannot attach to
-the existing session by its friendly name.
+discoverable. One likely cause is that another Bluetooth client—often a vendor
+app or a system-managed session—still owns this printer's BLE GATT connection.
+The same symptom can also mean the printer is asleep, out of range, or not
+advertising, so treat ownership as a diagnosis to verify rather than a fact.
 
 Before retrying, disconnect the printer in macOS Bluetooth settings, quit any
 vendor label app, wake or power-cycle the printer, and then run:
@@ -81,10 +96,11 @@ vendor label app, wake or power-cycle the printer, and then run:
 ./target/release/thermark doctor --use-config
 ```
 
-If `doctor` reports a matching `/dev/cu.…` endpoint, that is evidence of the
-same ownership problem—not proof that serial printing will work. Use the
-endpoint with `--conn usb` only when the printer responds to the serial
-protocol; otherwise release the Bluetooth session and use BLE normally.
+If `doctor` reports a matching `/dev/cu.…` endpoint, that supports the ownership
+diagnosis, but proves neither ownership nor serial-protocol compatibility. Use
+the endpoint with `--conn usb` only when the printer responds to the serial
+protocol; otherwise release any competing Bluetooth session and use BLE
+normally.
 
 ## Print stickers
 
@@ -94,9 +110,9 @@ read from config.
 Guest Wi-Fi:
 
 ```bash
-./target/release/thermark wifi \
+THERMARK_WIFI_PASSWORD='your-password' \
+  ./target/release/thermark wifi \
   --ssid "YourNetwork" \
-  --password 'your-password' \
   --label 50x30
 ```
 
@@ -144,7 +160,10 @@ Preview the exact bitmap without printing:
   --preview local/preview.png
 ```
 
-Generated sticker commands use `--save <path> --no-print` for the same purpose.
+`print --preview` applies the selected threshold and dithering and writes the
+final monochrome page. Generated sticker commands use
+`--save <path> --no-print` to inspect their composed artwork; those saved PNGs
+can retain antialiasing that the printer later thresholds.
 
 Check label placement on hardware:
 
@@ -153,8 +172,13 @@ Check label placement on hardware:
 ./target/release/thermark calibrate --boundary --label 50x30
 ```
 
-The printer does not report label dimensions, so `--label WxH` remains required
-when media changes.
+### Label size and RFID
+
+The printer's RFID response can describe the consumable type and remaining
+label count, but it does not report dimensions in millimetres. Vendor software
+may resolve an RFID barcode through its own catalogue; thermark has no cloud
+catalogue. Pass `--label WxH` when media changes, or save the size with
+`thermark config set --label WxH`.
 
 ## If a print looks wrong
 
@@ -167,8 +191,8 @@ when media changes.
 A charged B1 reaches the full feed canvas. Its default 1 mm top/bottom inset is
 registration margin, not a known unprintable band.
 
-For connection failures, quit the vendor app and copy the complete name from
-`thermark scan`.
+For connection failures on macOS, follow the
+[Bluetooth ownership checks](#macos-bluetooth-ownership) above.
 
 ## Development
 
@@ -178,7 +202,11 @@ cargo test --lib --no-default-features
 cargo test --test golden
 cargo test --test label_placement
 cargo test --test fixtures_readme
+cargo bench --bench image_pipeline
 ```
+
+The benchmark reports CPU-only medians. Compare runs on the same host, and
+measure peak RSS in separate processes when evaluating memory changes.
 
 The architecture keeps four concerns separate:
 

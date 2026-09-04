@@ -7,10 +7,11 @@ use crate::types::{Density, Rotation, Threshold};
 use std::path::Path;
 use tracing::info;
 
-/// Lay an image out on its label canvas exactly as printing would.
+/// Lay an image out on its label canvas exactly as printing does before
+/// monochrome encoding.
 ///
-/// Split out from the transport path so a preview can be produced without a
-/// printer — `thermark print --preview out.png` renders through this.
+/// Split out from the transport path so `thermark print --preview out.png` can
+/// compose here, then apply the same threshold/dither pass without a printer.
 pub fn compose_for_label(
     path: &Path,
     opts: &PrintOptions,
