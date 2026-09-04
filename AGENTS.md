@@ -62,6 +62,14 @@ Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, cali
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
 Experimental print tasks need `--allow-experimental`.
 
+On macOS, Bluetooth Settings may show the printer as **Connected** while
+CoreBluetooth cannot discover it. Treat that as an exclusive-session conflict:
+another client owns the printer's GATT connection. `thermark doctor
+--use-config` reports a matching `/dev/cu.…` endpoint as supporting evidence;
+disconnect the printer in macOS Bluetooth settings, quit vendor apps, and
+power-cycle or wake the printer before retrying BLE. A serial endpoint alone is
+not proof that the printer accepts thermark's serial protocol.
+
 ---
 
 ## Module map

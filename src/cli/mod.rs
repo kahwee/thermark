@@ -15,10 +15,30 @@ use anyhow::Result;
 use args::{Cli, Commands};
 use thermark::config::Config;
 
+/// Handle commands that need neither async I/O nor the printer runtime.
+///
+/// Keeping this check before Tokio/tracing initialization makes quick
+/// inspection and packet-encoding commands behave like small Unix tools.
+pub fn run_sync(cli: &Cli) -> Option<Result<i32>> {
+    let result = match &cli.command {
+        Commands::Ports => commands::device::ports(),
+        Commands::Fonts => {
+            commands::device::fonts();
+            Ok(())
+        }
+        Commands::Tasks => {
+            commands::device::tasks();
+            Ok(())
+        }
+        Commands::Encode { cmd, data } => commands::device::encode(cmd, data),
+        Commands::Config { action } => commands::config::run(action),
+        _ => return None,
+    };
+    Some(result.map(|()| 0))
+}
+
 /// Dispatch a parsed command. Returns the process exit code.
 pub async fn run(cli: Cli) -> Result<i32> {
-    let cfg = Config::load()?;
-
     match cli.command {
         Commands::Scan {
             seconds,
@@ -26,12 +46,18 @@ pub async fn run(cli: Cli) -> Result<i32> {
             name,
         } => commands::device::scan(seconds, save, name.as_deref()).await?,
         Commands::Ports => commands::device::ports()?,
-        Commands::Info { conn } => commands::device::info(&cfg, &conn).await?,
-        Commands::Identify { conn, json } => commands::device::identify(&cfg, &conn, json).await?,
+        Commands::Info { conn } => {
+            let cfg = Config::load()?;
+            commands::device::info(&cfg, &conn).await?
+        }
+        Commands::Identify { conn, json } => {
+            let cfg = Config::load()?;
+            commands::device::identify(&cfg, &conn, json).await?
+        }
         Commands::Fonts => commands::device::fonts(),
         Commands::Tasks => commands::device::tasks(),
         Commands::Encode { cmd, data } => commands::device::encode(&cmd, &data)?,
-        Commands::Config { action } => commands::config::run(action)?,
+        Commands::Config { action } => commands::config::run(&action)?,
 
         Commands::Print {
             conn,
@@ -51,6 +77,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             full_bleed,
             preview,
         } => {
+            let cfg = Config::load()?;
             commands::print::print(
                 &cfg,
                 commands::print::PrintCommand {
@@ -83,6 +110,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             density,
             boundary,
         } => {
+            let cfg = Config::load()?;
             commands::print::calibrate(
                 &cfg,
                 commands::print::CalibrateCommand {
@@ -110,6 +138,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             save,
             no_print,
         } => {
+            let cfg = Config::load()?;
             commands::sticker::text(
                 &cfg,
                 commands::sticker::TextCommand {
@@ -143,6 +172,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             save,
             no_print,
         } => {
+            let cfg = Config::load()?;
             commands::sticker::qr(
                 &cfg,
                 commands::sticker::QrCommand {
@@ -180,6 +210,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             save,
             no_print,
         } => {
+            let cfg = Config::load()?;
             commands::sticker::wifi(
                 &cfg,
                 commands::sticker::WifiCommand {
@@ -212,6 +243,7 @@ pub async fn run(cli: Cli) -> Result<i32> {
             use_config,
             fuzzy,
         } => {
+            let cfg = Config::load()?;
             return commands::doctor::run(
                 &cfg,
                 commands::doctor::DoctorCommand {

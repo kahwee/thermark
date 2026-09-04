@@ -1,13 +1,13 @@
 use super::*;
 use btleplug::api::{
-    Central, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
+    Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::stream::StreamExt;
 use std::collections::HashMap;
 use tokio::runtime::RuntimeFlavor;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, timeout};
+use tokio::time::{Instant, sleep, sleep_until, timeout, timeout_at};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -67,6 +67,57 @@ impl BleDeviceInfo {
     }
 }
 
+/// Exact platform IDs can finish discovery as soon as their advertisement
+/// arrives. Names (even exact ones) need the complete scan window so a second
+/// printer with the same advertising name still produces an ambiguity error.
+fn can_finish_connect_scan(selector: &str, candidate: &BleCandidate, mode: BleMatchMode) -> bool {
+    mode == BleMatchMode::Exact && candidate.id.eq_ignore_ascii_case(selector.trim())
+}
+
+async fn wait_for_exact_match(
+    adapter: &Adapter,
+    events: &mut (impl futures::Stream<Item = CentralEvent> + Unpin),
+    selector: &str,
+    deadline: Instant,
+) -> Option<(BleCandidate, Peripheral)> {
+    loop {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        let event = match timeout_at(deadline, events.next()).await {
+            Ok(Some(event)) => event,
+            Ok(None) => {
+                // Preserve the configured scan deadline if this platform's
+                // event stream ends unexpectedly; the catalog fallback below
+                // should see the same scan window as the old implementation.
+                sleep_until(deadline).await;
+                return None;
+            }
+            Err(_) => return None,
+        };
+        let id = match event {
+            CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) => id,
+            _ => continue,
+        };
+        let id_only = BleCandidate::new(id.to_string(), None);
+        if !can_finish_connect_scan(selector, &id_only, BleMatchMode::Exact) {
+            continue;
+        }
+        let peripheral = match timeout_at(deadline, adapter.peripheral(&id)).await {
+            Ok(Ok(peripheral)) => peripheral,
+            Ok(Err(error)) => {
+                debug!(%error, "BLE discovery event referenced an unavailable peripheral");
+                continue;
+            }
+            Err(_) => return None,
+        };
+
+        // Only an exact platform id may exit early. Returning the first exact
+        // name would bypass the catalog's duplicate-name ambiguity check.
+        return Some((id_only, peripheral));
+    }
+}
+
 impl BleTransport {
     /// Scan for B1-class label-printer peripherals.
     ///
@@ -123,36 +174,78 @@ impl BleTransport {
         mode: BleMatchMode,
     ) -> Result<Self> {
         let adapter = default_adapter().await?;
+        let mut events = if mode == BleMatchMode::Exact {
+            match adapter.events().await {
+                Ok(events) => Some(events),
+                Err(error) => {
+                    debug!(%error, "BLE event stream unavailable; using full scan window");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         adapter
             .start_scan(ScanFilter::default())
             .await
             .map_err(|e| Error::transport(format!("BLE start_scan: {e}")))?;
-        sleep(scan_for).await;
+        let deadline = Instant::now() + scan_for;
+        let early_match = match events.as_mut() {
+            Some(events) => wait_for_exact_match(&adapter, events, selector, deadline).await,
+            None => {
+                sleep_until(deadline).await;
+                None
+            }
+        };
         adapter.stop_scan().await.ok();
 
-        let peris = adapter
-            .peripherals()
-            .await
-            .map_err(|e| Error::transport(format!("BLE peripherals: {e}")))?;
-
-        let mut catalog: Vec<(BleCandidate, Peripheral)> = Vec::new();
-        for p in peris {
-            let props = p
-                .properties()
+        let (winner, peripheral) = if let Some(found) = early_match {
+            found
+        } else {
+            let peris = adapter
+                .peripherals()
                 .await
-                .map_err(|e| Error::transport(format!("BLE properties: {e}")))?;
-            let name = props.as_ref().and_then(|pr| pr.local_name.clone());
-            catalog.push((BleCandidate::new(p.id().to_string(), name), p));
-        }
+                .map_err(|e| Error::transport(format!("BLE peripherals: {e}")))?;
 
-        let candidates: Vec<BleCandidate> = catalog.iter().map(|(c, _)| c.clone()).collect();
-        let winner = select_ble_candidate(selector, &candidates, mode)?;
+            let mut catalog: Vec<(BleCandidate, Peripheral)> = Vec::new();
+            for p in peris {
+                let props = p
+                    .properties()
+                    .await
+                    .map_err(|e| Error::transport(format!("BLE properties: {e}")))?;
+                let name = props.as_ref().and_then(|pr| pr.local_name.clone());
+                catalog.push((BleCandidate::new(p.id().to_string(), name), p));
+            }
 
-        let peripheral = catalog
-            .into_iter()
-            .find(|(c, _)| c.id == winner.id)
-            .map(|(_, p)| p)
-            .ok_or_else(|| Error::transport("internal: matched BLE device vanished"))?;
+            let candidates: Vec<BleCandidate> = catalog.iter().map(|(c, _)| c.clone()).collect();
+            let has_matching_candidate = candidates
+                .iter()
+                .any(|candidate| score_ble_candidate(selector, candidate, mode).is_some());
+            let winner = match select_ble_candidate(selector, &candidates, mode) {
+                Ok(winner) => winner,
+                Err(error) if !has_matching_candidate => {
+                    #[cfg(all(target_os = "macos", feature = "serial"))]
+                    if let Some(path) = super::serial_port_for_selector(selector) {
+                        let detail = match error {
+                            Error::Transport(message) => message,
+                            other => other.to_string(),
+                        };
+                        return Err(Error::transport(format!(
+                            "{detail}. macOS exposes a matching serial endpoint at {path}, which can mean another Bluetooth client already owns the printer session. Disconnect the printer from macOS Bluetooth settings and quit any vendor app, then retry BLE; or explicitly try `--conn usb --addr {path}`."
+                        )));
+                    }
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            };
+
+            let peripheral = catalog
+                .into_iter()
+                .find(|(c, _)| c.id == winner.id)
+                .map(|(_, p)| p)
+                .ok_or_else(|| Error::transport("internal: matched BLE device vanished"))?;
+            (winner, peripheral)
+        };
 
         info!(
             name = %winner.display_name(),
@@ -365,4 +458,44 @@ async fn find_printer_char(peripheral: &Peripheral) -> Result<Characteristic> {
             .collect::<Vec<_>>()
             .join("\n")
     )))
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_exact_id_can_finish_connect_scan() {
+        let candidate = BleCandidate::new("A1B2-C3D4", Some("B1-Kitchen".into()));
+        assert!(!can_finish_connect_scan(
+            "b1-kitchen",
+            &candidate,
+            BleMatchMode::Exact
+        ));
+        assert!(can_finish_connect_scan(
+            "a1b2-c3d4",
+            &candidate,
+            BleMatchMode::Exact
+        ));
+        assert!(!can_finish_connect_scan(
+            "B1-Kit",
+            &candidate,
+            BleMatchMode::Exact
+        ));
+    }
+
+    #[test]
+    fn fuzzy_match_always_uses_the_complete_scan_window() {
+        let candidate = BleCandidate::new("A1B2-C3D4", Some("B1-Kitchen".into()));
+        assert!(!can_finish_connect_scan(
+            "Kitchen",
+            &candidate,
+            BleMatchMode::Fuzzy
+        ));
+        assert!(!can_finish_connect_scan(
+            "B1-Kitchen",
+            &candidate,
+            BleMatchMode::Fuzzy
+        ));
+    }
 }

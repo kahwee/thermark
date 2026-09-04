@@ -114,6 +114,26 @@ pub fn name_looks_like_label_printer(name: &str) -> bool {
     PRINTER_NAME_MARKERS.iter().any(|m| name.contains(m))
 }
 
+/// Whether a serial device path appears to belong to a configured printer
+/// selector. macOS commonly exposes an already-connected BLE printer as a
+/// `/dev/cu.<advertising-name>` endpoint.
+pub fn serial_path_matches_selector(path: &str, selector: &str) -> bool {
+    let path = path.trim().to_ascii_lowercase();
+    let selector = selector.trim().to_ascii_lowercase();
+    !selector.is_empty() && path.ends_with(&selector)
+}
+
+/// Find a serial endpoint that matches a BLE selector, when serial support is
+/// available. This is primarily a macOS diagnostic: a matching endpoint can
+/// mean another Bluetooth client already owns the printer's BLE session.
+#[cfg(all(target_os = "macos", feature = "ble", feature = "serial"))]
+pub(crate) fn serial_port_for_selector(selector: &str) -> Option<String> {
+    serial::SerialTransport::list_ports()
+        .ok()?
+        .into_iter()
+        .find(|path| serial_path_matches_selector(path, selector))
+}
+
 /// Score how well `selector` matches a scanned peripheral. Higher is better.
 ///
 /// Returns `None` if this mode does not treat the device as a match.
@@ -228,6 +248,22 @@ mod ble_match_tests {
 
     fn unnamed(id: &str) -> BleCandidate {
         BleCandidate::new(id, None)
+    }
+
+    #[test]
+    fn serial_path_matches_configured_printer_name() {
+        assert!(serial_path_matches_selector(
+            "/dev/cu.B1-I304120661",
+            "B1-I304120661"
+        ));
+        assert!(serial_path_matches_selector(
+            "/dev/tty.b1-i304120661",
+            "b1-i304120661"
+        ));
+        assert!(!serial_path_matches_selector(
+            "/dev/cu.B1-OtherPrinter",
+            "B1-I304120661"
+        ));
     }
 
     #[test]

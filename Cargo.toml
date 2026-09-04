@@ -25,13 +25,17 @@ serial = ["dep:serialport", "dep:tokio-serial"]
 name = "thermark"
 path = "src/main.rs"
 
+[[bench]]
+name = "image_pipeline"
+harness = false
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
-qrcode = "0.14"
+qrcode = { version = "0.14", default-features = false }
 ab_glyph = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,7 +50,7 @@ btleplug = { version = "0.12", optional = true }
 futures = { version = "0.3", optional = true }
 serialport = { version = "4", optional = true, default-features = false }
 tokio-serial = { version = "5", optional = true }
-uuid = { version = "1", features = ["v4"], optional = true }
+uuid = { version = "1", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -56,3 +60,4 @@ proptest = "1"
 [profile.release]
 lto = true
 codegen-units = 1
+strip = "symbols"

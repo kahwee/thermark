@@ -6,17 +6,17 @@ use thermark::protocol::Model;
 
 use crate::cli::args::ConfigCmd;
 
-pub fn run(action: ConfigCmd) -> Result<()> {
+pub fn run(action: &ConfigCmd) -> Result<()> {
     match action {
         ConfigCmd::Path => println!("{}", Config::default_path()?.display()),
-        ConfigCmd::Show { json } => show(json)?,
+        ConfigCmd::Show { json } => show(*json)?,
         ConfigCmd::Set {
             addr,
             conn,
             model,
             scan_secs,
             label,
-        } => set(&addr, conn, model, scan_secs, label.as_deref())?,
+        } => set(addr, *conn, *model, *scan_secs, label.as_deref())?,
         ConfigCmd::SafeArea {
             last_tick,
             label,
@@ -26,13 +26,13 @@ pub fn run(action: ConfigCmd) -> Result<()> {
             right,
             reset,
         } => safe_area(SafeAreaUpdate {
-            last_tick,
-            label,
-            top,
-            bottom,
-            left,
-            right,
-            reset,
+            last_tick: *last_tick,
+            label: label.clone(),
+            top: *top,
+            bottom: *bottom,
+            left: *left,
+            right: *right,
+            reset: *reset,
         })?,
         ConfigCmd::Clear => clear()?,
     }

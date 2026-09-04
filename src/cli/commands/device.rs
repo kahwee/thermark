@@ -204,7 +204,7 @@ pub async fn info(cfg: &Config, conn: &ConnArgs) -> Result<()> {
 
 pub async fn identify(cfg: &Config, conn: &ConnArgs, json: bool) -> Result<()> {
     let conn = conn.resolve(cfg)?;
-    let session = Session::connect(
+    let session = Session::connect_detailed(
         &conn,
         thermark::Model::B1,
         thermark::PrintTask::B1,

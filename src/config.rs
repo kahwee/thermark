@@ -21,7 +21,7 @@ pub const MAX_SCAN_SECS: u64 = 300;
 use crate::protocol::Model;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 /// Preferred link type stored in config / resolved for the CLI.
@@ -133,11 +133,16 @@ impl Config {
 
     /// Load from an explicit path. Missing file → empty config.
     pub fn load_from(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let text = fs::read_to_string(path)
-            .map_err(|e| Error::msg(format!("read config {}: {e}", path.display())))?;
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) => {
+                return Err(Error::msg(format!(
+                    "read config {}: {error}",
+                    path.display()
+                )));
+            }
+        };
         Self::parse_json(&text)
             .map_err(|e| Error::msg(format!("parse config {}: {e}", path.display())))
     }

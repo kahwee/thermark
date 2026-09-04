@@ -114,6 +114,12 @@ pub struct Session {
     allow_experimental: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum IdentityDetail {
+    Profile,
+    Full,
+}
+
 fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
     match (job, close) {
         (Err(job), Err(close)) => {
@@ -127,13 +133,54 @@ fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
 }
 
 impl Session {
-    #[allow(unused_variables)]
     pub async fn connect(
         conn: &ResolvedConn,
         model: Model,
         task: PrintTask,
         auto_task: bool,
         allow_experimental: bool,
+    ) -> Result<Self> {
+        Self::connect_with_identity(
+            conn,
+            model,
+            task,
+            auto_task,
+            allow_experimental,
+            IdentityDetail::Profile,
+        )
+        .await
+    }
+
+    /// Open a session and retain the full identity report for presentation.
+    ///
+    /// Normal printing only needs [`Self::connect`]; this variant keeps the
+    /// firmware and hardware metadata queries used by the `identify` command.
+    pub async fn connect_detailed(
+        conn: &ResolvedConn,
+        model: Model,
+        task: PrintTask,
+        auto_task: bool,
+        allow_experimental: bool,
+    ) -> Result<Self> {
+        Self::connect_with_identity(
+            conn,
+            model,
+            task,
+            auto_task,
+            allow_experimental,
+            IdentityDetail::Full,
+        )
+        .await
+    }
+
+    #[allow(unused_variables)]
+    async fn connect_with_identity(
+        conn: &ResolvedConn,
+        model: Model,
+        task: PrintTask,
+        auto_task: bool,
+        allow_experimental: bool,
+        identity_detail: IdentityDetail,
     ) -> Result<Self> {
         match conn.conn {
             ConnPref::Ble => {
@@ -150,7 +197,8 @@ impl Session {
                     .context("BLE connect")?;
                     let client = PrinterClient::new_with_task(AnyTransport::Ble(ble), model, task)
                         .with_pacing(pacing_from_env());
-                    Self::finish_connect(client, auto_task, allow_experimental).await
+                    Self::finish_connect(client, auto_task, allow_experimental, identity_detail)
+                        .await
                 }
             }
             ConnPref::Usb => {
@@ -162,7 +210,8 @@ impl Session {
                         .with_context(|| format!("open serial {}", conn.addr))?;
                     let client = PrinterClient::new_with_task(AnyTransport::Usb(ser), model, task)
                         .with_pacing(pacing_from_env());
-                    Self::finish_connect(client, auto_task, allow_experimental).await
+                    Self::finish_connect(client, auto_task, allow_experimental, identity_detail)
+                        .await
                 }
             }
         }
@@ -173,8 +222,13 @@ impl Session {
         mut client: PrinterClient<AnyTransport>,
         auto_task: bool,
         allow_experimental: bool,
+        identity_detail: IdentityDetail,
     ) -> Result<Self> {
-        let identity = client.identify().await.ok();
+        let identity = match identity_detail {
+            IdentityDetail::Profile => client.identify_profile().await,
+            IdentityDetail::Full => client.identify().await,
+        }
+        .ok();
         if let Some(identity) = &identity {
             if let Some(profile) = client.apply_identity(identity, auto_task) {
                 tracing::info!(model = %profile.model, model_id = identity.model_id, dpi = profile.dpi, task = ?profile.task, "identified printer");
@@ -211,9 +265,6 @@ impl Session {
         density: thermark::Density,
     ) -> Result<()> {
         self.ensure_print_allowed()?;
-        if let Ok(rfid) = self.client.rfid_info().await {
-            tracing::info!(%rfid, "RFID");
-        }
         self.client.preflight_ready().await?;
         self.client.print_gray_image(gray, density).await?;
         Ok(())

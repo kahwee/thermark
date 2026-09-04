@@ -72,6 +72,28 @@ fn encode_rfid_probe() {
 }
 
 #[test]
+fn offline_commands_ignore_malformed_config() {
+    let (_dir, path) = temp_config_path();
+    std::fs::write(&path, "{ definitely not json\n").unwrap();
+
+    for args in [vec!["tasks"], vec!["encode", "1a", "01"]] {
+        thermark_with_config(&path).args(args).assert().success();
+    }
+}
+
+#[test]
+fn config_path_does_not_parse_config() {
+    let (_dir, path) = temp_config_path();
+    std::fs::write(&path, "{ definitely not json\n").unwrap();
+
+    thermark_with_config(&path)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(path.to_string_lossy().as_ref()));
+}
+
+#[test]
 fn bad_model_rejected() {
     thermark()
         .args([

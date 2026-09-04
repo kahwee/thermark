@@ -236,9 +236,6 @@ impl<T: Transport> PrinterClient<T> {
         let image = compose_for_label(path, &opts, max_width, self.profile().pixels_per_mm())?;
         let raster = image_encode::encode(image, max_width, opts.threshold.get(), opts.dither)?;
 
-        if let Ok(rfid) = self.rfid_info().await {
-            info!(%rfid, "RFID");
-        }
         self.preflight_ready().await?;
         self.print_raster(raster, opts.density).await
     }
@@ -249,9 +246,8 @@ impl<T: Transport> PrinterClient<T> {
         gray: &image::GrayImage,
         density: Density,
     ) -> Result<()> {
-        let image = image::DynamicImage::ImageLuma8(gray.clone());
         let raster =
-            image_encode::encode(image, self.max_width_px(), Threshold::DEFAULT.get(), false)?;
+            image_encode::encode_gray(gray, self.max_width_px(), Threshold::DEFAULT.get(), false)?;
         self.print_raster(raster, density).await
     }
 }

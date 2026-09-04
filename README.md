@@ -65,6 +65,27 @@ Use the full advertising name shown by `scan`. Matching is exact by default;
 `--fuzzy` enables intentional substring matching. On macOS, Bluetooth device IDs
 are UUIDs rather than classic MAC addresses.
 
+### macOS Bluetooth ownership
+
+macOS can show a printer as **Connected** while thermark reports that it is not
+discoverable. That means another Bluetooth client—often a vendor app or a
+system-managed session—already owns the printer's BLE GATT connection. A BLE
+peripheral cannot be used by two clients at once, and thermark cannot attach to
+the existing session by its friendly name.
+
+Before retrying, disconnect the printer in macOS Bluetooth settings, quit any
+vendor label app, wake or power-cycle the printer, and then run:
+
+```bash
+./target/release/thermark scan
+./target/release/thermark doctor --use-config
+```
+
+If `doctor` reports a matching `/dev/cu.…` endpoint, that is evidence of the
+same ownership problem—not proof that serial printing will work. Use the
+endpoint with `--conn usb` only when the printer responds to the serial
+protocol; otherwise release the Bluetooth session and use BLE normally.
+
 ## Print stickers
 
 Always pass the physical label size. After `scan --save`, the printer address is

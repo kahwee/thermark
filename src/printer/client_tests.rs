@@ -170,6 +170,50 @@ async fn detected_identity_replaces_the_provisional_profile() {
 }
 
 #[tokio::test]
+async fn profile_identity_skips_presentation_metadata() {
+    let mut c = client_b1();
+    let identity = c.identify_profile().await.unwrap();
+
+    assert_eq!(identity.model_id, 4096);
+    assert_eq!(identity.protocol_version, Some(5));
+    assert_eq!(identity.firmware, None);
+    assert_eq!(identity.hardware, None);
+
+    let info_keys: Vec<u8> = c
+        .transport()
+        .tx_packets
+        .iter()
+        .filter(|packet| packet.cmd == Cmd::PrinterInfo as u8)
+        .filter_map(|packet| packet.data.first().copied())
+        .collect();
+    assert_eq!(info_keys, vec![InfoKey::DeviceType as u8]);
+}
+
+#[tokio::test]
+async fn full_identity_still_reads_version_metadata() {
+    let mut c = client_b1();
+    let identity = c.identify().await.unwrap();
+
+    assert!(identity.firmware.is_some());
+    assert!(identity.hardware.is_some());
+    let info_keys: Vec<u8> = c
+        .transport()
+        .tx_packets
+        .iter()
+        .filter(|packet| packet.cmd == Cmd::PrinterInfo as u8)
+        .filter_map(|packet| packet.data.first().copied())
+        .collect();
+    assert_eq!(
+        info_keys,
+        vec![
+            InfoKey::DeviceType as u8,
+            InfoKey::SoftVersion as u8,
+            InfoKey::HardVersion as u8,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn fetch_summary_reads_info_keys() {
     let mut c = client_b1();
     let s = c.fetch_summary().await.unwrap();
@@ -349,6 +393,14 @@ async fn print_image_file_opts_aborts_preflight() {
     );
     // Must not have entered the print sequence.
     let cmds = c.transport().tx_cmds();
+    assert!(
+        cmds.contains(&(Cmd::Heartbeat as u8)),
+        "heartbeat preflight must remain on the print path: {cmds:?}"
+    );
+    assert!(
+        !cmds.contains(&(Cmd::RfidInfo as u8)),
+        "ordinary printing must not query RFID: {cmds:?}"
+    );
     assert!(
         !cmds.contains(&0x01),
         "print start should not run: {cmds:?}"

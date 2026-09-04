@@ -10,7 +10,13 @@ use crate::transport::Transport;
 use std::time::Duration;
 
 impl<T: Transport> PrinterClient<T> {
-    pub async fn identify(&mut self) -> Result<PrinterIdentity> {
+    /// Read only the identity fields needed to select a physical profile and
+    /// firmware-sensitive print task.
+    ///
+    /// Normal print sessions use this shorter probe. Firmware and hardware
+    /// version strings are presentation metadata for `identify`, and querying
+    /// them here added two optional round trips to every print.
+    pub async fn identify_profile(&mut self) -> Result<PrinterIdentity> {
         let connect_result = self
             .transceive_with(
                 protocol::connect(),
@@ -56,6 +62,17 @@ impl<T: Transport> PrinterClient<T> {
                 .and_then(|packet| parse_protocol_version(&packet.data)),
             _ => None,
         };
+        Ok(PrinterIdentity {
+            model_id,
+            protocol_version,
+            firmware: None,
+            hardware: None,
+        })
+    }
+
+    /// Read the complete identity report, including presentation metadata.
+    pub async fn identify(&mut self) -> Result<PrinterIdentity> {
+        let mut identity = self.identify_profile().await?;
         let firmware = self
             .get_info(InfoKey::SoftVersion)
             .await
@@ -66,12 +83,9 @@ impl<T: Transport> PrinterClient<T> {
             .await
             .ok()
             .map(|v| v.to_string());
-        Ok(PrinterIdentity {
-            model_id,
-            protocol_version,
-            firmware,
-            hardware,
-        })
+        identity.firmware = firmware;
+        identity.hardware = hardware;
+        Ok(identity)
     }
 
     pub fn apply_identity(

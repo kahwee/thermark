@@ -335,6 +335,17 @@ async fn doctor_ble(
                 "ble_scan",
                 format!("no printers in {scan_secs}s — power on, quit vendor apps, move closer"),
             ));
+            #[cfg(all(target_os = "macos", feature = "serial"))]
+            if let Some(selector) = addr
+                && let Some(path) = transport::serial_port_for_selector(selector)
+            {
+                checks.push(Check::warn(
+                    "ble_session",
+                    format!(
+                        "macOS exposes matching serial endpoint {path}; another Bluetooth client may own the printer. Disconnect it in Bluetooth settings and quit vendor apps before retrying BLE"
+                    ),
+                ));
+            }
             if addr.is_none() {
                 return Ok(());
             }
