@@ -20,9 +20,14 @@ use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 const W: u32 = 384;
 const H: u32 = 240;
 const MAX_W: u32 = 384;
+const TEST_FONT: &str = "tests/fonts/DejaVuSans.ttf";
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures")
+}
+
+fn test_font() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(TEST_FONT)
 }
 
 #[derive(Clone, Copy)]
@@ -68,9 +73,6 @@ fn curated() -> &'static [Fixture] {
         },
     ]
 }
-
-/// Primary smoke image for CLI / print-path tests.
-pub const SMOKE_FIXTURE: &str = "fixtures/sticker_wifi.png";
 
 fn open_gray(name: &str) -> image::GrayImage {
     let path = fixtures_dir().join(name);
@@ -228,14 +230,13 @@ fn wifi_demo_layout_api_matches_canvas() {
         label: lp,
         safe: thermark::geometry::SafeArea::default(),
         text_side: TextSide::Right,
-        font_path: None,
-        font_name: Some("helvetica".into()),
+        font_path: Some(test_font()),
+        font_name: None,
         font_size: None,
         border: false,
-    });
-    if let Ok(img) = img {
-        assert_eq!(img.dimensions(), (W, H));
-    }
+    })
+    .expect("render Wi-Fi demo with vendored font");
+    assert_eq!(img.dimensions(), (W, H));
     let fix = open_gray("sticker_wifi.png");
     assert_eq!(fix.dimensions(), (W, H));
 }
@@ -250,17 +251,16 @@ fn link_sticker_layout_is_full_canvas_square_qr() {
         safe: thermark::geometry::SafeArea::default(),
         text_side: TextSide::Right,
         border: false,
-        font_path: None,
-        font_name: Some("helvetica".into()),
+        font_path: Some(test_font()),
+        font_name: None,
         font_size: None,
-    });
-    if let Ok(img) = img {
-        assert_eq!(img.dimensions(), (W, H));
-        let side = thermark::label::max_qr_side(lp, thermark::geometry::SafeArea::default());
-        assert_eq!(side, side.min(lp.height_px));
-        let fix = open_gray("sticker_link.png");
-        assert_eq!(fix.dimensions(), (W, H));
-    }
+    })
+    .expect("render link sticker with vendored font");
+    assert_eq!(img.dimensions(), (W, H));
+    let side = thermark::label::max_qr_side(lp, thermark::geometry::SafeArea::default());
+    assert_eq!(side, side.min(lp.height_px));
+    let fix = open_gray("sticker_link.png");
+    assert_eq!(fix.dimensions(), (W, H));
 }
 
 #[test]

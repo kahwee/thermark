@@ -31,6 +31,11 @@ pub enum WifiSecurity {
 }
 
 impl WifiSecurity {
+    /// Whether this security mode needs a password in the QR payload.
+    pub const fn requires_password(self) -> bool {
+        matches!(self, Self::Wpa | Self::Wep)
+    }
+
     fn tag(self) -> &'static str {
         match self {
             Self::Wpa => "WPA",
@@ -73,7 +78,7 @@ pub fn wifi_qr_payload(
     if ssid.is_empty() {
         return Err(Error::msg("Wi‑Fi SSID must not be empty"));
     }
-    if matches!(security, WifiSecurity::Wpa | WifiSecurity::Wep) && password.is_empty() {
+    if security.requires_password() && password.is_empty() {
         return Err(Error::msg(
             "password required for WPA/WEP. Pass --password … or set THERMARK_WIFI_PASSWORD \
              (keeps the secret out of shell history). Open network: --security nopass",
@@ -137,11 +142,12 @@ pub struct WifiLabelOptions {
 /// Render a 50×30-class Wi‑Fi sticker: join QR + clear network name.
 pub fn make_wifi_label(opts: &WifiLabelOptions) -> Result<GrayImage> {
     let payload = wifi_qr_payload(&opts.ssid, &opts.password, opts.security, opts.hidden)?;
-    let side = if opts.show_password {
-        wifi_side_text(&opts.ssid, Some(&opts.password))
-    } else {
-        wifi_side_text(&opts.ssid, None)
-    };
+    // Keep open-network semantics at the public renderer boundary too. CLI
+    // callers normalize this already, but library callers may carry a stale
+    // password alongside `Nopass`; it must never appear on that label.
+    let shown_password =
+        (opts.show_password && opts.security.requires_password()).then_some(opts.password.as_str());
+    let side = wifi_side_text(&opts.ssid, shown_password);
     make_qr_label_opts(&QrLabelOptions {
         url: payload,
         side_text: side,
@@ -183,6 +189,36 @@ mod tests {
         let p = wifi_qr_payload("OpenNet", "", WifiSecurity::Nopass, false).unwrap();
         assert!(!p.contains("P:"), "{p}");
         assert!(p.contains("T:nopass"));
+    }
+
+    #[test]
+    fn open_network_label_never_renders_a_stale_password() {
+        let baseline = WifiLabelOptions {
+            ssid: "OpenNet".into(),
+            password: String::new(),
+            security: WifiSecurity::Nopass,
+            hidden: false,
+            show_password: false,
+            label: LabelPx {
+                width_px: 384,
+                height_px: 240,
+            },
+            safe: SafeArea::B1,
+            text_side: TextSide::Right,
+            font_path: None,
+            font_name: None,
+            font_size: None,
+            border: false,
+        };
+        let expected = make_wifi_label(&baseline).unwrap();
+        let actual = make_wifi_label(&WifiLabelOptions {
+            password: "must-not-appear".into(),
+            show_password: true,
+            ..baseline
+        })
+        .unwrap();
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

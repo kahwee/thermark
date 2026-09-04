@@ -108,6 +108,16 @@ impl PrinterProfile {
     pub const fn supports_density(self, density: u8) -> bool {
         density >= self.density_min && density <= self.density_max
     }
+
+    /// Whether this exact model/profile and print-task combination has been
+    /// exercised on hardware owned by this project.
+    ///
+    /// A task describes wire behavior, not the physical device it is sent to.
+    /// In particular, selecting the B1 task for another model does not make
+    /// that printer path hardware-verified.
+    pub const fn print_path_hardware_tested(self, task: PrintTask) -> bool {
+        matches!((self.model, task), (Model::B1, PrintTask::B1))
+    }
 }
 
 const GAP_BLACK_TRANSPARENT: &[u8] = &[1, 2, 5];
@@ -235,6 +245,13 @@ mod tests {
         assert_eq!(profile.direction, PrintDirection::Left);
         assert_eq!((profile.density_min, profile.density_max), (1, 3));
         assert_eq!(profile.task, None);
+    }
+
+    #[test]
+    fn hardware_verification_belongs_to_the_profile_and_task_pair() {
+        assert!(profile_for_model(Model::B1).print_path_hardware_tested(PrintTask::B1));
+        assert!(!profile_for_model(Model::B21Pro).print_path_hardware_tested(PrintTask::B1));
+        assert!(!profile_for_model(Model::B1).print_path_hardware_tested(PrintTask::D110));
     }
 
     #[test]

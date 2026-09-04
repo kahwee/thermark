@@ -5,7 +5,7 @@ use crate::geometry::{LabelPx, Rect, SafeArea};
 use crate::packet::{MAX_DATA_LEN, Packet};
 use crate::protocol;
 use crate::types::Rotation;
-use image::{DynamicImage, GenericImageView, GrayImage, Luma, Pixel, RgbaImage, imageops};
+use image::{DynamicImage, GenericImageView, GrayImage, Luma, RgbaImage, imageops};
 
 /// Six bytes precede bitmap pixels in a row packet, and the frame length is a
 /// single byte. Physical profiles are much narrower, but the public encoder
@@ -165,8 +165,96 @@ pub fn encode(img: DynamicImage, max_width: u32, threshold: u8, dither: bool) ->
 
     // Consuming the dynamic image lets an existing Luma8 buffer pass through
     // without a second page-sized copy.
-    let gray = img.into_luma8();
+    let gray = grayscale_on_white(img);
     encode_gray_validated(&gray, width, height, threshold, dither)
+}
+
+/// Convert an image to grayscale after flattening transparency onto white.
+///
+/// Thermal media has a white background. Ignoring alpha makes a transparent
+/// black PNG look solid black, so both encoding and trimming route alpha
+/// pixels through the same compositing rule.
+pub fn grayscale_on_white(img: DynamicImage) -> GrayImage {
+    if !img.has_alpha() {
+        return img.into_luma8();
+    }
+
+    flatten_alpha_on_white(img).into_luma8()
+}
+
+/// Composite alpha-bearing channels over white in their native precision.
+///
+/// Luminance conversion happens afterwards through `DynamicImage::into_luma8`.
+/// Keeping that order preserves the image crate's color conversion and makes
+/// an opaque RGBA pixel identical to the corresponding RGB pixel.
+fn flatten_alpha_on_white(img: DynamicImage) -> DynamicImage {
+    match img {
+        DynamicImage::ImageLumaA8(mut pixels) => {
+            for pixel in pixels.pixels_mut() {
+                pixel[0] = composite_u8_on_white(pixel[0], pixel[1]);
+                pixel[1] = u8::MAX;
+            }
+            DynamicImage::ImageLumaA8(pixels)
+        }
+        DynamicImage::ImageRgba8(mut pixels) => {
+            for pixel in pixels.pixels_mut() {
+                let alpha = pixel[3];
+                for channel in &mut pixel.0[..3] {
+                    *channel = composite_u8_on_white(*channel, alpha);
+                }
+                pixel[3] = u8::MAX;
+            }
+            DynamicImage::ImageRgba8(pixels)
+        }
+        DynamicImage::ImageLumaA16(mut pixels) => {
+            for pixel in pixels.pixels_mut() {
+                pixel[0] = composite_u16_on_white(pixel[0], pixel[1]);
+                pixel[1] = u16::MAX;
+            }
+            DynamicImage::ImageLumaA16(pixels)
+        }
+        DynamicImage::ImageRgba16(mut pixels) => {
+            for pixel in pixels.pixels_mut() {
+                let alpha = pixel[3];
+                for channel in &mut pixel.0[..3] {
+                    *channel = composite_u16_on_white(*channel, alpha);
+                }
+                pixel[3] = u16::MAX;
+            }
+            DynamicImage::ImageRgba16(pixels)
+        }
+        DynamicImage::ImageRgba32F(mut pixels) => {
+            for pixel in pixels.pixels_mut() {
+                let alpha = pixel[3];
+                for channel in &mut pixel.0[..3] {
+                    *channel = *channel * alpha + (1.0 - alpha);
+                }
+                pixel[3] = 1.0;
+            }
+            DynamicImage::ImageRgba32F(pixels)
+        }
+        image => image,
+    }
+}
+
+fn composite_u8_on_white(channel: u8, alpha: u8) -> u8 {
+    let alpha = u16::from(alpha);
+    ((u16::from(channel) * alpha + u16::from(u8::MAX) * (u16::from(u8::MAX) - alpha) + 127)
+        / u16::from(u8::MAX)) as u8
+}
+
+fn composite_u16_on_white(channel: u16, alpha: u16) -> u16 {
+    let alpha = u64::from(alpha);
+    ((u64::from(channel) * alpha
+        + u64::from(u16::MAX) * (u64::from(u16::MAX) - alpha)
+        + u64::from(u16::MAX) / 2)
+        / u64::from(u16::MAX)) as u16
+}
+
+/// Whether the hard-threshold encoder burns a source luminance value.
+#[inline]
+fn burns_at_threshold(luma: u8, threshold: u8) -> bool {
+    255u8.saturating_sub(luma) > threshold
 }
 
 /// Threshold a borrowed grayscale image and emit print row packets.
@@ -289,8 +377,7 @@ fn for_each_print_bit(
     if !dither {
         for (y, row) in gray.as_raw().chunks_exact(width_usize).enumerate() {
             for (x, &luma) in row.iter().enumerate() {
-                let inverted = 255u8.saturating_sub(luma);
-                visit(x as u32, y as u32, inverted > threshold);
+                visit(x as u32, y as u32, burns_at_threshold(luma, threshold));
             }
         }
         return;
@@ -414,58 +501,135 @@ impl RowRunEncoder {
 /// bulldozer with a 35 px built-in margin lost another 29 rows to it after
 /// scaling, on top of the 40 reserved rows.
 ///
-/// Returns the image unchanged when it is blank or already tight.
+/// `threshold` is a direct luminance ceiling: pixels with luma less than or
+/// equal to it count as ink. Returns the image unchanged when it is blank or
+/// already tight.
 pub fn trim_white(img: DynamicImage, threshold: u8) -> DynamicImage {
-    let (w, h) = img.dimensions();
-    let Some(ink) = image_ink_bounds(&img, threshold) else {
-        return img; // nothing but background
+    let ink = image_luma_bounds(&img, |luma| luma <= threshold);
+    crop_to_bounds(img, ink)
+}
+
+/// Trim to the pixels that the selected print conversion would burn.
+///
+/// Hard-threshold trimming shares the encoder's exact darkness predicate and
+/// can crop all four edges. Dithering only removes leading and trailing white
+/// rows: the full source width is retained because white columns can carry
+/// Floyd–Steinberg error between rows and change later burn decisions.
+pub(crate) fn trim_for_print(img: DynamicImage, threshold: u8, dither: bool) -> DynamicImage {
+    let ink = if dither {
+        image_luma_bounds(&img, |luma| luma < u8::MAX).map(|bounds| Rect {
+            x: 0,
+            y: bounds.y,
+            w: img.width(),
+            h: bounds.h,
+        })
+    } else {
+        image_luma_bounds(&img, |luma| burns_at_threshold(luma, threshold))
     };
-    if ink.x == 0 && ink.y == 0 && ink.w == w && ink.h == h {
-        return img; // already tight
+    crop_to_bounds(img, ink)
+}
+
+fn crop_to_bounds(img: DynamicImage, bounds: Option<Rect>) -> DynamicImage {
+    let (width, height) = img.dimensions();
+    let Some(bounds) = bounds else {
+        return img;
+    };
+    if bounds.x == 0 && bounds.y == 0 && bounds.w == width && bounds.h == height {
+        return img;
     }
     // DynamicImage::crop_imm dispatches to the underlying buffer, preserving
     // its pixel format. Converting the entire input to RGBA first made a
     // grayscale crop four times larger than necessary.
-    img.crop_imm(ink.x, ink.y, ink.w, ink.h)
+    img.crop_imm(bounds.x, bounds.y, bounds.w, bounds.h)
 }
 
-/// Find ink directly in common 8-bit images without allocating a full
-/// grayscale copy. High-precision formats keep the library's conversion order:
-/// converting their channels to RGBA8 first can move luminance by one at a
-/// threshold boundary.
-fn image_ink_bounds(img: &DynamicImage, threshold: u8) -> Option<Rect> {
+/// Find matching luminance directly in native grayscale images. Other formats
+/// go through the same color conversion and white alpha composite as encoding,
+/// so trimming cannot disagree with the eventual print at a threshold edge.
+fn image_luma_bounds(img: &DynamicImage, mut predicate: impl FnMut(u8) -> bool) -> Option<Rect> {
     if let Some(gray) = img.as_luma8() {
-        return ink_bounds(gray, threshold);
+        return luma_bounds_by(
+            gray.enumerate_pixels()
+                .map(|(x, y, pixel)| (x, y, pixel[0])),
+            predicate,
+        );
     }
-    let color = img.color();
-    if color.bits_per_pixel() / u16::from(color.channel_count()) > 8 {
-        return ink_bounds(&img.to_luma8(), threshold);
+
+    if !img.has_alpha() {
+        let gray = img.to_luma8();
+        return luma_bounds_by(
+            gray.enumerate_pixels()
+                .map(|(x, y, pixel)| (x, y, pixel[0])),
+            predicate,
+        );
     }
-    ink_bounds_from_luma(
-        img.pixels().map(|(x, y, pixel)| (x, y, pixel.to_luma()[0])),
-        threshold,
-    )
+
+    // Alpha-bearing images need compositing before luma conversion, but trim
+    // borrows its input so it can later return the original pixel format. Do
+    // that conversion in bounded stripes rather than cloning the whole source
+    // alongside a page-sized grayscale allocation.
+    const STRIPE_ROWS: u32 = 64;
+    let (width, height) = img.dimensions();
+    let mut bounds = LumaBounds::new();
+    let mut y = 0;
+    while width != 0 && y < height {
+        let rows = (height - y).min(STRIPE_ROWS);
+        let gray = grayscale_on_white(img.crop_imm(0, y, width, rows));
+        for (x, stripe_y, pixel) in gray.enumerate_pixels() {
+            if predicate(pixel[0]) {
+                bounds.include(x, y + stripe_y);
+            }
+        }
+        y += rows;
+    }
+    bounds.finish()
 }
 
-fn ink_bounds_from_luma(
+fn luma_bounds_by(
     pixels: impl Iterator<Item = (u32, u32, u8)>,
-    threshold: u8,
+    mut predicate: impl FnMut(u8) -> bool,
 ) -> Option<Rect> {
-    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    let mut bounds = LumaBounds::new();
     for (x, y, luma) in pixels {
-        if luma <= threshold {
-            x0 = x0.min(x);
-            y0 = y0.min(y);
-            x1 = x1.max(x);
-            y1 = y1.max(y);
+        if predicate(luma) {
+            bounds.include(x, y);
         }
     }
-    (x0 != u32::MAX).then(|| Rect {
-        x: x0,
-        y: y0,
-        w: x1 - x0 + 1,
-        h: y1 - y0 + 1,
-    })
+    bounds.finish()
+}
+
+struct LumaBounds {
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+}
+
+impl LumaBounds {
+    fn new() -> Self {
+        Self {
+            x0: u32::MAX,
+            y0: u32::MAX,
+            x1: 0,
+            y1: 0,
+        }
+    }
+
+    fn include(&mut self, x: u32, y: u32) {
+        self.x0 = self.x0.min(x);
+        self.y0 = self.y0.min(y);
+        self.x1 = self.x1.max(x);
+        self.y1 = self.y1.max(y);
+    }
+
+    fn finish(self) -> Option<Rect> {
+        (self.x0 != u32::MAX).then(|| Rect {
+            x: self.x0,
+            y: self.y0,
+            w: self.x1 - self.x0 + 1,
+            h: self.y1 - self.y0 + 1,
+        })
+    }
 }
 
 /// Bounding box of ink — pixels at or below `threshold` — or `None` if blank.
@@ -474,10 +638,10 @@ fn ink_bounds_from_luma(
 /// where did anything actually get drawn? Answering it by hand each time is how
 /// two call sites end up disagreeing about what counts as ink.
 pub fn ink_bounds(gray: &GrayImage, threshold: u8) -> Option<Rect> {
-    ink_bounds_from_luma(
+    luma_bounds_by(
         gray.enumerate_pixels()
             .map(|(x, y, pixel)| (x, y, pixel[0])),
-        threshold,
+        |luma| luma <= threshold,
     )
 }
 
@@ -513,6 +677,21 @@ struct ContentBox {
 }
 
 impl ContentBox {
+    fn for_label(label: LabelPx, safe: SafeArea, margin: u32) -> Result<Self> {
+        let area = safe.content(label).ok_or_else(|| {
+            Error::invalid_label(format!(
+                "safe area (top {}, bottom {}, left {}, right {}) leaves no content on a {}x{}px label",
+                safe.top,
+                safe.bottom,
+                safe.left,
+                safe.right,
+                label.width_px,
+                label.height_px
+            ))
+        })?;
+        Ok(Self::in_rect(label, area, margin))
+    }
+
     /// Content box for `area` within a full `label` canvas.
     fn in_rect(label: LabelPx, area: Rect, margin: u32) -> Self {
         let canvas_w = label.width_px.max(1);
@@ -610,15 +789,15 @@ fn cover_crop(iw: u32, ih: u32, target_w: u32, target_h: u32) -> Rect {
 ///
 /// Makes content as large as the media allows; `margin` keeps a white border
 /// so heat is less likely to run to the edge. Pass [`SafeArea::NONE`] for full
-/// bleed. Returns a full-size canvas with the image placed inside `safe`.
-pub fn fill_label(img: DynamicImage, label: LabelPx, safe: SafeArea, margin: u32) -> DynamicImage {
-    let area = safe.content(label).unwrap_or(Rect {
-        x: 0,
-        y: 0,
-        w: label.width_px,
-        h: label.height_px,
-    });
-    let bx = ContentBox::in_rect(label, area, margin);
+/// bleed. Returns a full-size canvas with the image placed inside `safe`, or
+/// an error when the insets leave no content area on the label.
+pub fn fill_label(
+    img: DynamicImage,
+    label: LabelPx,
+    safe: SafeArea,
+    margin: u32,
+) -> Result<DynamicImage> {
+    let bx = ContentBox::for_label(label, safe, margin)?;
     let (iw, ih) = img.dimensions();
     let crop = cover_crop(iw, ih, bx.width, bx.height);
     let source = imageops::crop_imm(&img, crop.x, crop.y, crop.w, crop.h);
@@ -653,26 +832,21 @@ pub fn fill_label(img: DynamicImage, label: LabelPx, safe: SafeArea, margin: u32
         bx.origin_x as i64,
         bx.origin_y as i64,
     );
-    DynamicImage::ImageRgba8(canvas)
+    Ok(DynamicImage::ImageRgba8(canvas))
 }
 
 /// Scale `img` to **fit entirely** inside the configured content area.
 ///
 /// Prefer this for photographs so nothing is cropped. Pass [`SafeArea::NONE`]
-/// to use the whole canvas.
+/// to use the whole canvas. Returns an error when the insets leave no content
+/// area on the label.
 pub fn contain_label(
     img: DynamicImage,
     label: LabelPx,
     safe: SafeArea,
     margin: u32,
-) -> DynamicImage {
-    let area = safe.content(label).unwrap_or(Rect {
-        x: 0,
-        y: 0,
-        w: label.width_px,
-        h: label.height_px,
-    });
-    let bx = ContentBox::in_rect(label, area, margin);
+) -> Result<DynamicImage> {
+    let bx = ContentBox::for_label(label, safe, margin)?;
     let (iw, ih) = img.dimensions();
     let scale = f64::min(bx.width as f64 / iw as f64, bx.height as f64 / ih as f64);
     let (nw, nh) = scaled_dimensions(&img, scale);
@@ -687,7 +861,7 @@ pub fn contain_label(
         (bx.origin_x + bx.width.saturating_sub(nw) / 2) as i64,
         (bx.origin_y + bx.height.saturating_sub(nh) / 2) as i64,
     );
-    DynamicImage::ImageRgba8(canvas)
+    Ok(DynamicImage::ImageRgba8(canvas))
 }
 
 /// Spacing between calibration rings, in px (0.5 mm at 8 px/mm).
@@ -837,6 +1011,131 @@ mod tests {
     }
 
     #[test]
+    fn transparent_black_is_white_for_encoding_and_trimming() {
+        let transparent =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 2, image::Rgba([0, 0, 0, 0])));
+        let gray = grayscale_on_white(transparent.clone());
+        assert!(gray.pixels().all(|pixel| pixel[0] == 255));
+
+        let raster = encode(transparent, 384, 127, false).unwrap();
+        assert_eq!(raster.rows.len(), 1);
+        assert_eq!(raster.rows[0].cmd, Cmd::PrintEmptyRow as u8);
+        assert_eq!(raster.rows[0].data[2], 2);
+
+        let mut rgba = RgbaImage::from_pixel(7, 5, image::Rgba([0, 0, 0, 0]));
+        rgba.put_pixel(3, 2, image::Rgba([0, 0, 0, 255]));
+        let trimmed = trim_white(DynamicImage::ImageRgba8(rgba), 127);
+        assert_eq!(trimmed.dimensions(), (1, 1));
+        assert_eq!(trimmed.get_pixel(0, 0), image::Rgba([0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn semi_transparent_black_uses_the_same_threshold_for_encode_and_trim() {
+        let mut rgba = RgbaImage::from_pixel(8, 1, image::Rgba([0, 0, 0, 0]));
+        rgba.put_pixel(1, 0, image::Rgba([0, 0, 0, 127]));
+        rgba.put_pixel(2, 0, image::Rgba([0, 0, 0, 128]));
+        let image = DynamicImage::ImageRgba8(rgba);
+
+        // Over white, alpha 127 rounds to luma 128 (no burn), while alpha 128
+        // is luma 127 (burn) at the default threshold.
+        let raster = encode(image.clone(), 384, 127, false).unwrap();
+        assert_eq!(raster.rows.len(), 1);
+        assert_eq!(raster.rows[0].cmd, Cmd::PrintBitmapRow as u8);
+        assert_eq!(raster.rows[0].data[6], 0b0010_0000);
+
+        let trimmed = trim_white(image, 127);
+        assert_eq!(trimmed.dimensions(), (1, 1));
+        assert_eq!(trimmed.get_pixel(0, 0), image::Rgba([0, 0, 0, 128]));
+    }
+
+    #[test]
+    fn opaque_rgba_keeps_the_image_crate_luminance_at_the_burn_boundary() {
+        let mut rgba = RgbaImage::from_pixel(3, 1, image::Rgba([255, 255, 255, 255]));
+        rgba.put_pixel(1, 0, image::Rgba([0, 153, 251, 255]));
+        let image = DynamicImage::ImageRgba8(rgba);
+
+        let expected = image.clone().into_luma8();
+        assert_eq!(expected.as_raw(), &[255, 128, 255]);
+        assert_eq!(grayscale_on_white(image.clone()), expected);
+
+        // Luma 128 does not burn at threshold 127, so print-aware trimming
+        // must treat this as a blank image and leave its dimensions intact.
+        assert_eq!(trim_for_print(image, 127, false).dimensions(), (3, 1));
+    }
+
+    #[test]
+    fn print_trim_uses_darkness_threshold_without_changing_public_trim_semantics() {
+        let gray = GrayImage::from_raw(7, 1, vec![255, 204, 205, 0, 205, 204, 255]).unwrap();
+        let image = DynamicImage::ImageLuma8(gray);
+
+        // Public trim_white keeps its established direct-luma `<= threshold`
+        // contract, which selects only the central black pixel here.
+        let public = trim_white(image.clone(), 50).into_luma8();
+        assert_eq!(public.dimensions(), (1, 1));
+        assert_eq!(public.as_raw(), &[0]);
+
+        // Print threshold 50 burns darkness > 50: luma 204 burns while the
+        // exact luma-205 boundary does not. Both outer burned pixels survive.
+        let print = trim_for_print(image, 50, false).into_luma8();
+        assert_eq!(print.dimensions(), (5, 1));
+        assert_eq!(print.as_raw(), &[204, 205, 0, 205, 204]);
+        assert_eq!(
+            render_print_preview(&print, 384, 50, false)
+                .unwrap()
+                .as_raw(),
+            &[0, 255, 0, 255, 0]
+        );
+    }
+
+    #[test]
+    fn print_trim_composites_alpha_before_applying_a_non_default_threshold() {
+        let mut rgba = RgbaImage::from_pixel(7, 70, image::Rgba([0, 0, 0, 0]));
+        rgba.put_pixel(1, 65, image::Rgba([0, 0, 0, 50]));
+        rgba.put_pixel(2, 65, image::Rgba([0, 0, 0, 51]));
+        rgba.put_pixel(4, 65, image::Rgba([0, 0, 0, 51]));
+        rgba.put_pixel(5, 65, image::Rgba([0, 0, 0, 50]));
+
+        // Alpha 50 composites to luma 205 (no burn), while alpha 51 becomes
+        // luma 204 (burn). The y coordinate also exercises a second stripe.
+        let trimmed = trim_for_print(DynamicImage::ImageRgba8(rgba), 50, false);
+        assert_eq!(trimmed.dimensions(), (3, 1));
+        assert_eq!(grayscale_on_white(trimmed).as_raw(), &[204, 255, 204]);
+    }
+
+    #[test]
+    fn dither_trim_keeps_full_width_and_preserves_retained_burn_bits() {
+        // This exact pair of rows is a counterexample to horizontal dither
+        // trimming: error carried by the white columns changes whether a
+        // retained content pixel burns after cropping to columns 2..4.
+        let content = GrayImage::from_raw(
+            6,
+            2,
+            vec![255, 255, 32, 32, 255, 255, 255, 255, 192, 128, 255, 255],
+        )
+        .unwrap();
+        let expected = render_print_preview(&content, 384, 128, true).unwrap();
+        let horizontally_cropped = imageops::crop_imm(&content, 2, 0, 2, 2).to_image();
+        let cropped_bits = render_print_preview(&horizontally_cropped, 384, 128, true).unwrap();
+        let expected_content_bits = imageops::crop_imm(&expected, 2, 0, 2, 2).to_image();
+        assert_ne!(cropped_bits, expected_content_bits);
+
+        // Leading white rows start with no error and trailing rows cannot
+        // influence earlier pixels, so those vertical edges remain safe.
+        let mut padded = GrayImage::from_pixel(6, 4, Luma([255]));
+        imageops::replace(&mut padded, &content, 0, 1);
+        let padded_bits = render_print_preview(&padded, 384, 128, true).unwrap();
+        let expected_retained_bits = imageops::crop_imm(&padded_bits, 0, 1, 6, 2).to_image();
+
+        let trimmed = trim_for_print(DynamicImage::ImageLuma8(padded), 128, true).into_luma8();
+        assert_eq!(trimmed, content);
+        assert_eq!(trimmed.dimensions(), (6, 2));
+        assert_eq!(
+            render_print_preview(&trimmed, 384, 128, true).unwrap(),
+            expected_retained_bits
+        );
+    }
+
+    #[test]
     fn encode_rejects_an_over_tall_page_before_row_indices_wrap() {
         let gray = GrayImage::from_pixel(1, u32::from(u16::MAX) + 1, Luma([255]));
         assert!(matches!(
@@ -981,8 +1280,46 @@ mod tests {
     fn fill_label_exact_size() {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(50, 50, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
-        let out = fill_label(src, lp, SafeArea::NONE, 0);
+        let out = fill_label(src, lp, SafeArea::NONE, 0).unwrap();
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
+    }
+
+    #[test]
+    fn label_placement_rejects_invalid_label_and_safe_area_combinations() {
+        let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(1, 1, Luma([0])));
+        let invalid = [
+            (
+                LabelPx {
+                    width_px: 10,
+                    height_px: 8,
+                },
+                SafeArea {
+                    top: 0,
+                    bottom: 0,
+                    left: 5,
+                    right: 5,
+                },
+            ),
+            (
+                LabelPx {
+                    width_px: 0,
+                    height_px: 8,
+                },
+                SafeArea::NONE,
+            ),
+        ];
+
+        for (label, safe) in invalid {
+            for result in [
+                fill_label(src.clone(), label, safe, 0),
+                contain_label(src.clone(), label, safe, 0),
+            ] {
+                assert!(
+                    matches!(result, Err(Error::InvalidLabel(ref message)) if message.contains("leaves no content")),
+                    "unexpected placement result: {result:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1005,7 +1342,9 @@ mod tests {
             left: 2,
             right: 2,
         };
-        let output = fill_label(DynamicImage::ImageLuma8(source), label, safe, 1).to_luma8();
+        let output = fill_label(DynamicImage::ImageLuma8(source), label, safe, 1)
+            .unwrap()
+            .to_luma8();
 
         assert_eq!(output.dimensions(), (10, 8));
         assert_eq!(
@@ -1032,8 +1371,9 @@ mod tests {
             width_px: 64,
             height_px: 32,
         };
-        let output =
-            fill_label(DynamicImage::ImageLuma8(source), label, SafeArea::NONE, 0).to_luma8();
+        let output = fill_label(DynamicImage::ImageLuma8(source), label, SafeArea::NONE, 0)
+            .unwrap()
+            .to_luma8();
 
         assert_eq!(output.dimensions(), (64, 32));
         assert!(output.pixels().all(|pixel| pixel[0] == 0));
@@ -1051,8 +1391,9 @@ mod tests {
             width_px: 384,
             height_px: 240,
         };
-        let output =
-            fill_label(DynamicImage::ImageLuma8(source), label, SafeArea::NONE, 0).to_luma8();
+        let output = fill_label(DynamicImage::ImageLuma8(source), label, SafeArea::NONE, 0)
+            .unwrap()
+            .to_luma8();
 
         let (darkest, lightest) = output.pixels().fold((u8::MAX, u8::MIN), |(lo, hi), pixel| {
             (lo.min(pixel[0]), hi.max(pixel[0]))
@@ -1075,7 +1416,9 @@ mod tests {
         // Tall image → letterbox left/right on a wide label.
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(40, 80, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
-        let out = contain_label(src, lp, SafeArea::NONE, 0).to_luma8();
+        let out = contain_label(src, lp, SafeArea::NONE, 0)
+            .unwrap()
+            .to_luma8();
         assert_eq!(out.dimensions(), (lp.width_px, lp.height_px));
         // Corners of canvas should stay white (letterbox / padding).
         assert_eq!(out.get_pixel(0, 0)[0], 255);
@@ -1091,7 +1434,9 @@ mod tests {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(200, 200, Luma([0])));
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let margin = 16u32;
-        let out = contain_label(src, lp, SafeArea::NONE, margin).to_luma8();
+        let out = contain_label(src, lp, SafeArea::NONE, margin)
+            .unwrap()
+            .to_luma8();
         // Outer margin ring must be white.
         for x in 0..lp.width_px {
             assert_eq!(out.get_pixel(x, 0)[0], 255);
@@ -1109,8 +1454,8 @@ mod tests {
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
 
         for placed in [
-            fill_label(src.clone(), lp, safe, 0),
-            contain_label(src.clone(), lp, safe, 0),
+            fill_label(src.clone(), lp, safe, 0).unwrap(),
+            contain_label(src.clone(), lp, safe, 0).unwrap(),
         ] {
             let g = placed.to_luma8();
             assert_eq!(g.dimensions(), (lp.width_px, lp.height_px));
@@ -1194,7 +1539,7 @@ mod tests {
             }
         }
         let art = trim_white(DynamicImage::ImageLuma8(g), 127);
-        let placed = contain_label(art, lp, safe, 0).to_luma8();
+        let placed = contain_label(art, lp, safe, 0).unwrap().to_luma8();
 
         let usable = lp.height_px - safe.bottom;
         let mut lowest = 0;
@@ -1215,7 +1560,7 @@ mod tests {
         // Calibration depends on this: it must reach the true edges.
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
         let src = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
-        let g = fill_label(src, lp, SafeArea::NONE, 0).to_luma8();
+        let g = fill_label(src, lp, SafeArea::NONE, 0).unwrap().to_luma8();
         assert_eq!(g.get_pixel(0, 0)[0], 0);
         assert_eq!(g.get_pixel(lp.width_px - 1, lp.height_px - 1)[0], 0);
     }

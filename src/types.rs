@@ -104,7 +104,7 @@ impl Rotation {
         }
     }
 
-    /// True if any non-zero rotation is applied.
+    /// True when no rotation is applied.
     pub fn is_identity(self) -> bool {
         matches!(self, Self::Deg0)
     }

@@ -1,5 +1,6 @@
 //! Environment + printer readiness checks (`thermark doctor`).
 
+use crate::config::ConnPref;
 use crate::errors::Result;
 use crate::print_task::{PrintTask, SupportStatus, hardware_matrix};
 use crate::printer::{Heartbeat, RfidInfo};
@@ -207,7 +208,8 @@ pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
             format!("model={model} has no verified default task"),
         );
     };
-    let (status, label) = if task.hardware_tested() {
+    let profile = crate::profile::profile_for_model(model);
+    let (status, label) = if profile.print_path_hardware_tested(task) {
         (CheckStatus::Pass, "hardware-tested")
     } else {
         (CheckStatus::Warn, "experimental")
@@ -217,7 +219,7 @@ pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
         status,
         format!(
             "model={model} → task={task} ({label}), max width {}px",
-            crate::profile::profile_for_model(model).max_width_px
+            profile.max_width_px
         ),
     )
 }
@@ -229,7 +231,7 @@ pub struct DoctorOptions {
     pub model: Model,
     pub task: Option<PrintTask>,
     pub scan_secs: u64,
-    pub conn: DoctorConn,
+    pub conn: ConnPref,
     pub match_mode: BleMatchMode,
 }
 
@@ -287,10 +289,10 @@ pub async fn run_doctor(opts: &DoctorOptions) -> Result<DoctorReport> {
     ));
 
     match opts.conn {
-        DoctorConn::Ble => {
+        ConnPref::Ble => {
             doctor_ble(&mut checks, addr, model, scan_secs, match_mode).await?;
         }
-        DoctorConn::Usb => {
+        ConnPref::Usb => {
             doctor_usb(&mut checks, addr, model).await?;
         }
     }
@@ -450,21 +452,11 @@ async fn doctor_usb(checks: &mut Vec<Check>, _addr: Option<&str>, _model: Model)
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DoctorConn {
-    #[default]
-    Ble,
-    Usb,
-}
-
-impl From<crate::config::ConnPref> for DoctorConn {
-    fn from(p: crate::config::ConnPref) -> Self {
-        match p {
-            crate::config::ConnPref::Ble => Self::Ble,
-            crate::config::ConnPref::Usb => Self::Usb,
-        }
-    }
-}
+/// Compatibility name for the connection preference used by [`DoctorOptions`].
+///
+/// New code should use [`ConnPref`] directly. Keeping this alias avoids breaking
+/// callers while removing the duplicate enum and conversion layer.
+pub type DoctorConn = ConnPref;
 
 #[cfg(test)]
 mod tests {
@@ -531,5 +523,12 @@ mod tests {
     fn print_task_b1_is_pass() {
         let c = evaluate_print_task(Model::B1, None);
         assert_eq!(c.status, CheckStatus::Pass);
+    }
+
+    #[test]
+    fn b1_task_does_not_mark_an_experimental_profile_as_tested() {
+        let c = evaluate_print_task(Model::B21Pro, Some(PrintTask::B1));
+        assert_eq!(c.status, CheckStatus::Warn);
+        assert!(c.detail.contains("experimental"));
     }
 }

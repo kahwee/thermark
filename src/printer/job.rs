@@ -20,7 +20,7 @@ pub fn compose_for_label(
 ) -> Result<image::DynamicImage> {
     let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
     if opts.trim {
-        img = image_encode::trim_white(img, opts.threshold.get());
+        img = image_encode::trim_for_print(img, opts.threshold.get(), opts.dither);
     }
 
     match opts.label.map(|l| l.to_pixels(max_width_px, pixels_per_mm)) {
@@ -41,7 +41,7 @@ pub fn compose_for_label(
                 image_encode::fill_label(img, lp, opts.safe, opts.margin_px)
             } else {
                 image_encode::contain_label(img, lp, opts.safe, opts.margin_px)
-            };
+            }?;
         }
         None if opts.fit => img = image_encode::fit_width(img, max_width_px),
         None => {}
@@ -67,7 +67,8 @@ pub struct PrintOptions {
     pub dither: bool,
     /// Content/registration insets.
     pub safe: SafeArea,
-    /// Crop the source image's own white border before placement.
+    /// Crop source whitespace before placement. Dithered images keep their
+    /// full width so horizontal diffusion state remains unchanged.
     pub trim: bool,
 }
 

@@ -1,6 +1,6 @@
 //! `thermark config` — show / set / clear the saved default printer.
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use thermark::config::{Config, ConnPref};
 use thermark::protocol::Model;
 
@@ -16,7 +16,7 @@ pub fn run(action: &ConfigCmd) -> Result<()> {
             model,
             scan_secs,
             label,
-        } => set(addr, *conn, *model, *scan_secs, label.as_deref())?,
+        } => set(addr.as_deref(), *conn, *model, *scan_secs, label.as_deref())?,
         ConfigCmd::SafeArea {
             last_tick,
             label,
@@ -86,25 +86,46 @@ fn show(json: bool) -> Result<()> {
 }
 
 fn set(
-    addr: &str,
-    conn: ConnPref,
+    addr: Option<&str>,
+    conn: Option<ConnPref>,
     model: Option<Model>,
     scan_secs: Option<u64>,
     label: Option<&str>,
 ) -> Result<()> {
+    ensure!(
+        addr.is_some()
+            || conn.is_some()
+            || model.is_some()
+            || scan_secs.is_some()
+            || label.is_some(),
+        "no config updates provided; pass --addr, --conn, --model, --scan-secs, or --label"
+    );
     let mut cfg = Config::load()?;
-    cfg.apply_set(addr, conn, model, scan_secs)?;
-    if let Some(l) = label {
-        // Validate before saving: a bad size here would fail on every later
-        // command with no hint where it came from.
-        thermark::geometry::LabelMm::parse(l)?;
-        cfg.label = Some(l.to_string());
-    }
+    cfg.apply_update(addr, conn, model, scan_secs, label)?;
     let path = cfg.save()?;
-    println!("saved default printer → {addr}");
-    println!("  connection: {conn}");
+    println!("saved config");
+    if addr.is_some() {
+        println!("  addr:       {}", cfg.addr.as_deref().unwrap_or("(unset)"));
+    }
+    if let Some(conn) = conn {
+        println!("  connection: {conn}");
+    }
+    if let Some(model) = model {
+        println!("  model:      {model}");
+    }
+    if let Some(scan_secs) = scan_secs {
+        println!("  scan_secs:  {scan_secs}");
+    }
+    if label.is_some() {
+        println!(
+            "  label:      {}",
+            cfg.label.as_deref().unwrap_or("(unset)")
+        );
+    }
     println!("  file:       {}", path.display());
-    println!("Now you can run: thermark info   (no -a needed)");
+    if cfg.addr.is_some() {
+        println!("Now you can run: thermark info   (no -a needed)");
+    }
     println!("JSON view:       thermark config show --json");
     Ok(())
 }

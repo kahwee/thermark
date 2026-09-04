@@ -63,7 +63,7 @@ fn main() {
         height_px: 240,
     };
     report("cover fill owned+clone", 20, || {
-        black_box(fill_label(tall.clone(), label, SafeArea::B1, 0))
+        black_box(fill_label(tall.clone(), label, SafeArea::B1, 0).unwrap())
     });
 
     let bordered = DynamicImage::ImageLuma8(GrayImage::from_fn(2_000, 1_500, |x, y| {

@@ -408,6 +408,56 @@ async fn print_image_file_opts_aborts_preflight() {
 }
 
 #[tokio::test]
+async fn print_gray_image_aborts_preflight_before_starting_a_job() {
+    let mut mock = MockTransport::new();
+    mock.heartbeat_not_ready_no_paper();
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+    let err = c
+        .print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Printer(PrinterFault::NO_PAPER)),
+        "got {err:?}"
+    );
+
+    let cmds = c.transport().tx_cmds();
+    assert!(
+        cmds.contains(&(Cmd::Heartbeat as u8)),
+        "heartbeat preflight should run: {cmds:?}"
+    );
+    assert!(
+        !cmds.contains(&(Cmd::PrintStart as u8)),
+        "print start should not run: {cmds:?}"
+    );
+    let row_commands = [
+        Cmd::PrintBitmapRowIndexed as u8,
+        Cmd::PrintEmptyRow as u8,
+        Cmd::PrintBitmapRow as u8,
+    ];
+    assert!(
+        !cmds.iter().any(|cmd| row_commands.contains(cmd)),
+        "row data should not be sent: {cmds:?}"
+    );
+}
+
+#[tokio::test]
+async fn print_gray_image_continues_when_heartbeat_is_unavailable() {
+    let mut mock = MockTransport::new();
+    mock.mute_cmd(Cmd::Heartbeat as u8);
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+    c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap();
+
+    let cmds = c.transport().tx_cmds();
+    assert!(cmds.contains(&(Cmd::Heartbeat as u8)));
+    assert!(cmds.contains(&(Cmd::PrintStart as u8)));
+}
+
+#[tokio::test]
 async fn lost_write_is_recovered_by_resending_a_read() {
     // BLE writes are unacknowledged, so a dropped request can only be
     // recovered by sending it again — waiting longer never helps.

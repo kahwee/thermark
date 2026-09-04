@@ -201,27 +201,45 @@ impl Config {
 
     /// Delete config at an explicit path.
     pub fn clear_at(path: &Path) -> Result<bool> {
-        if path.exists() {
-            fs::remove_file(path)
-                .map_err(|e| Error::msg(format!("remove config {}: {e}", path.display())))?;
-            Ok(true)
-        } else {
-            Ok(false)
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(Error::msg(format!(
+                "remove config {}: {error}",
+                path.display()
+            ))),
         }
     }
 
     /// Update fields for `config set` (only overwrites provided values).
-    pub fn apply_set(
+    pub fn apply_update(
         &mut self,
-        addr: impl Into<String>,
-        connection: ConnPref,
+        addr: Option<&str>,
+        connection: Option<ConnPref>,
         model: Option<Model>,
         scan_secs: Option<u64>,
+        label: Option<&str>,
     ) -> Result<()> {
-        let addr = addr.into().trim().to_string();
-        if addr.is_empty() {
-            return Err(Error::msg("printer address cannot be blank"));
-        }
+        // Validate every supplied value before changing `self`, so a failed
+        // update cannot leave an in-memory config partially modified.
+        let addr = match addr {
+            Some(addr) => {
+                let addr = addr.trim();
+                if addr.is_empty() {
+                    return Err(Error::msg("printer address cannot be blank"));
+                }
+                Some(addr.to_string())
+            }
+            None => None,
+        };
+        let label = match label {
+            Some(label) => {
+                let label = label.trim();
+                LabelMm::parse(label)?;
+                Some(label.to_string())
+            }
+            None => None,
+        };
         if let Some(seconds) = scan_secs
             && !(1..=MAX_SCAN_SECS).contains(&seconds)
         {
@@ -229,15 +247,41 @@ impl Config {
                 "scan time must be 1..={MAX_SCAN_SECS} seconds, got {seconds}"
             )));
         }
-        self.addr = Some(addr);
-        self.connection = Some(connection);
-        if let Some(m) = model {
-            self.model = Some(m);
+
+        let mut updated = self.clone();
+        if let Some(addr) = addr {
+            updated.addr = Some(addr);
         }
-        if let Some(s) = scan_secs {
-            self.scan_secs = Some(s);
+        if let Some(connection) = connection {
+            updated.connection = Some(connection);
         }
+        if let Some(model) = model {
+            updated.model = Some(model);
+        }
+        if let Some(scan_secs) = scan_secs {
+            updated.scan_secs = Some(scan_secs);
+        }
+        if let Some(label) = label {
+            updated.label = Some(label);
+        }
+        updated.validate()?;
+        *self = updated;
         Ok(())
+    }
+
+    /// Set a printer address and connection, preserving optional fields.
+    ///
+    /// This compatibility helper is also used by `scan --save`; callers that
+    /// need a partial update should use [`Self::apply_update`].
+    pub fn apply_set(
+        &mut self,
+        addr: impl Into<String>,
+        connection: ConnPref,
+        model: Option<Model>,
+        scan_secs: Option<u64>,
+    ) -> Result<()> {
+        let addr = addr.into();
+        self.apply_update(Some(&addr), Some(connection), model, scan_secs, None)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -444,6 +488,58 @@ mod tests {
         assert_eq!(cfg.connection, Some(ConnPref::Ble));
         assert_eq!(cfg.model, Some(Model::B1Pro));
         assert_eq!(cfg.scan_secs, Some(9));
+    }
+
+    #[test]
+    fn apply_update_changes_only_supplied_fields() {
+        let mut cfg = Config {
+            addr: Some("B1-Old".into()),
+            connection: Some(ConnPref::Usb),
+            model: Some(Model::B1Pro),
+            scan_secs: Some(9),
+            safe_area: None,
+            label: Some("50x30".into()),
+        };
+
+        cfg.apply_update(Some(" B1-New "), None, None, None, Some("40x20"))
+            .unwrap();
+
+        assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
+        assert_eq!(cfg.connection, Some(ConnPref::Usb));
+        assert_eq!(cfg.model, Some(Model::B1Pro));
+        assert_eq!(cfg.scan_secs, Some(9));
+        assert_eq!(cfg.label.as_deref(), Some("40x20"));
+    }
+
+    #[test]
+    fn apply_update_validates_before_mutating() {
+        let original = Config {
+            addr: Some("B1-Old".into()),
+            connection: Some(ConnPref::Usb),
+            model: None,
+            scan_secs: None,
+            safe_area: None,
+            label: Some("50x30".into()),
+        };
+        let mut cfg = original.clone();
+
+        assert!(
+            cfg.apply_update(Some("B1-New"), None, None, None, Some("invalid"))
+                .is_err()
+        );
+        assert_eq!(cfg, original);
+
+        let mut with_safe_area = Config {
+            safe_area: Some(SafeArea::B1),
+            ..original.clone()
+        };
+        let unchanged = with_safe_area.clone();
+        assert!(
+            with_safe_area
+                .apply_update(None, None, None, None, Some("50x1"))
+                .is_err()
+        );
+        assert_eq!(with_safe_area, unchanged);
     }
 
     #[test]

@@ -69,6 +69,11 @@ impl LabelMm {
             .ok_or_else(|| {
                 Error::invalid_label(format!("bad label size '{s}', expected e.g. 50x30"))
             })?;
+        if parts.next().is_some() {
+            return Err(Error::invalid_label(format!(
+                "bad label size '{s}', expected exactly two dimensions, e.g. 50x30"
+            )));
+        }
         // `nan` and `inf` both parse as f64, and NaN fails every comparison —
         // so `value <= 0.0` alone would let them through into the pixel math.
         for (value, axis) in [(w, "width"), (h, "height")] {
@@ -287,6 +292,20 @@ mod tests {
         assert!(LabelMm::parse("abc").is_err());
         assert!(LabelMm::parse("0x30").is_err());
         assert!(LabelMm::parse("-10x20").is_err());
+    }
+
+    #[test]
+    fn reject_extra_dimensions_and_trailing_separators() {
+        for s in [
+            "50x30x999",
+            "50x30x",
+            "50×30×999",
+            "50×30×",
+            "50*30*999",
+            "50*30*",
+        ] {
+            assert!(LabelMm::parse(s).is_err(), "should reject '{s}'");
+        }
     }
 
     #[test]

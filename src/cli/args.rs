@@ -53,7 +53,7 @@ pub struct TaskArgs {
     /// Print task override: b1, d11v1, d110, or d110mv4
     #[arg(long, value_enum)]
     pub task: Option<PrintTask>,
-    /// Allow a task not hardware-tested by thermark
+    /// Allow a printer profile/task pair not hardware-tested by thermark
     #[arg(long, default_value_t = false)]
     pub allow_experimental: bool,
 }
@@ -164,7 +164,7 @@ pub struct PrintCommand {
     #[arg(long, default_value_t = false)]
     pub dither: bool,
     /// Keep the image's own white border instead of cropping it.
-    /// By default it is trimmed so the artwork fills the label.
+    /// Hard-threshold printing trims every edge; dithering trims only top/bottom.
     #[arg(long, default_value_t = false)]
     pub no_trim: bool,
     /// Ignore the configured registration inset and use the whole canvas.
@@ -227,7 +227,7 @@ pub struct TextCommand {
     /// Also save PNG to this path
     #[arg(long)]
     pub save: Option<PathBuf>,
-    /// Only generate PNG, do not print
+    /// Render without printing; combine with --save to keep the PNG
     #[arg(long, default_value_t = false)]
     pub no_print: bool,
 }
@@ -264,7 +264,7 @@ pub struct QrCommand {
     /// Also save PNG to this path
     #[arg(long)]
     pub save: Option<PathBuf>,
-    /// Only generate PNG, do not print
+    /// Render without printing; combine with --save to keep the PNG
     #[arg(long, default_value_t = false)]
     pub no_print: bool,
 }
@@ -283,7 +283,7 @@ pub struct WifiCommand {
     /// Network name (SSID) — shown on the sticker
     #[arg(long)]
     pub ssid: String,
-    /// Wi‑Fi password (or set THERMARK_WIFI_PASSWORD — preferred, avoids shell history)
+    /// WPA/WEP password (or set THERMARK_WIFI_PASSWORD — preferred)
     #[arg(long, default_value = "")]
     pub password: String,
     /// Security: wpa (default), wep, nopass
@@ -292,21 +292,25 @@ pub struct WifiCommand {
     /// Hidden SSID
     #[arg(long, default_value_t = false)]
     pub hidden: bool,
-    /// Also print password in cleartext under the SSID (less secure)
+    /// Also print a WPA/WEP password in cleartext under the SSID (less secure)
     #[arg(long, default_value_t = false)]
     pub show_password: bool,
+    /// Put text on the left or right of the square QR
     #[arg(long, value_enum, default_value_t = TextSide::Right)]
     pub text_side: TextSide,
+    /// Label size in mm, e.g. 50x30 (default: config, else 50x30)
     #[arg(long)]
     pub label: Option<String>,
+    /// Draw a 1px outer border (usually unnecessary)
     #[arg(long, default_value_t = false)]
     pub border: bool,
+    /// Density 1..=5 (default 4 = darker for small QR/text)
     #[arg(short, long, default_value = "4", value_parser = parse_density)]
     pub density: Density,
-    /// Save PNG (use a path outside the git repo for real credentials)
+    /// Save PNG (use gitignored local/prints/ for real credentials)
     #[arg(long)]
     pub save: Option<PathBuf>,
-    /// Only generate PNG, do not print
+    /// Render without printing; combine with --save to keep the PNG
     #[arg(long, default_value_t = false)]
     pub no_print: bool,
 }
@@ -377,7 +381,8 @@ pub enum Commands {
     ///
     /// QR uses the standard WIFI: payload (phones join on scan). Side text shows
     /// the SSID large; password stays in the QR unless --show-password.
-    /// Do not commit real credentials — print locally or --save outside the repo.
+    /// Do not commit real credentials — print directly or save under the
+    /// gitignored `local/prints/` directory.
     Wifi(WifiCommand),
     /// List system fonts this tool can use
     Fonts,
@@ -410,14 +415,14 @@ pub enum ConfigCmd {
     },
     /// Print config file path only
     Path,
-    /// Save default printer (merge into existing config.json)
+    /// Update saved defaults (only provided fields change)
     Set {
-        /// BLE name / UUID or serial path (required)
+        /// BLE name / UUID or serial path
         #[arg(short, long)]
-        addr: String,
+        addr: Option<String>,
         /// Connection type
-        #[arg(short = 'c', long, value_enum, default_value_t = ConnPref::Ble)]
-        conn: ConnPref,
+        #[arg(short = 'c', long, value_enum)]
+        conn: Option<ConnPref>,
         /// Default model
         #[arg(short, long, value_enum)]
         model: Option<Model>,

@@ -25,8 +25,9 @@ the owned printer.
 | B1 Pro, B21 Pro, D11, D11_H, D110 | Experimental monochrome profiles |
 | B18 | Geometry known; print task unresolved |
 
-Experimental models require `--allow-experimental`. Multi-colour printheads and
-colour raster protocols are out of scope.
+Printing with any profile/task pair other than the tested B1+B1 path requires
+`--allow-experimental`; offline previews and saved renders do not. Multi-colour
+printheads and colour raster protocols are out of scope.
 
 Requires Rust 1.98 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
 the current stable toolchain for rustup users.
@@ -116,6 +117,15 @@ THERMARK_WIFI_PASSWORD='your-password' \
   --label 50x30
 ```
 
+Open networks do not need a password:
+
+```bash
+./target/release/thermark wifi \
+  --ssid "Cafe-Guest" \
+  --security nopass \
+  --label 50x30
+```
+
 URL with readable text:
 
 ```bash
@@ -149,9 +159,30 @@ Personal artwork and real credentials belong under `local/`, which is ignored
 by git. Committed files under [`fixtures/`](fixtures/) contain public demo data
 only.
 
+### Which printer profile controls rendering
+
+For an online `text`, `qr`, `wifi`, or `calibrate` command, thermark connects
+and identifies the printer before converting the physical label size to pixels.
+The detected profile's DPI and printhead width therefore determine the rendered
+canvas. If a generated-label command also uses `--save`, the PNG is written
+from that same detected-profile render before it is printed.
+
+Hardware printing fails closed if the identity probe fails or reports an
+unrecognized model. thermark will not render or send a job using provisional
+profile geometry in that case.
+
+`--no-print` remains connection-free. In that mode, generated labels use the
+profile selected by `--model`, then the saved configuration, then the B1
+default. Combine `--save <path> --no-print` when you want a wholly offline
+render.
+
+Online raw-image printing also lays out the image against the detected profile.
+Its default 1 mm registration margin is converted at the detected DPI; an
+explicitly saved pixel inset and `--full-bleed` remain exact.
+
 ## Preview and calibrate
 
-Preview the exact bitmap without printing:
+Preview the exact bitmap for the selected profile without printing:
 
 ```bash
 ./target/release/thermark print \
@@ -161,9 +192,13 @@ Preview the exact bitmap without printing:
 ```
 
 `print --preview` applies the selected threshold and dithering and writes the
-final monochrome page. Generated sticker commands use
+final monochrome page for the configured or `--model` profile. If that profile
+does not match hardware later detected by an online print, its geometry can
+differ. Generated sticker commands use
 `--save <path> --no-print` to inspect their composed artwork; those saved PNGs
-can retain antialiasing that the printer later thresholds.
+can retain antialiasing that the printer later thresholds. Without
+`--no-print`, `--save` waits until printer identification so the saved bitmap
+and printed page share the same profile-sized render.
 
 Check label placement on hardware:
 

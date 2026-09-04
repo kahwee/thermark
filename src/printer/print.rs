@@ -241,6 +241,10 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     /// Print an in-memory grayscale image (dark pixels print).
+    ///
+    /// Reported cover, paper, and empty-battery faults block the job. Printers
+    /// that do not answer the heartbeat query remain supported; see
+    /// [`Self::preflight_ready`].
     pub async fn print_gray_image(
         &mut self,
         gray: &image::GrayImage,
@@ -248,6 +252,8 @@ impl<T: Transport> PrinterClient<T> {
     ) -> Result<()> {
         let raster =
             image_encode::encode_gray(gray, self.max_width_px(), Threshold::DEFAULT.get(), false)?;
+
+        self.preflight_ready().await?;
         self.print_raster(raster, density).await
     }
 }

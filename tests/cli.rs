@@ -59,7 +59,10 @@ fn tasks_prints_matrix() {
         .assert()
         .success()
         .stdout(predicate::str::contains("b1"))
-        .stdout(predicate::str::contains("tested"));
+        .stdout(predicate::str::contains("tested"))
+        .stdout(predicate::str::contains(
+            "Any profile/task pair except B1+b1",
+        ));
 }
 
 #[test]
@@ -142,8 +145,6 @@ fn experimental_model_default_requires_allow_flag() {
     thermark_with_config(&cfg)
         .args([
             "print",
-            "-a",
-            "B1-Fake",
             "-i",
             "fixtures/sticker_wifi.png",
             "--model",
@@ -151,7 +152,120 @@ fn experimental_model_default_requires_allow_flag() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("allow-experimental"));
+        .stderr(predicate::str::contains("allow-experimental"))
+        .stderr(predicate::str::contains("no printer address").not());
+}
+
+#[test]
+fn experimental_model_with_b1_task_requires_allow_flag_before_connecting() {
+    let (_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "-i",
+            "fixtures/sticker_wifi.png",
+            "--model",
+            "b21pro",
+            "--task",
+            "b1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("allow-experimental"))
+        .stderr(predicate::str::contains("no printer address").not());
+}
+
+#[test]
+fn experimental_model_can_render_preview_without_hardware_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let preview = dir.path().join("d110-preview.png");
+    let cfg = dir.path().join("config.json");
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            "fixtures/sticker_wifi.png",
+            "--model",
+            "d110",
+            "--label",
+            "12x30",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("allow-experimental").not());
+
+    assert_eq!(image::open(preview).unwrap().width(), 96);
+}
+
+#[test]
+fn experimental_model_can_generate_stickers_without_hardware_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("config.json");
+    let text = dir.path().join("text.png");
+    let qr = dir.path().join("qr.png");
+    let wifi = dir.path().join("wifi.png");
+
+    for args in [
+        vec![
+            "text",
+            "--text",
+            "OFFLINE",
+            "--model",
+            "b21pro",
+            "--label",
+            "40x20",
+            "--save",
+            text.to_str().unwrap(),
+            "--no-print",
+        ],
+        vec![
+            "qr",
+            "--url",
+            "https://example.com/42",
+            "--text",
+            "ORDER 42",
+            "--model",
+            "b21pro",
+            "--label",
+            "40x20",
+            "--save",
+            qr.to_str().unwrap(),
+            "--no-print",
+        ],
+        vec![
+            "wifi",
+            "--ssid",
+            "OfflineGuest",
+            "--password",
+            "not-a-secret",
+            "--model",
+            "b21pro",
+            "--label",
+            "40x20",
+            "--save",
+            wifi.to_str().unwrap(),
+            "--no-print",
+        ],
+    ] {
+        thermark_with_config(&cfg)
+            .args(args)
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("allow-experimental").not());
+    }
+
+    for output in [text, qr, wifi] {
+        assert!(output.is_file(), "{} was not generated", output.display());
+        assert_eq!(
+            image::open(&output).unwrap().to_luma8().dimensions(),
+            (472, 236),
+            "{} must use the selected B21 Pro 300 dpi profile",
+            output.display()
+        );
+    }
 }
 
 #[test]
@@ -297,6 +411,62 @@ fn wifi_missing_password_errors_helpfully() {
 }
 
 #[test]
+fn wifi_open_network_renders_without_password() {
+    let (cfg_dir, cfg) = temp_config_path();
+    let with_env = cfg_dir.path().join("open-with-env.png");
+    let without_env = cfg_dir.path().join("open-without-env.png");
+    let sentinel = "OPEN-NETWORK-PASSWORD-MUST-BE-IGNORED";
+
+    thermark_with_config(&cfg)
+        .env("THERMARK_WIFI_PASSWORD", sentinel)
+        .args([
+            "wifi",
+            "--ssid",
+            "Cafe-Guest",
+            "--security",
+            "nopass",
+            "--label",
+            "50x30",
+            "--show-password",
+            "--save",
+            with_env.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cafe-Guest"))
+        .stdout(predicate::str::contains("open network (no password)"))
+        .stdout(predicate::str::contains(sentinel).not())
+        .stderr(predicate::str::contains(sentinel).not());
+
+    thermark_with_config(&cfg)
+        .env_remove("THERMARK_WIFI_PASSWORD")
+        .args([
+            "wifi",
+            "--ssid",
+            "Cafe-Guest",
+            "--security",
+            "nopass",
+            "--label",
+            "50x30",
+            "--show-password",
+            "--save",
+            without_env.to_str().unwrap(),
+            "--no-print",
+        ])
+        .assert()
+        .success();
+
+    let with_env = image::open(with_env).unwrap().into_luma8();
+    let without_env = image::open(without_env).unwrap().into_luma8();
+    assert_eq!(with_env.dimensions(), without_env.dimensions());
+    assert!(
+        with_env.as_raw() == without_env.as_raw(),
+        "an open-network label must not render THERMARK_WIFI_PASSWORD"
+    );
+}
+
+#[test]
 fn print_help_mentions_fuzzy_ble_match() {
     thermark()
         .args(["print", "--help"])
@@ -413,30 +583,49 @@ fn safe_area_rejects_non_finite_negative_and_consuming_values() {
 }
 
 #[test]
-fn config_set_merges_model_and_connection() {
+fn config_set_partially_merges_addr_connection_and_label() {
     let (_dir, path) = temp_config_path();
 
     thermark_with_config(&path)
-        .args(["config", "set", "-a", "B1-A", "-c", "usb", "-m", "b21pro"])
+        .args(["config", "set", "--conn", "usb"])
         .assert()
         .success();
-
-    let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains("B1-A"));
-    assert!(body.contains("usb"));
-    assert!(body.contains("b21pro"));
 
     thermark_with_config(&path)
-        .args(["config", "set", "-a", "B1-B", "-c", "ble"])
+        .args(["config", "set", "--addr", "B1-A", "--model", "b21pro"])
         .assert()
         .success();
 
-    let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains("B1-B"));
-    assert!(body.contains("ble"));
+    thermark_with_config(&path)
+        .args(["config", "set", "--label", "40x20"])
+        .assert()
+        .success();
+
+    thermark_with_config(&path)
+        .args(["config", "set", "--addr", "B1-B"])
+        .assert()
+        .success();
+
+    let cfg = thermark::config::Config::load_from(&path).unwrap();
+    assert_eq!(cfg.addr.as_deref(), Some("B1-B"));
+    assert_eq!(cfg.connection, Some(thermark::config::ConnPref::Usb));
+    assert_eq!(cfg.model, Some(thermark::protocol::Model::B21Pro));
+    assert_eq!(cfg.label.as_deref(), Some("40x20"));
+}
+
+#[test]
+fn config_set_rejects_no_updates() {
+    let (_dir, path) = temp_config_path();
+
+    thermark_with_config(&path)
+        .args(["config", "set"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no config updates provided"));
+
     assert!(
-        body.contains("b21pro"),
-        "model should be preserved on merge: {body}"
+        !path.exists(),
+        "an empty update must not create config.json"
     );
 }
 
@@ -555,6 +744,62 @@ fn print_preview_shows_hard_threshold_burn_bits_as_black() {
 
     let pixels = image::open(preview).unwrap().into_luma8().into_raw();
     assert_eq!(pixels, [0, 0, 255, 255]);
+}
+
+#[test]
+fn print_preview_trim_preserves_pixels_burned_at_a_non_default_threshold() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("threshold-trim-input.png");
+    let preview = dir.path().join("threshold-trim-preview.png");
+    let cfg = dir.path().join("config.json");
+    image::GrayImage::from_raw(7, 1, vec![255, 204, 205, 0, 205, 204, 255])
+        .unwrap()
+        .save(&input)
+        .unwrap();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            input.to_str().unwrap(),
+            "--threshold",
+            "50",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let preview = image::open(preview).unwrap().into_luma8();
+    assert_eq!(preview.dimensions(), (5, 1));
+    assert_eq!(preview.as_raw(), &[0, 255, 0, 255, 0]);
+}
+
+#[test]
+fn print_preview_composites_transparent_pixels_on_white() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("alpha-input.png");
+    let preview = dir.path().join("alpha-preview.png");
+    let cfg = dir.path().join("config.json");
+    image::RgbaImage::from_raw(2, 1, vec![0, 0, 0, 0, 0, 0, 0, 255])
+        .unwrap()
+        .save(&input)
+        .unwrap();
+
+    thermark_with_config(&cfg)
+        .args([
+            "print",
+            "--image",
+            input.to_str().unwrap(),
+            "--no-trim",
+            "--preview",
+            preview.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let pixels = image::open(preview).unwrap().into_luma8().into_raw();
+    assert_eq!(pixels, [255, 0]);
 }
 
 #[test]

@@ -261,7 +261,7 @@ pub fn tasks() {
     }
     println!();
     println!("Default: detected profile or b1. Override: --task b1|d11v1|d110|d110mv4");
-    println!("Non-b1 tasks require: --allow-experimental");
+    println!("Any profile/task pair except B1+b1 requires: --allow-experimental");
 }
 
 pub fn encode(cmd: &str, data: &str) -> Result<()> {

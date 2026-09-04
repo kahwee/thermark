@@ -7,7 +7,7 @@ use thermark::printer::PrintOptions;
 use tracing::info;
 
 use crate::cli::args::{CalibrateCommand, PrintCommand};
-use crate::cli::session::{print_file_resolved, print_gray_resolved, resolve_profile};
+use crate::cli::session::{print_file_resolved, render_and_print_gray_resolved, resolve_target};
 use crate::cli::tips::warn_print_limits;
 
 pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
@@ -38,7 +38,8 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
     }
     warn_print_limits(&image, &label, no_fill, dither);
 
-    let profile = resolve_profile(cfg, model, &task)?;
+    let target = resolve_target(cfg, model, &task)?;
+    let profile = thermark::profile_for_model(target.model);
     let label_mm = label.as_deref().map(LabelMm::parse).transpose()?;
     // --no-fill wins over --fill; without a label there is no canvas to fill.
     let use_fill = !no_fill && label_mm.is_some() && fill;
@@ -55,19 +56,21 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
         safe: if full_bleed {
             thermark::geometry::SafeArea::NONE
         } else {
-            cfg.resolve_safe_area(profile.pixels_per_mm)
+            cfg.resolve_safe_area(profile.pixels_per_mm())
         },
         trim: !no_trim,
     };
     if let Some(out) = preview {
-        // Compose through the exact same path a real print uses, then stop.
+        // Compose through the same image pipeline a real print uses, then
+        // stop. This offline path necessarily uses the selected profile;
+        // online printing re-resolves geometry from detected hardware.
         let composed = thermark::printer::compose_for_label(
             &image,
             &opts,
             profile.max_width_px,
-            profile.pixels_per_mm,
+            profile.pixels_per_mm(),
         )?;
-        let gray = composed.into_luma8();
+        let gray = thermark::image_encode::grayscale_on_white(composed);
         let visible = thermark::image_encode::render_print_preview(
             &gray,
             profile.max_width_px,
@@ -81,7 +84,7 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
         return Ok(());
     }
 
-    print_file_resolved(cfg, &conn, profile, &image, opts).await?;
+    print_file_resolved(cfg, &conn, target, &image, opts, full_bleed).await?;
     println!("OK — sent print job");
     Ok(())
 }
@@ -159,39 +162,38 @@ pub async fn calibrate(cfg: &Config, args: CalibrateCommand) -> Result<()> {
         density,
         boundary,
     } = args;
-    let profile = resolve_profile(cfg, model, &task)?;
+    let target = resolve_target(cfg, model, &task)?;
     let label = cfg.resolve_label(label.as_deref());
     let label_mm = LabelMm::parse(&label)?;
-    let lp = label_mm.to_pixels(profile.max_width_px, profile.pixels_per_mm);
-    info!(
-        width_px = lp.width_px,
-        height_px = lp.height_px,
-        width_mm = label_mm.width_mm,
-        height_mm = label_mm.height_mm,
-        "calibration pattern"
-    );
+    let (lp, safe, pixels_per_mm) =
+        render_and_print_gray_resolved(cfg, &conn, target, density, |detected| {
+            let pixels_per_mm = detected.pixels_per_mm();
+            let lp = label_mm.to_pixels(detected.max_width_px, pixels_per_mm);
+            let safe = cfg.resolve_safe_area(pixels_per_mm);
+            info!(
+                model = %detected.model,
+                dpi = detected.dpi,
+                width_px = lp.width_px,
+                height_px = lp.height_px,
+                width_mm = label_mm.width_mm,
+                height_mm = label_mm.height_mm,
+                "calibration pattern"
+            );
 
-    let gray = if boundary {
-        thermark::label::make_boundary_label(lp, profile.pixels_per_mm, None)?
-    } else {
-        thermark::label::make_calibration_label(
-            lp,
-            cfg.resolve_safe_area(profile.pixels_per_mm),
-            profile.pixels_per_mm,
-            None,
-        )?
-    };
-    print_gray_resolved(cfg, &conn, profile, &gray, density).await?;
+            let gray = if boundary {
+                thermark::label::make_boundary_label(lp, pixels_per_mm, None)?
+            } else {
+                thermark::label::make_calibration_label(lp, safe, pixels_per_mm, None)?
+            };
+            Ok((gray, (lp, safe, pixels_per_mm)))
+        })
+        .await?;
     if boundary {
         println!("OK — boundary probe printed ({label})");
-        print_boundary_legend(lp, profile.pixels_per_mm);
+        print_boundary_legend(lp, pixels_per_mm);
         return Ok(());
     }
     println!("OK — calibration printed ({label})");
-    print_calibration_legend(
-        lp,
-        cfg.resolve_safe_area(profile.pixels_per_mm),
-        profile.pixels_per_mm,
-    );
+    print_calibration_legend(lp, safe, pixels_per_mm);
     Ok(())
 }

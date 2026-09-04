@@ -21,11 +21,16 @@ such change is listed under **Changed** with the old and new spelling.
 - `image_encode::encode_gray`, a borrowed grayscale entry point that lets label
   renderers encode without cloning a page-sized image, and
   `render_print_preview` for validated black-on-white print pixels.
+- `image_encode::grayscale_on_white` for alpha-aware conversion that matches
+  how transparent artwork is printed on white thermal media.
 
 ### Changed
 
 - **BREAKING:** geometry conversion is profile-aware and supported task names
   are now `b1`, `d11v1`, `d110`, and `d110mv4`.
+- **BREAKING:** `image_encode::fill_label` and `contain_label` now return
+  `Result<DynamicImage>` so an invalid safe-area/label combination cannot
+  silently fall back to full bleed.
 - Incomplete or missing completion status now fails safely instead of allowing
   PrintEnd to declare an unconfirmed page successful.
 - `PrinterDevice` keeps model, profile, task, and identity coherent inside a
@@ -44,6 +49,8 @@ such change is listed under **Changed** with the old and new spelling.
 - CLI command arguments now have one Clap-owned representation that handlers
   consume directly, removing the duplicate command structs and dispatch-time
   unpacking/repacking layer without changing the command-line surface.
+- `DoctorOptions` now uses `config::ConnPref` directly; `DoctorConn` remains a
+  source-compatible type alias for existing library callers.
 - Normal print sessions query only the identity needed for profile/task
   selection and no longer perform an informational RFID query. `identify` and
   `info` retain their detailed reports.
@@ -54,12 +61,46 @@ such change is listed under **Changed** with the old and new spelling.
   compatible dependency releases.
 - README and agent guidance now document the maintenance baseline and
   evidence-first rules for modernization, benchmarking, and code reduction.
+- Golden and fixture render tests use the vendored font and fail explicitly on
+  renderer errors instead of treating them as skipped cases.
 
 ### Fixed
 
+- Online text, QR, Wi-Fi, and calibration labels now render only after printer
+  identification, so the detected profile's DPI and printhead width determine
+  their pixel geometry. Online `--save` writes that same render, while
+  `--no-print` remains offline and uses the requested or configured profile.
+- Hardware printing now fails closed when identity probing fails or reports an
+  unrecognized model, rather than sending a job with provisional profile
+  geometry.
+- Raw-image printing now resolves the default physical 1 mm registration
+  margin at the detected printer DPI; explicitly configured pixel insets and
+  full bleed remain unchanged.
+- Open-network Wi-Fi stickers (`--security nopass`) no longer require or
+  resolve a password.
+- `config set` now updates only the fields provided, so label-only changes and
+  address changes preserve the existing connection preference.
+- Transparent image pixels are composited onto white consistently before
+  trimming and monochrome encoding instead of allowing transparent black to
+  burn as ink.
+- Print-time white-border trimming now uses the encoder's exact hard-threshold
+  rule. Dithered artwork retains its full width so cropping cannot change
+  Floyd–Steinberg error flow between rows.
+- Offline previews and saved sticker renders can use experimental model
+  profiles without opting into an experimental hardware print sequence; the
+  opt-in remains mandatory at both pre-connect and post-identification print
+  boundaries. Verification is attached to the effective profile-and-task pair,
+  so selecting the B1 task cannot bypass the gate for another printer model.
+- Label sizes with extra dimensions or trailing separators are rejected rather
+  than silently ignoring the extra input.
+- Direct `PrinterClient::print_gray_image` calls now run the same tolerant
+  heartbeat readiness preflight as file printing, blocking known cover, paper,
+  and empty-battery faults before a job starts.
+- Error recovery hints distinguish BLE from USB failures and describe image
+  width in terms of the selected profile rather than a hard-coded B1 width.
 - `print --preview` now applies the selected threshold and dithering before
   saving, with burn bits shown as black ink, so the PNG matches the final
-  monochrome page sent to the printer.
+  monochrome conversion for the selected offline profile.
 - Raster encoding rejects dimensions and row payloads that cannot fit the
   protocol's `u16` coordinates or one-byte frame length before indices or
   lengths can wrap.

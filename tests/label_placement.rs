@@ -140,8 +140,8 @@ fn trimmed_artwork_stays_inside_the_printable_area() {
     let art = trim_white(image::DynamicImage::ImageLuma8(g), 127);
 
     for (mode, placed) in [
-        ("contain", contain_label(art.clone(), lp, safe, 0)),
-        ("fill", fill_label(art, lp, safe, 0)),
+        ("contain", contain_label(art.clone(), lp, safe, 0).unwrap()),
+        ("fill", fill_label(art, lp, safe, 0).unwrap()),
     ] {
         assert_inside_safe_area(&placed.to_luma8(), lp, safe, mode);
     }

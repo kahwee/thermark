@@ -32,7 +32,7 @@ pub fn guard_wifi_save_path(path: &Path) -> Result<()> {
             "refusing to save a Wi‑Fi sticker under fixtures/ \
              (that path is committed product demos — real credentials must not land there).\n  \
              Use:  --save local/prints/home-wifi.png\n  \
-             or omit --save (writes under /tmp). See local/README.md"
+             or omit --save to print without saving. See local/README.md"
         );
     }
     Ok(())
@@ -74,37 +74,80 @@ pub fn warn_print_limits(image: &Path, label: &Option<String>, no_fill: bool, di
     }
 }
 
-/// Substring → hint pairs appended to stderr after a failure.
-const ERROR_HINTS: &[(&[&str], &str)] = &[
-    (
-        &["ble", "bluetooth", "connect", "transport"],
-        "tip: quit any official label app (one BLE client only). \
-         Full name: `thermark scan` then -a \"B1-…\". Exact match by default; --fuzzy if needed.",
-    ),
-    (
-        &["cover", "lackpaper", "no paper"],
-        "tip: close the lid fully; load labels with 2–5 mm sticking out of the exit slot",
-    ),
-    (
-        &["timeout"],
-        "tip: run `thermark doctor --use-config` for lid/paper/BLE readiness",
-    ),
-    (
-        &["image width", "too wide"],
-        "tip: --label 50x30 scales to the sticker; max width is 384 px on B1",
-    ),
-];
+const BLE_HINT: &str = "tip: quit any official label app (one BLE client only). \
+    Full name: `thermark scan` then -a \"B1-…\". Exact match by default; --fuzzy if needed.";
+const USB_HINT: &str = "tip: run `thermark ports` to verify the serial device path, then retry \
+    with `--conn usb --addr <path>`";
+const MEDIA_HINT: &str =
+    "tip: close the lid fully; load labels with 2–5 mm sticking out of the exit slot";
+const TIMEOUT_HINT: &str =
+    "tip: run `thermark doctor --use-config` for lid/paper/connection readiness";
+const IMAGE_WIDTH_HINT: &str =
+    "tip: pass the correct --label WxH so thermark scales to the selected printer profile";
+const PASSWORD_HINT: &str =
+    "tip: THERMARK_WIFI_PASSWORD=… avoids leaving the secret in shell history";
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn first_word(text: &str, words: &[&str]) -> Option<usize> {
+    words
+        .iter()
+        .flat_map(|word| text.match_indices(word))
+        .filter_map(|(index, word)| {
+            let before = text[..index].chars().next_back();
+            let after = text[index + word.len()..].chars().next();
+            let bounded = before.is_none_or(|ch| !ch.is_ascii_alphanumeric())
+                && after.is_none_or(|ch| !ch.is_ascii_alphanumeric());
+            bounded.then_some(index)
+        })
+        .min()
+}
+
+/// Select recovery hints from a fully formatted error chain.
+///
+/// Real transport errors identify themselves as BLE or serial. Requiring that
+/// explicit marker prevents a generic `connect` or `transport` context from
+/// sending a USB user toward BLE-only recovery steps.
+fn hints_for_error(text: &str) -> Vec<&'static str> {
+    let text = text.to_ascii_lowercase();
+    let mut hints = Vec::new();
+
+    let ble_at = first_word(&text, &["ble", "bluetooth"]);
+    let usb_at = first_word(&text, &["serial", "usb"]);
+    let transport_hint = match (ble_at, usb_at) {
+        (Some(ble), Some(usb)) if ble <= usb => {
+            (!text.contains("without bluetooth support")).then_some(BLE_HINT)
+        }
+        (_, Some(_)) => (!text.contains("without usb serial support")).then_some(USB_HINT),
+        (Some(_), None) => (!text.contains("without bluetooth support")).then_some(BLE_HINT),
+        _ => None,
+    };
+    if let Some(hint) = transport_hint {
+        hints.push(hint);
+    }
+
+    if contains_any(&text, &["cover", "lackpaper", "no paper"]) {
+        hints.push(MEDIA_HINT);
+    }
+    if text.contains("timeout") {
+        hints.push(TIMEOUT_HINT);
+    }
+    if contains_any(&text, &["image width", "too wide"]) {
+        hints.push(IMAGE_WIDTH_HINT);
+    }
+    if text.contains("password") && text.contains("wifi") {
+        hints.push(PASSWORD_HINT);
+    }
+
+    hints
+}
 
 /// Extra stderr tips after a failure (does not change the error itself).
 pub fn emit_error_tips(err: &anyhow::Error) {
-    let text = format!("{err:#}").to_ascii_lowercase();
-    for (needles, hint) in ERROR_HINTS {
-        if needles.iter().any(|n| text.contains(n)) {
-            eprintln!("{hint}");
-        }
-    }
-    if text.contains("password") && text.contains("wifi") {
-        eprintln!("tip: THERMARK_WIFI_PASSWORD=… avoids leaving the secret in shell history");
+    for hint in hints_for_error(&format!("{err:#}")) {
+        eprintln!("{hint}");
     }
 }
 
@@ -117,5 +160,45 @@ mod tests {
         assert!(guard_wifi_save_path(Path::new("fixtures/x.png")).is_err());
         assert!(guard_wifi_save_path(Path::new("a/fixtures/x.png")).is_err());
         assert!(guard_wifi_save_path(Path::new("local/prints/x.png")).is_ok());
+    }
+
+    #[test]
+    fn transport_hints_follow_the_named_transport() {
+        assert_eq!(
+            hints_for_error("BLE connect: transport unavailable"),
+            [BLE_HINT]
+        );
+        assert_eq!(
+            hints_for_error("open serial /dev/cu.usb: transport: permission denied"),
+            [USB_HINT]
+        );
+        assert_eq!(
+            hints_for_error(
+                "BLE connect: transport unavailable; a matching serial endpoint may exist"
+            ),
+            [BLE_HINT]
+        );
+        assert!(hints_for_error("transport: connection reset").is_empty());
+        assert!(hints_for_error("transport unavailable").is_empty());
+        assert!(hints_for_error("this binary was built without USB serial support").is_empty());
+        assert!(hints_for_error("this binary was built without Bluetooth support").is_empty());
+    }
+
+    #[test]
+    fn image_width_hint_is_profile_neutral() {
+        let hints = hints_for_error("image width 400px exceeds printer max 96px");
+        assert_eq!(hints, [IMAGE_WIDTH_HINT]);
+        assert!(!hints[0].contains("384"));
+        assert!(!hints[0].contains("B1"));
+    }
+
+    #[test]
+    fn non_transport_guidance_is_preserved() {
+        assert_eq!(hints_for_error("cover open"), [MEDIA_HINT]);
+        assert_eq!(
+            hints_for_error("timeout waiting for response"),
+            [TIMEOUT_HINT]
+        );
+        assert_eq!(hints_for_error("WiFi password required"), [PASSWORD_HINT]);
     }
 }

@@ -36,9 +36,8 @@ const GOLDEN_DIR: &str = "tests/golden";
 /// every one of them.
 const GOLDEN_FONT: &str = "tests/fonts/DejaVuSans.ttf";
 
-fn golden_font() -> Option<PathBuf> {
-    let p = PathBuf::from(GOLDEN_FONT);
-    p.exists().then_some(p)
+fn golden_font() -> PathBuf {
+    PathBuf::from(GOLDEN_FONT)
 }
 /// Where a mismatching render is written, so it can be inspected.
 const ACTUAL_DIR: &str = "target/golden-actual";
@@ -65,10 +64,10 @@ fn artwork() -> image::DynamicImage {
     image::DynamicImage::ImageLuma8(g)
 }
 
-/// A render under test. `None` means "cannot run here" (missing system font).
+/// A render under test. Renderer errors are golden-test failures.
 struct Case {
     name: &'static str,
-    render: fn() -> Option<GrayImage>,
+    render: fn() -> thermark::errors::Result<GrayImage>,
 }
 
 fn cases() -> Vec<Case> {
@@ -76,30 +75,36 @@ fn cases() -> Vec<Case> {
         // ── Geometry: no font needed, always runs ────────────────────────
         Case {
             name: "calibration_pattern_50x30",
-            render: || Some(calibration_pattern(label(), Some(SafeArea::default()), 8.0)),
+            render: || Ok(calibration_pattern(label(), Some(SafeArea::default()), 8.0)),
         },
         Case {
             name: "calibration_pattern_full_bleed",
-            render: || Some(calibration_pattern(label(), None, 8.0)),
+            render: || Ok(calibration_pattern(label(), None, 8.0)),
         },
         Case {
             name: "art_contain_safe",
-            render: || Some(contain_label(artwork(), label(), SafeArea::default(), 0).to_luma8()),
+            render: || {
+                contain_label(artwork(), label(), SafeArea::default(), 0).map(|img| img.to_luma8())
+            },
         },
         Case {
             name: "art_fill_safe",
-            render: || Some(fill_label(artwork(), label(), SafeArea::default(), 0).to_luma8()),
+            render: || {
+                fill_label(artwork(), label(), SafeArea::default(), 0).map(|img| img.to_luma8())
+            },
         },
         Case {
             name: "art_trimmed_contain",
             render: || {
                 let art = trim_white(artwork(), 127);
-                Some(contain_label(art, label(), SafeArea::default(), 0).to_luma8())
+                contain_label(art, label(), SafeArea::default(), 0).map(|img| img.to_luma8())
             },
         },
         Case {
             name: "art_full_bleed",
-            render: || Some(contain_label(artwork(), label(), SafeArea::NONE, 0).to_luma8()),
+            render: || {
+                contain_label(artwork(), label(), SafeArea::NONE, 0).map(|img| img.to_luma8())
+            },
         },
         // ── Font-dependent ───────────────────────────────────────────────
         Case {
@@ -112,11 +117,10 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     text_side: TextSide::Right,
                     border: false,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: None,
                 })
-                .ok()
             },
         },
         Case {
@@ -129,11 +133,10 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     text_side: TextSide::Left,
                     border: true,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: None,
                 })
-                .ok()
             },
         },
         Case {
@@ -145,11 +148,10 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Center,
                     border: false,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: None,
                 })
-                .ok()
             },
         },
         Case {
@@ -161,11 +163,10 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Left,
                     border: false,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: Some(14.0),
                 })
-                .ok()
             },
         },
         Case {
@@ -177,11 +178,10 @@ fn cases() -> Vec<Case> {
                     safe: SafeArea::default(),
                     align: TextAlign::Center,
                     border: false,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: None,
                 })
-                .ok()
             },
         },
         Case {
@@ -196,24 +196,22 @@ fn cases() -> Vec<Case> {
                     label: label(),
                     safe: SafeArea::default(),
                     text_side: TextSide::Right,
-                    font_path: golden_font(),
+                    font_path: Some(golden_font()),
                     font_name: None,
                     font_size: None,
                     border: false,
                 })
-                .ok()
             },
         },
         Case {
             name: "calibration_numbered",
             render: || {
-                make_calibration_label(label(), SafeArea::default(), 8.0, golden_font().as_deref())
-                    .ok()
+                make_calibration_label(label(), SafeArea::default(), 8.0, Some(&golden_font()))
             },
         },
         Case {
             name: "boundary_probe",
-            render: || make_boundary_label(label(), 8.0, golden_font().as_deref()).ok(),
+            render: || make_boundary_label(label(), 8.0, Some(&golden_font())),
         },
     ]
 }
@@ -238,24 +236,23 @@ fn golden_renders_are_unchanged() {
         std::fs::create_dir_all(GOLDEN_DIR).expect("create golden dir");
     }
 
-    // Without this the text cases fall back to `font_path: None`, silently
-    // pick up a system font, and compare host-specific rasterisation against
-    // committed goldens — which is exactly how this suite stayed red on CI.
     assert!(
-        golden_font().is_some(),
+        golden_font().is_file(),
         "vendored font missing: {GOLDEN_FONT}\n\
-         Text goldens are pixel comparisons and MUST NOT fall back to a system \
-         font. Restore the file rather than regenerating the goldens."
+         Text goldens are pixel comparisons. Restore the font rather than \
+         regenerating the goldens with a different face."
     );
 
     let mut verified = Vec::new();
-    let mut skipped = Vec::new();
     let mut failures = Vec::new();
 
     for case in cases() {
-        let Some(actual) = (case.render)() else {
-            skipped.push(case.name);
-            continue;
+        let actual = match (case.render)() {
+            Ok(actual) => actual,
+            Err(err) => {
+                failures.push(format!("{}: render failed: {err}", case.name));
+                continue;
+            }
         };
         let path = PathBuf::from(GOLDEN_DIR).join(format!("{}.png", case.name));
 
@@ -301,13 +298,15 @@ fn golden_renders_are_unchanged() {
     }
 
     if update {
+        assert!(
+            failures.is_empty(),
+            "could not regenerate every golden:\n  {}",
+            failures.join("\n  ")
+        );
         println!("regenerated {} golden(s): {verified:?}", verified.len());
         return;
     }
 
-    if !skipped.is_empty() {
-        println!("skipped (no system font): {skipped:?}");
-    }
     println!("verified {} golden(s)", verified.len());
 
     assert!(
@@ -316,27 +315,4 @@ fn golden_renders_are_unchanged() {
          `UPDATE_GOLDEN=1 cargo test --test golden`.",
         failures.join("\n  ")
     );
-}
-
-/// The geometry cases need no font, so a bare checkout must still cover them.
-#[test]
-fn geometry_cases_never_skip() {
-    let font_free = [
-        "calibration_pattern_50x30",
-        "calibration_pattern_full_bleed",
-        "art_contain_safe",
-        "art_fill_safe",
-        "art_trimmed_contain",
-        "art_full_bleed",
-    ];
-    for name in font_free {
-        let case = cases()
-            .into_iter()
-            .find(|c| c.name == name)
-            .unwrap_or_else(|| panic!("no case named {name}"));
-        assert!(
-            (case.render)().is_some(),
-            "{name} must render without a system font"
-        );
-    }
 }

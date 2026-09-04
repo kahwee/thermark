@@ -29,7 +29,7 @@ pub async fn run(cfg: &Config, args: DoctorCommand) -> Result<i32> {
         model: cfg.resolve_model(model),
         task,
         scan_secs: seconds,
-        conn: cfg.resolve_connection(conn).into(),
+        conn: cfg.resolve_connection(conn),
         match_mode: BleMatchMode::from_fuzzy(fuzzy),
     })
     .await

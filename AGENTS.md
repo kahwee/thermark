@@ -62,7 +62,7 @@ Check placement without a printer: `thermark print -i art.png --label 50x30 --pr
 
 Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
-Experimental print tasks need `--allow-experimental`.
+Experimental profile/task print paths need `--allow-experimental`.
 
 On macOS, Bluetooth Settings may show the printer as **Connected** while
 CoreBluetooth cannot discover it. Treat that as an exclusive-session conflict:
@@ -124,7 +124,8 @@ Protocol notes: see the command table in `src/protocol.rs`.
 
 ## Geometry & fonts
 
-- **8 px/mm**; max width **384**
+- **Owned B1 profile:** 8 px/mm; max width **384**. Other registered profiles
+  use their own DPI and printhead width from `PrinterProfile`.
 - Printable area on a **charged** B1 is the **whole canvas** — measured with
   `calibrate --boundary`, the last bar (rows 232-239) prints. `SafeArea::B1` is
   1 mm top/bottom as registration margin only. A low battery truncates dense
@@ -279,14 +280,15 @@ physical geometry.
 
 `PrinterClient` defaults via `PrintTask::for_model`. Override: `--task` / `.with_print_task()`.
 
-CLI: every non-B1 task requires `--allow-experimental` on printing commands.
+CLI: every profile/task pair other than the owned B1 profile with its B1 task
+requires `--allow-experimental` on printing commands.
 Library API is unrestricted.
 
 ## Tests
 
 ```bash
 cargo test
-cargo test --test golden              # 13 stored renders, pixel-exact
+cargo test --test golden              # 14 stored renders, pixel-exact
 UPDATE_GOLDEN=1 cargo test --test golden   # accept new output, deliberately
 scripts/compare-render.sh v0.12.0     # byte-compare renders against a ref
 cargo bench --bench image_pipeline    # CPU-only image-pipeline medians

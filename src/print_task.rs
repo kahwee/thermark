@@ -37,6 +37,11 @@ impl PrintTask {
         }
     }
 
+    /// Whether this wire sequence has a hardware-tested use.
+    ///
+    /// This does not authorize using the task with an arbitrary printer model;
+    /// hardware-write gates must also check
+    /// [`crate::profile::PrinterProfile::print_path_hardware_tested`].
     pub const fn hardware_tested(self) -> bool {
         matches!(self, Self::B1)
     }
