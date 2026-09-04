@@ -652,12 +652,24 @@ pub fn fit_width(img: DynamicImage, max_width: u32) -> DynamicImage {
         return img;
     }
     let new_h = ((h as f64) * (max_width as f64) / (w as f64)).round() as u32;
-    DynamicImage::ImageRgba8(imageops::resize(
-        &img,
-        max_width,
-        new_h.max(1),
-        imageops::FilterType::Triangle,
-    ))
+    match img {
+        // Avoid expanding the overwhelmingly common monochrome input from one
+        // byte to four bytes per pixel. Other formats retain the established
+        // RGBA8 conversion: resizing high-precision channels in place can move
+        // values across the later 8-bit print threshold.
+        DynamicImage::ImageLuma8(gray) => DynamicImage::ImageLuma8(imageops::resize(
+            &gray,
+            max_width,
+            new_h.max(1),
+            imageops::FilterType::Triangle,
+        )),
+        image => DynamicImage::ImageRgba8(imageops::resize(
+            &image,
+            max_width,
+            new_h.max(1),
+            imageops::FilterType::Triangle,
+        )),
+    }
 }
 
 /// The drawable area of a label once the margin is inset.
@@ -1008,6 +1020,57 @@ mod tests {
             let owned = encode(DynamicImage::ImageLuma8(gray.clone()), 384, 113, dither).unwrap();
             assert_eq!(borrowed, owned);
         }
+    }
+
+    #[test]
+    fn fit_width_preserves_grayscale_storage() {
+        let image = DynamicImage::ImageLuma8(GrayImage::from_fn(800, 200, |x, y| {
+            Luma([((x * 19 + y * 43) & 0xff) as u8])
+        }));
+        let expected = imageops::resize(&image, 400, 100, imageops::FilterType::Triangle);
+        let resized = fit_width(image, 400);
+
+        assert_eq!(resized.dimensions(), (400, 100));
+        assert_eq!(resized.to_rgba8(), expected);
+        assert!(
+            matches!(resized, DynamicImage::ImageLuma8(_)),
+            "grayscale input should not expand to four-byte RGBA pixels"
+        );
+    }
+
+    #[test]
+    fn fit_width_preserves_legacy_high_precision_conversion() {
+        let image = DynamicImage::ImageLuma16(image::ImageBuffer::from_fn(800, 2, |x, _| {
+            image::Luma([((x * 83) & 0xffff) as u16])
+        }));
+        let expected = DynamicImage::ImageRgba8(imageops::resize(
+            &image,
+            400,
+            1,
+            imageops::FilterType::Triangle,
+        ));
+
+        assert_eq!(fit_width(image, 400), expected);
+    }
+
+    #[test]
+    fn fit_width_preserves_legacy_alpha_resampling() {
+        let image = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(800, 4, |x, y| {
+            image::Rgba([
+                ((x * 7) & 0xff) as u8,
+                ((y * 61) & 0xff) as u8,
+                ((x + y * 13) & 0xff) as u8,
+                ((x * 29 + y) & 0xff) as u8,
+            ])
+        }));
+        let expected = DynamicImage::ImageRgba8(imageops::resize(
+            &image,
+            400,
+            2,
+            imageops::FilterType::Triangle,
+        ));
+
+        assert_eq!(fit_width(image, 400), expected);
     }
 
     #[test]

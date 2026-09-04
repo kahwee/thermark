@@ -2,6 +2,7 @@
 //! area. These bugs were found one at a time by printing; this covers them all
 //! at once, without hardware.
 
+use std::path::{Path, PathBuf};
 use thermark::geometry::{LabelMm, LabelPx, SafeArea};
 use thermark::image_encode::ink_bounds;
 use thermark::label::{
@@ -11,6 +12,10 @@ use thermark::wifi::{WifiLabelOptions, WifiSecurity, make_wifi_label};
 
 fn label() -> LabelPx {
     LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0)
+}
+
+fn test_font() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf")
 }
 
 /// Rows/cols of ink, and whether any lands outside the printable band.
@@ -43,7 +48,7 @@ fn qr_label_stays_inside_the_printable_area() {
         safe,
         text_side: TextSide::Right,
         border: false,
-        font_path: None,
+        font_path: Some(test_font()),
         font_name: None,
         font_size: None,
     })
@@ -55,18 +60,17 @@ fn qr_label_stays_inside_the_printable_area() {
 fn text_label_stays_inside_the_printable_area() {
     let lp = label();
     let safe = SafeArea::default();
-    let Ok(img) = make_text_label(&TextLabelOptions {
+    let img = make_text_label(&TextLabelOptions {
         text: "THERMARK\nbulldozer crew\n#1".into(),
         label: lp,
         safe,
         align: TextAlign::Center,
         border: false,
-        font_path: None,
+        font_path: Some(test_font()),
         font_name: None,
         font_size: None,
-    }) else {
-        return; // no system font on this host
-    };
+    })
+    .expect("render text label with vendored font");
     assert_inside_safe_area(&img, lp, safe, "text");
 }
 
@@ -74,7 +78,7 @@ fn text_label_stays_inside_the_printable_area() {
 fn wifi_label_stays_inside_the_printable_area() {
     let lp = label();
     let safe = SafeArea::default();
-    let Ok(img) = make_wifi_label(&WifiLabelOptions {
+    let img = make_wifi_label(&WifiLabelOptions {
         ssid: "Cafe-Guest".into(),
         password: "s3cret-password".into(),
         security: WifiSecurity::Wpa,
@@ -83,13 +87,12 @@ fn wifi_label_stays_inside_the_printable_area() {
         label: lp,
         safe,
         text_side: TextSide::Right,
-        font_path: None,
+        font_path: Some(test_font()),
         font_name: None,
         font_size: None,
         border: false,
-    }) else {
-        return;
-    };
+    })
+    .expect("render Wi-Fi label with vendored font");
     assert_inside_safe_area(&img, lp, safe, "wifi");
 }
 
@@ -97,18 +100,17 @@ fn wifi_label_stays_inside_the_printable_area() {
 fn text_is_optically_centred_in_the_printable_area() {
     let lp = label();
     let safe = SafeArea::default();
-    let Ok(img) = make_text_label(&TextLabelOptions {
+    let img = make_text_label(&TextLabelOptions {
         text: "THERMARK\nbulldozer crew\n#1".into(),
         label: lp,
         safe,
         align: TextAlign::Center,
         border: false,
-        font_path: None,
+        font_path: Some(test_font()),
         font_name: None,
         font_size: None,
-    }) else {
-        return;
-    };
+    })
+    .expect("render centered text with vendored font");
 
     let ink = ink_bounds(&img, 127).expect("rendered nothing");
     let above = ink.y - safe.top;
@@ -165,7 +167,7 @@ fn common_media_sizes_all_render_inside_the_printable_area() {
             safe,
             align: TextAlign::Center,
             border: false,
-            font_path: None,
+            font_path: Some(test_font()),
             font_name: None,
             font_size: None,
         })
@@ -179,7 +181,7 @@ fn common_media_sizes_all_render_inside_the_printable_area() {
             safe,
             text_side: TextSide::Right,
             border: false,
-            font_path: None,
+            font_path: Some(test_font()),
             font_name: None,
             font_size: None,
         })
@@ -197,6 +199,7 @@ fn common_media_sizes_all_render_inside_the_printable_area() {
 fn boundary_probe_marks_the_trailing_edge_of_any_media() {
     use thermark::label::{boundary_range, make_boundary_label};
 
+    let font = test_font();
     for spec in ["40x20", "40x30", "50x30", "50x80"] {
         let lp = LabelMm::parse(spec).unwrap().to_pixels(384, 8.0);
         let range = boundary_range(lp, 8.0);
@@ -212,7 +215,8 @@ fn boundary_probe_marks_the_trailing_edge_of_any_media() {
             "{spec}: probe needs more than one bar to be readable"
         );
 
-        let img = make_boundary_label(lp, 8.0, None).unwrap_or_else(|e| panic!("{spec}: {e}"));
+        let img =
+            make_boundary_label(lp, 8.0, Some(&font)).unwrap_or_else(|e| panic!("{spec}: {e}"));
         let ink = ink_bounds(&img, 127).unwrap_or_else(|| panic!("{spec}: probe drew nothing"));
         let bottom = ink.y + ink.h - 1;
         // Full bleed on purpose — the probe measures the edge, so it must draw

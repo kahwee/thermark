@@ -46,6 +46,11 @@ fn main() {
 
     init_tracing(cli.verbose);
     let runtime = match tokio::runtime::Builder::new_multi_thread()
+        // CLI jobs need one foreground worker plus the BLE notification pump,
+        // not one worker per logical CPU. Bounding the pool avoids spawning a
+        // dozen threads on larger hosts while preserving the multi-threaded
+        // runtime required by BleTransport's blocking disconnect backstop.
+        .worker_threads(2)
         .enable_all()
         .build()
     {

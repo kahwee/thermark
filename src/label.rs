@@ -512,6 +512,10 @@ mod tests {
     use super::*;
     use crate::geometry::LabelMm;
 
+    fn test_font_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf")
+    }
+
     #[test]
     fn qr_is_square() {
         let side = 200;
@@ -522,7 +526,18 @@ mod tests {
     #[test]
     fn label_text_is_left_to_right_abc() {
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
-        let img = make_qr_label("https://www.youtube.com", "ABC", lp, TextSide::Right).unwrap();
+        let img = make_qr_label_opts(&QrLabelOptions {
+            url: "https://www.youtube.com".into(),
+            side_text: "ABC".into(),
+            label: lp,
+            safe: SafeArea::default(),
+            text_side: TextSide::Right,
+            border: false,
+            font_path: Some(test_font_path()),
+            font_name: None,
+            font_size: None,
+        })
+        .unwrap();
         assert_eq!(img.dimensions(), (384, 240));
 
         // Text lives in the right half; find dark runs and ensure width is reasonable
@@ -619,18 +634,17 @@ mod tests {
     #[test]
     fn text_label_renders_and_stays_in_the_safe_area() {
         let lp = LabelMm::parse("50x30").unwrap().to_pixels(384, 8.0);
-        let Ok(img) = make_text_label(&TextLabelOptions {
+        let img = make_text_label(&TextLabelOptions {
             text: "HELLO\nWORLD".into(),
             label: lp,
             safe: SafeArea::default(),
             align: TextAlign::Center,
             border: false,
-            font_path: None,
+            font_path: Some(test_font_path()),
             font_name: None,
             font_size: None,
-        }) else {
-            return; // no system font on this host
-        };
+        })
+        .expect("render text label with vendored font");
         assert_eq!(img.dimensions(), (lp.width_px, lp.height_px));
         let safe = SafeArea::default();
         for y in (lp.height_px - safe.bottom)..lp.height_px {
@@ -664,7 +678,18 @@ mod tests {
             width_px: 384,
             height_px: 240,
         };
-        let img = make_qr_label("https://example.com", "HI", lp, TextSide::Right).unwrap();
+        let img = make_qr_label_opts(&QrLabelOptions {
+            url: "https://example.com".into(),
+            side_text: "HI".into(),
+            label: lp,
+            safe: SafeArea::default(),
+            text_side: TextSide::Right,
+            border: false,
+            font_path: Some(test_font_path()),
+            font_name: None,
+            font_size: None,
+        })
+        .unwrap();
         // Corners should be white (no border)
         assert_eq!(img.get_pixel(0, 0)[0], 255);
         assert_eq!(img.get_pixel(383, 0)[0], 255);

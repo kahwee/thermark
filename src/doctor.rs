@@ -11,8 +11,10 @@ use crate::transport::BleMatchMode;
 // Only a transport actually talks to a printer, so with both features off these
 // are dead. Gated rather than `#[allow(unused)]` so a genuinely unused import
 // still gets reported.
-#[cfg(any(feature = "ble", feature = "serial"))]
+#[cfg(any(feature = "ble", feature = "serial", test))]
 use crate::printer::PrinterClient;
+#[cfg(any(feature = "ble", feature = "serial", test))]
+use crate::transport::Transport;
 #[cfg(feature = "ble")]
 use std::time::Duration;
 
@@ -204,7 +206,7 @@ pub fn evaluate_rfid(r: &RfidInfo) -> Check {
 pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
     let Some(task) = task.or_else(|| PrintTask::for_model(model)) else {
         return Check::warn(
-            "print task",
+            "print_task",
             format!("model={model} has no verified default task"),
         );
     };
@@ -222,6 +224,59 @@ pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
             profile.max_width_px
         ),
     )
+}
+
+/// Build a read-only diagnostic client, including for profiles whose print
+/// task is unresolved. The fallback task is inert: doctor never sends print
+/// commands, and connected support is evaluated only after identification.
+#[cfg(any(feature = "ble", feature = "serial", test))]
+fn diagnostic_client<T: Transport>(
+    transport: T,
+    configured_model: Model,
+    explicit_task: Option<PrintTask>,
+) -> PrinterClient<T> {
+    let provisional_task = explicit_task
+        .or_else(|| PrintTask::for_model(configured_model))
+        .unwrap_or(PrintTask::B1);
+    PrinterClient::new_with_task(transport, configured_model, provisional_task)
+}
+
+/// Identify connected hardware before claiming that its print path is tested.
+#[cfg(any(feature = "ble", feature = "serial", test))]
+async fn evaluate_connected_print_task<T: Transport>(
+    client: &mut PrinterClient<T>,
+    explicit_task: Option<PrintTask>,
+) -> Check {
+    let identity = match client.identify_profile().await {
+        Ok(identity) => identity,
+        Err(error) => {
+            return Check::fail(
+                "print_task",
+                format!("not evaluated — printer identity query failed: {error}"),
+            );
+        }
+    };
+    let model_id = identity.model_id;
+    let detected_task = explicit_task.or_else(|| crate::profile::task_for_identity(&identity));
+    let Some(profile) = client.apply_identity(&identity, explicit_task.is_none()) else {
+        return Check::fail(
+            "print_task",
+            format!("not evaluated — printer model id {model_id} is not in the profile registry"),
+        );
+    };
+
+    let mut check = evaluate_print_task(profile.model, detected_task);
+    check.detail = format!("detected model id {model_id}: {}", check.detail);
+    check
+}
+
+#[cfg(any(feature = "ble", feature = "serial", test))]
+fn replace_print_task_check(checks: &mut Vec<Check>, connected: Check) {
+    if let Some(check) = checks.iter_mut().find(|check| check.name == "print_task") {
+        *check = connected;
+    } else {
+        checks.push(connected);
+    }
 }
 
 /// What to diagnose. `addr: None` means host-only checks (no connect).
@@ -252,8 +307,16 @@ pub async fn run_doctor(opts: &DoctorOptions) -> Result<DoctorReport> {
         format!("v{}", env!("CARGO_PKG_VERSION")),
     ));
 
-    // Print task honesty
-    checks.push(evaluate_print_task(model, opts.task));
+    // Without a connection only the requested/configured profile is available.
+    // Connected paths add this check after applying the detected identity.
+    if addr.is_none() {
+        checks.push(evaluate_print_task(model, opts.task));
+    } else {
+        checks.push(Check::fail(
+            "print_task",
+            "not evaluated — connected printer identity unavailable",
+        ));
+    }
 
     // Fonts
     let fonts = crate::font::list_available_fonts();
@@ -290,10 +353,10 @@ pub async fn run_doctor(opts: &DoctorOptions) -> Result<DoctorReport> {
 
     match opts.conn {
         ConnPref::Ble => {
-            doctor_ble(&mut checks, addr, model, scan_secs, match_mode).await?;
+            doctor_ble(&mut checks, addr, model, opts.task, scan_secs, match_mode).await?;
         }
         ConnPref::Usb => {
-            doctor_usb(&mut checks, addr, model).await?;
+            doctor_usb(&mut checks, addr, model, opts.task).await?;
         }
     }
 
@@ -319,6 +382,7 @@ async fn doctor_ble(
     checks: &mut Vec<Check>,
     addr: Option<&str>,
     model: Model,
+    task: Option<PrintTask>,
     scan_secs: u64,
     match_mode: BleMatchMode,
 ) -> Result<()> {
@@ -372,7 +436,9 @@ async fn doctor_ble(
                     "ble_connect",
                     format!("connected via '{selector}' ({match_mode:?})"),
                 ));
-                let mut client = PrinterClient::new(ble, model);
+                let mut client = diagnostic_client(ble, model, task);
+                let print_task = evaluate_connected_print_task(&mut client, task).await;
+                replace_print_task_check(checks, print_task);
                 match client.heartbeat().await {
                     Ok(hb) => {
                         checks.push(Check::pass("heartbeat", format!("{} bytes", hb.raw_len)));
@@ -410,6 +476,7 @@ async fn doctor_ble(
     checks: &mut Vec<Check>,
     _addr: Option<&str>,
     _model: Model,
+    _task: Option<PrintTask>,
     _scan_secs: u64,
     _match_mode: BleMatchMode,
 ) -> Result<()> {
@@ -421,7 +488,12 @@ async fn doctor_ble(
 }
 
 #[cfg(feature = "serial")]
-async fn doctor_usb(checks: &mut Vec<Check>, addr: Option<&str>, model: Model) -> Result<()> {
+async fn doctor_usb(
+    checks: &mut Vec<Check>,
+    addr: Option<&str>,
+    model: Model,
+    task: Option<PrintTask>,
+) -> Result<()> {
     let Some(path) = addr else {
         checks.push(Check::fail(
             "usb",
@@ -432,7 +504,9 @@ async fn doctor_usb(checks: &mut Vec<Check>, addr: Option<&str>, model: Model) -
     match SerialTransport::open(path) {
         Ok(ser) => {
             checks.push(Check::pass("usb_open", path));
-            let mut client = PrinterClient::new(ser, model);
+            let mut client = diagnostic_client(ser, model, task);
+            let print_task = evaluate_connected_print_task(&mut client, task).await;
+            replace_print_task_check(checks, print_task);
             match client.heartbeat().await {
                 Ok(hb) => {
                     checks.push(Check::pass("heartbeat", format!("{} bytes", hb.raw_len)));
@@ -447,7 +521,12 @@ async fn doctor_usb(checks: &mut Vec<Check>, addr: Option<&str>, model: Model) -
 }
 
 #[cfg(not(feature = "serial"))]
-async fn doctor_usb(checks: &mut Vec<Check>, _addr: Option<&str>, _model: Model) -> Result<()> {
+async fn doctor_usb(
+    checks: &mut Vec<Check>,
+    _addr: Option<&str>,
+    _model: Model,
+    _task: Option<PrintTask>,
+) -> Result<()> {
     checks.push(Check::fail("usb", "serial feature disabled at build time"));
     Ok(())
 }
@@ -461,6 +540,7 @@ pub type DoctorConn = ConnPref;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::MockTransport;
     use crate::printer::Heartbeat;
 
     #[test]
@@ -530,5 +610,116 @@ mod tests {
         let c = evaluate_print_task(Model::B21Pro, Some(PrintTask::B1));
         assert_eq!(c.status, CheckStatus::Warn);
         assert!(c.detail.contains("experimental"));
+    }
+
+    #[tokio::test]
+    async fn connected_task_support_uses_detected_profile_and_default_task() {
+        let mut transport = MockTransport::new();
+        transport.set_model_id(4097); // B1 Pro
+        let mut client = diagnostic_client(transport, Model::B1, None);
+
+        let check = evaluate_connected_print_task(&mut client, None).await;
+
+        assert_eq!(check.name, "print_task");
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.detail.contains("model=b1pro"), "{}", check.detail);
+        assert!(check.detail.contains("task=d110mv4"), "{}", check.detail);
+        assert!(check.detail.contains("experimental"), "{}", check.detail);
+        assert!(
+            !check.detail.contains("hardware-tested"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_b18_doctor_is_unresolved_without_panicking_or_printing() {
+        let mut transport = MockTransport::new();
+        transport.set_model_id(3584); // B18
+        let mut client = diagnostic_client(transport, Model::B18, None);
+
+        let check = evaluate_connected_print_task(&mut client, None).await;
+
+        assert_eq!(check.name, "print_task");
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.detail.contains("model=b18"), "{}", check.detail);
+        assert!(
+            check.detail.contains("no verified default task"),
+            "{}",
+            check.detail
+        );
+        assert!(client.transport().tx_cmds().iter().all(|cmd| !matches!(
+            *cmd,
+            0x01 | 0x03 | 0x13 | 0x15 | 0x20 | 0x21 | 0x23 | 0x83..=0x85 | 0xe3 | 0xf3
+        )));
+    }
+
+    #[tokio::test]
+    async fn connected_doctor_preserves_explicit_task_for_detected_profile() {
+        let mut transport = MockTransport::new();
+        transport.set_model_id(4097); // B1 Pro
+        let mut client = diagnostic_client(transport, Model::B1, Some(PrintTask::B1));
+
+        let check = evaluate_connected_print_task(&mut client, Some(PrintTask::B1)).await;
+
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.detail.contains("model=b1pro"), "{}", check.detail);
+        assert!(check.detail.contains("task=b1"), "{}", check.detail);
+        assert_eq!(client.print_task(), PrintTask::B1);
+    }
+
+    #[tokio::test]
+    async fn connected_unknown_model_cannot_inherit_configured_support() {
+        let mut transport = MockTransport::new();
+        transport.set_model_id(0xffff);
+        let mut client = diagnostic_client(transport, Model::B1, None);
+
+        let check = evaluate_connected_print_task(&mut client, None).await;
+
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(check.detail.contains("model id 65535"), "{}", check.detail);
+        assert!(
+            !check.detail.contains("hardware-tested"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_identity_query_cannot_inherit_configured_support() {
+        let mut transport = MockTransport::new();
+        transport.mute_cmd(crate::protocol::Cmd::PrinterInfo as u8);
+        let mut client = diagnostic_client(transport, Model::B1, None)
+            .with_pacing(crate::printer::Pacing::INSTANT);
+
+        let check = evaluate_connected_print_task(&mut client, None).await;
+
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(
+            check.detail.contains("identity query failed"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            !check.detail.contains("hardware-tested"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn connected_placeholder_preserves_the_print_task_check_surface() {
+        let mut checks = vec![Check::fail(
+            "print_task",
+            "not evaluated — connected printer identity unavailable",
+        )];
+        replace_print_task_check(
+            &mut checks,
+            Check::warn("print_task", "detected experimental path"),
+        );
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert_eq!(checks[0].detail, "detected experimental path");
     }
 }

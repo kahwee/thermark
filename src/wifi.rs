@@ -193,6 +193,8 @@ mod tests {
 
     #[test]
     fn open_network_label_never_renders_a_stale_password() {
+        let font_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf");
         let baseline = WifiLabelOptions {
             ssid: "OpenNet".into(),
             password: String::new(),
@@ -205,7 +207,7 @@ mod tests {
             },
             safe: SafeArea::B1,
             text_side: TextSide::Right,
-            font_path: None,
+            font_path: Some(font_path),
             font_name: None,
             font_size: None,
             border: false,

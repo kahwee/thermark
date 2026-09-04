@@ -44,8 +44,10 @@ such change is listed under **Changed** with the old and new spelling.
   packs rows while thresholding. Floyd–Steinberg error storage is now
   proportional to image width rather than width × height.
 - Offline inspection commands bypass Tokio and tracing startup, and commands
-  that do not use configuration no longer load it. Release builds strip
-  symbols, and unused `qrcode` and `uuid` dependency features are disabled.
+  that do not use configuration no longer load it. Async commands use a
+  bounded two-worker runtime instead of spawning one worker per logical CPU.
+  Release builds strip symbols, and unused `qrcode` and `uuid` dependency
+  features are disabled.
 - CLI command arguments now have one Clap-owned representation that handlers
   consume directly, removing the duplicate command structs and dispatch-time
   unpacking/repacking layer without changing the command-line surface.
@@ -61,8 +63,12 @@ such change is listed under **Changed** with the old and new spelling.
   compatible dependency releases.
 - README and agent guidance now document the maintenance baseline and
   evidence-first rules for modernization, benchmarking, and code reduction.
-- Golden and fixture render tests use the vendored font and fail explicitly on
-  renderer errors instead of treating them as skipped cases.
+- Font-dependent unit, placement, golden, and fixture render tests use the
+  vendored font and fail explicitly on renderer errors instead of treating
+  them as skipped cases.
+- Width-only resizing retains one-byte storage for 8-bit grayscale artwork
+  instead of expanding it to four-byte RGBA, while higher-precision formats
+  keep their established 8-bit conversion and threshold behavior.
 
 ### Fixed
 
@@ -73,6 +79,10 @@ such change is listed under **Changed** with the old and new spelling.
 - Hardware printing now fails closed when identity probing fails or reports an
   unrecognized model, rather than sending a job with provisional profile
   geometry.
+- Connected `doctor` runs identify the actual printer before reporting task
+  support. An unresolved B18 configuration no longer reaches the infallible
+  print-client constructor, and unknown hardware cannot inherit a configured
+  model's support claim.
 - Raw-image printing now resolves the default physical 1 mm registration
   margin at the detected printer DPI; explicitly configured pixel insets and
   full bleed remain unchanged.

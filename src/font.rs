@@ -406,21 +406,23 @@ impl LabelFont {
 mod tests {
     use super::*;
 
+    fn test_font() -> LabelFont {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf");
+        LabelFont::load(&path)
+            .unwrap_or_else(|error| panic!("load vendored test font {}: {error}", path.display()))
+    }
+
+    #[cfg(target_os = "macos")]
     #[test]
     fn system_font_loads_on_macos() {
-        let f = LabelFont::load_default();
-        if cfg!(target_os = "macos") {
-            let f = f.expect("macOS should have Arial");
-            assert!(f.path().exists());
-            assert!(f.text_width("ABC", 24.0) > 10);
-        }
+        let f = LabelFont::load_default().expect("macOS should have a supported system font");
+        assert!(f.path().exists());
+        assert!(f.text_width("ABC", 24.0) > 10);
     }
 
     #[test]
     fn fit_size_never_returns_a_size_larger_than_the_smallest_tried() {
-        let Ok(f) = LabelFont::load_default() else {
-            return;
-        };
+        let f = test_font();
         // A box too small for any size: the old fallback returned 12.0 — larger
         // than the 10px that had already failed — so text overflowed further.
         let px = f.fit_size("SOME LONGISH LABEL TEXT HERE", 20, 8);
@@ -429,9 +431,7 @@ mod tests {
 
     #[test]
     fn fit_size_picks_the_largest_size_that_fits() {
-        let Ok(f) = LabelFont::load_default() else {
-            return;
-        };
+        let f = test_font();
         let (w, h) = (127, 228);
         let px = f.fit_size("Wi-Fi\nGuest\nScan to join", w, h);
         assert!(f.fits("Wi-Fi\nGuest\nScan to join", w, h, px));
@@ -445,9 +445,7 @@ mod tests {
 
     #[test]
     fn fit_size_keeps_words_whole_instead_of_splitting_them() {
-        let Ok(f) = LabelFont::load_default() else {
-            return;
-        };
+        let f = test_font();
         // The real case: a 127px text column beside a QR. Picking purely on
         // "does it fit" rendered THERMARK as THER / MARK, because the
         // hard-broken lines do fit. A smaller size keeps the word intact.
@@ -463,9 +461,7 @@ mod tests {
 
     #[test]
     fn fit_size_still_splits_when_a_word_can_never_fit() {
-        let Ok(f) = LabelFont::load_default() else {
-            return;
-        };
+        let f = test_font();
         // A single token far wider than the column: splitting is the only
         // option, so the whole-word preference must not deadlock.
         let px = f.fit_size("SUPERCALIFRAGILISTIC", 40, 200);
@@ -473,10 +469,8 @@ mod tests {
     }
 
     #[test]
-    fn arial_abc_left_to_right() {
-        let Ok(font) = LabelFont::load_default() else {
-            return;
-        };
+    fn font_abc_is_left_to_right() {
+        let font = test_font();
         let mut img = GrayImage::from_pixel(200, 60, Luma([255]));
         // baseline ~ 40 for 32px font
         font.draw_text(&mut img, 5.0, 40.0, "ABC", 32.0);
