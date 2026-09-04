@@ -10,6 +10,8 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-04
+
 ### Added
 
 - Printer identification with human-readable and JSON hardware reports.
@@ -17,12 +19,18 @@ such change is listed under **Changed** with the old and new spelling.
   B21 Pro, D11, D11_H, and D110 families; B18 geometry is recognized but its
   print task remains unresolved.
 - A reproducible `image_pipeline` benchmark for hard-threshold encoding,
-  dithering, cover placement, and white-border trimming.
+  dithering, cover placement, and white-border trimming across grayscale and
+  RGB artwork.
 - `image_encode::encode_gray`, a borrowed grayscale entry point that lets label
   renderers encode without cloning a page-sized image, and
   `render_print_preview` for validated black-on-white print pixels.
 - `image_encode::grayscale_on_white` for alpha-aware conversion that matches
   how transparent artwork is printed on white thermal media.
+- A tag- and manually-triggered GitHub release workflow that tests the primary
+  and full feature sets and packages full and BLE-only Linux x86_64/ARM64 and
+  macOS Apple Silicon/Intel binaries with verified SHA-256 checksums. Release
+  actions are immutable-pinned, manual runs cannot publish, and pushed tags are
+  rejected unless they match the Cargo version.
 
 ### Changed
 
@@ -51,8 +59,13 @@ such change is listed under **Changed** with the old and new spelling.
 - CLI command arguments now have one Clap-owned representation that handlers
   consume directly, removing the duplicate command structs and dispatch-time
   unpacking/repacking layer without changing the command-line surface.
-- `DoctorOptions` now uses `config::ConnPref` directly; `DoctorConn` remains a
-  source-compatible type alias for existing library callers.
+- **BREAKING:** printer support metadata now has one owner: `profile::PROFILES`.
+  Each `PrinterProfile` carries its display name, `default_task`, support
+  status, tested connection, and evidence notes. This replaces the duplicate
+  task-level hardware matrix, and support is evaluated for the effective
+  profile/task/connection path.
+- **BREAKING:** `DoctorOptions` now uses `config::ConnPref` directly and the
+  duplicate `DoctorConn` compatibility name has been removed.
 - Normal print sessions query only the identity needed for profile/task
   selection and no longer perform an informational RFID query. `identify` and
   `info` retain their detailed reports.
@@ -69,6 +82,11 @@ such change is listed under **Changed** with the old and new spelling.
 - Width-only resizing retains one-byte storage for 8-bit grayscale artwork
   instead of expanding it to four-byte RGBA, while higher-precision formats
   keep their established 8-bit conversion and threshold behavior.
+- RGB8 white-border trimming finds its bounds without first allocating a
+  page-sized grayscale copy, keeping peak memory bounded by the source and the
+  final crop. Packet sends encode into a caller-owned fixed-size stack buffer,
+  eliminating one heap allocation per protocol packet without changing retry
+  or pacing behavior.
 
 ### Fixed
 
@@ -99,8 +117,9 @@ such change is listed under **Changed** with the old and new spelling.
 - Offline previews and saved sticker renders can use experimental model
   profiles without opting into an experimental hardware print sequence; the
   opt-in remains mandatory at both pre-connect and post-identification print
-  boundaries. Verification is attached to the effective profile-and-task pair,
-  so selecting the B1 task cannot bypass the gate for another printer model.
+  boundaries. Verification is attached to the effective profile, task, and
+  connection, so selecting the B1 task cannot bypass the gate for another
+  printer model and unverified B1-over-USB printing requires an explicit opt-in.
 - Label sizes with extra dimensions or trailing separators are rejected rather
   than silently ignoring the extra input.
 - Direct `PrinterClient::print_gray_image` calls now run the same tolerant
@@ -121,6 +140,30 @@ such change is listed under **Changed** with the old and new spelling.
 ### Removed
 
 - Legacy `simple` and `b21v1` task paths and their CLI aliases.
+- **BREAKING:** retired superseded library compatibility APIs after checking
+  GitHub for downstream use. Migrate as follows:
+  - `hardware_matrix()` / `HardwareSupport` → iterate `profile::PROFILES` and
+    read `PrinterProfile::{display_name, default_task, support_status,
+    tested_connection, support_notes}`.
+  - `PrintTask::hardware_tested()` →
+    `PrinterProfile::print_path_hardware_tested(task, connection)` or
+    `PrinterProfile::print_path_support(task, connection)`.
+  - `PrinterProfile::print_path_hardware_tested(task)` →
+    `PrinterProfile::print_path_hardware_tested(task, connection)`; verification
+    now includes the physical transport while remaining available in const
+    contexts.
+  - `doctor::evaluate_print_task(model, task)` →
+    `doctor::evaluate_print_task(model, task, connection)` so USB cannot inherit
+    BLE's hardware-verification claim.
+  - `PrinterProfile::task` → `PrinterProfile::default_task`.
+  - `print_task::SupportStatus` → `profile::SupportStatus` (the crate-root
+    `thermark::SupportStatus` export is unchanged).
+  - `ConnPref::parse(value)` → `value.parse::<ConnPref>()`; unknown values now
+    return a typed error instead of silently selecting BLE.
+  - `Model::max_width_px()` → `profile_for_model(model).max_width_px`.
+  - `label::make_qr_label(...)` → `label::make_qr_label_opts(...)` with an
+    explicit `QrLabelOptions` value.
+  - `doctor::DoctorConn` → `config::ConnPref`.
 
 ## [0.31.0] - 2026-08-10
 
@@ -1123,7 +1166,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.32.0
 [0.29.0]: https://github.com/kahwee/thermark/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/kahwee/thermark/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/kahwee/thermark/compare/v0.26.0...v0.27.0

@@ -38,6 +38,7 @@ mock-tested, but has not been verified against the owned printer.
 
 ```bash
 cargo build --release
+cargo build --locked --release --no-default-features --features ble
 cargo test
 cargo test --lib --no-default-features
 cargo test --test fixtures_readme   # sticker fixtures + boundary checks
@@ -62,7 +63,7 @@ Check placement without a printer: `thermark print -i art.png --label 50x30 --pr
 
 Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
-Experimental profile/task print paths need `--allow-experimental`.
+Experimental profile/task/connection paths need `--allow-experimental`.
 
 On macOS, Bluetooth Settings may show the printer as **Connected** while
 CoreBluetooth cannot discover it. Treat that as an exclusive-session conflict:
@@ -81,7 +82,7 @@ not proof that the printer accepts thermark's serial protocol.
 | `config.rs` | User `config.json` (default BLE addr) |
 | `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
 | `protocol.rs` | Commands, B1 PrintStart / page size, models |
-| `profile.rs` | `PrinterDevice` aggregate, detected identity, physical capabilities |
+| `profile.rs` | `PrinterDevice`, identity, capabilities, default task, support registry |
 | `errors.rs` | Print error 0xDB reason codes |
 | `transport.rs`, `transport/` | Common transport/matching + BLE and serial implementations |
 | `printer/` | Client core, safe print jobs, queries, validated pacing, explicit raw API |
@@ -105,6 +106,9 @@ not proof that the printer accepts thermark's serial protocol.
   `transport::name_looks_like_label_printer`.
 - **Pacing:** tests use `Pacing::INSTANT`, which differs from `Pacing::REAL`
   only in durations — never in retry counts or control flow.
+- **Support:** `profile::PROFILES` is the single authority for model display
+  names, default tasks, verification status, and evidence notes. Never recreate
+  a parallel hardware matrix in `print_task` or the CLI.
 
 ---
 
@@ -280,8 +284,8 @@ physical geometry.
 
 `PrinterClient` defaults via `PrintTask::for_model`. Override: `--task` / `.with_print_task()`.
 
-CLI: every profile/task pair other than the owned B1 profile with its B1 task
-requires `--allow-experimental` on printing commands.
+CLI: every profile/task/connection path other than the owned B1 profile with
+its B1 task over BLE requires `--allow-experimental` on printing commands.
 Library API is unrestricted.
 
 ## Tests
@@ -306,6 +310,12 @@ printable-band invariant. Print only to confirm a *deliberate* visual change.
 Compare benchmark runs on the same host. The benchmark does not measure peak
 RSS; use separate processes for memory measurements so allocator state from one
 case cannot affect another.
+
+`.github/workflows/release.yml` packages full and BLE-only binaries for Linux
+x86_64/ARM64 and macOS Apple Silicon/Intel, verifies their checksums, and pins
+release actions to immutable commits. Manual branch dispatch validates
+downloadable artifacts without publishing; a pushed `v*` tag publishes only
+when it exactly matches the Cargo version.
 
 ```bash
 # coverage (needs Homebrew llvm + cargo-llvm-cov)

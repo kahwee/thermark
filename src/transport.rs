@@ -5,7 +5,7 @@
 //! - `serial` — [`SerialTransport`]
 
 use crate::errors::{Error, Result};
-use crate::packet::Packet;
+use crate::packet::{MAX_FRAME_LEN, Packet};
 use std::fmt;
 use std::time::Duration;
 use tracing::debug;
@@ -30,9 +30,13 @@ pub trait Transport: Send {
         packet: &Packet,
     ) -> impl std::future::Future<Output = Result<()>> + Send {
         async {
-            let bytes = packet.encode()?;
-            debug!(bytes = %hex::encode(&bytes), "TX");
-            self.send_raw(&bytes).await
+            // A print can contain hundreds of row packets. Keep their small,
+            // bounded frame storage inline instead of allocating a fresh Vec
+            // for every call.
+            let mut frame = [0u8; MAX_FRAME_LEN];
+            let bytes = packet.encode_into(&mut frame)?;
+            debug!(bytes = %hex::encode(bytes), "TX");
+            self.send_raw(bytes).await
         }
     }
 }

@@ -478,6 +478,16 @@ async fn lost_write_is_recovered_by_resending_a_read() {
         .filter(|c| **c == 0x40)
         .count();
     assert_eq!(sends, 3, "two dropped writes plus the one that landed");
+
+    let expected = protocol::info(InfoKey::DeviceSerial).encode().unwrap();
+    let frames: Vec<&[u8]> = c
+        .transport()
+        .tx
+        .iter()
+        .filter(|frame| Packet::decode(frame).is_ok_and(|packet| packet.cmd == 0x40))
+        .map(Vec::as_slice)
+        .collect();
+    assert_eq!(frames, vec![expected.as_slice(); 3]);
 }
 
 #[tokio::test]

@@ -2,8 +2,9 @@
 
 use crate::config::ConnPref;
 use crate::errors::Result;
-use crate::print_task::{PrintTask, SupportStatus, hardware_matrix};
+use crate::print_task::PrintTask;
 use crate::printer::{Heartbeat, RfidInfo};
+use crate::profile::{PROFILES, SupportStatus};
 use crate::protocol::Model;
 use std::fmt;
 
@@ -202,8 +203,9 @@ pub fn evaluate_rfid(r: &RfidInfo) -> Check {
     )
 }
 
-/// Report the task a print would actually use, honouring an explicit `--task`.
-pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
+/// Report the task and connection a print would actually use, honouring an
+/// explicit `--task`.
+pub fn evaluate_print_task(model: Model, task: Option<PrintTask>, connection: ConnPref) -> Check {
     let Some(task) = task.or_else(|| PrintTask::for_model(model)) else {
         return Check::warn(
             "print_task",
@@ -211,16 +213,17 @@ pub fn evaluate_print_task(model: Model, task: Option<PrintTask>) -> Check {
         );
     };
     let profile = crate::profile::profile_for_model(model);
-    let (status, label) = if profile.print_path_hardware_tested(task) {
-        (CheckStatus::Pass, "hardware-tested")
-    } else {
-        (CheckStatus::Warn, "experimental")
+    let support = profile.print_path_support(task, connection);
+    let (status, label) = match support {
+        SupportStatus::Tested => (CheckStatus::Pass, "hardware-tested"),
+        SupportStatus::Experimental => (CheckStatus::Warn, "experimental"),
+        SupportStatus::Unresolved => (CheckStatus::Warn, "unresolved"),
     };
     Check::new(
         "print_task",
         status,
         format!(
-            "model={model} → task={task} ({label}), max width {}px",
+            "model={model} → task={task} over {connection} ({label}), max width {}px",
             profile.max_width_px
         ),
     )
@@ -246,6 +249,7 @@ fn diagnostic_client<T: Transport>(
 async fn evaluate_connected_print_task<T: Transport>(
     client: &mut PrinterClient<T>,
     explicit_task: Option<PrintTask>,
+    connection: ConnPref,
 ) -> Check {
     let identity = match client.identify_profile().await {
         Ok(identity) => identity,
@@ -265,7 +269,7 @@ async fn evaluate_connected_print_task<T: Transport>(
         );
     };
 
-    let mut check = evaluate_print_task(profile.model, detected_task);
+    let mut check = evaluate_print_task(profile.model, detected_task, connection);
     check.detail = format!("detected model id {model_id}: {}", check.detail);
     check
 }
@@ -310,7 +314,7 @@ pub async fn run_doctor(opts: &DoctorOptions) -> Result<DoctorReport> {
     // Without a connection only the requested/configured profile is available.
     // Connected paths add this check after applying the detected identity.
     if addr.is_none() {
-        checks.push(evaluate_print_task(model, opts.task));
+        checks.push(evaluate_print_task(model, opts.task, opts.conn));
     } else {
         checks.push(Check::fail(
             "print_task",
@@ -361,15 +365,19 @@ pub async fn run_doctor(opts: &DoctorOptions) -> Result<DoctorReport> {
     }
 
     // Support matrix tip
-    let tested: Vec<_> = hardware_matrix()
+    let tested: Vec<_> = PROFILES
         .iter()
-        .filter(|h| h.status == SupportStatus::Tested)
-        .map(|h| h.model)
+        .filter_map(|profile| {
+            (profile.support_status == SupportStatus::Tested)
+                .then_some(profile.tested_connection)
+                .flatten()
+                .map(|connection| format!("{} over {connection}", profile.display_name))
+        })
         .collect();
     checks.push(Check::pass(
         "support_matrix",
         format!(
-            "hardware-tested models: {} — run `thermark tasks`",
+            "hardware-tested paths: {} — run `thermark tasks`",
             tested.join(", ")
         ),
     ));
@@ -437,7 +445,8 @@ async fn doctor_ble(
                     format!("connected via '{selector}' ({match_mode:?})"),
                 ));
                 let mut client = diagnostic_client(ble, model, task);
-                let print_task = evaluate_connected_print_task(&mut client, task).await;
+                let print_task =
+                    evaluate_connected_print_task(&mut client, task, ConnPref::Ble).await;
                 replace_print_task_check(checks, print_task);
                 match client.heartbeat().await {
                     Ok(hb) => {
@@ -505,7 +514,7 @@ async fn doctor_usb(
         Ok(ser) => {
             checks.push(Check::pass("usb_open", path));
             let mut client = diagnostic_client(ser, model, task);
-            let print_task = evaluate_connected_print_task(&mut client, task).await;
+            let print_task = evaluate_connected_print_task(&mut client, task, ConnPref::Usb).await;
             replace_print_task_check(checks, print_task);
             match client.heartbeat().await {
                 Ok(hb) => {
@@ -530,12 +539,6 @@ async fn doctor_usb(
     checks.push(Check::fail("usb", "serial feature disabled at build time"));
     Ok(())
 }
-
-/// Compatibility name for the connection preference used by [`DoctorOptions`].
-///
-/// New code should use [`ConnPref`] directly. Keeping this alias avoids breaking
-/// callers while removing the duplicate enum and conversion layer.
-pub type DoctorConn = ConnPref;
 
 #[cfg(test)]
 mod tests {
@@ -601,13 +604,21 @@ mod tests {
 
     #[test]
     fn print_task_b1_is_pass() {
-        let c = evaluate_print_task(Model::B1, None);
+        let c = evaluate_print_task(Model::B1, None, ConnPref::Ble);
         assert_eq!(c.status, CheckStatus::Pass);
     }
 
     #[test]
+    fn b1_usb_path_is_not_reported_as_hardware_tested() {
+        let c = evaluate_print_task(Model::B1, None, ConnPref::Usb);
+        assert_eq!(c.status, CheckStatus::Warn);
+        assert!(c.detail.contains("over usb"), "{}", c.detail);
+        assert!(c.detail.contains("experimental"), "{}", c.detail);
+    }
+
+    #[test]
     fn b1_task_does_not_mark_an_experimental_profile_as_tested() {
-        let c = evaluate_print_task(Model::B21Pro, Some(PrintTask::B1));
+        let c = evaluate_print_task(Model::B21Pro, Some(PrintTask::B1), ConnPref::Ble);
         assert_eq!(c.status, CheckStatus::Warn);
         assert!(c.detail.contains("experimental"));
     }
@@ -618,7 +629,7 @@ mod tests {
         transport.set_model_id(4097); // B1 Pro
         let mut client = diagnostic_client(transport, Model::B1, None);
 
-        let check = evaluate_connected_print_task(&mut client, None).await;
+        let check = evaluate_connected_print_task(&mut client, None, ConnPref::Ble).await;
 
         assert_eq!(check.name, "print_task");
         assert_eq!(check.status, CheckStatus::Warn);
@@ -638,7 +649,7 @@ mod tests {
         transport.set_model_id(3584); // B18
         let mut client = diagnostic_client(transport, Model::B18, None);
 
-        let check = evaluate_connected_print_task(&mut client, None).await;
+        let check = evaluate_connected_print_task(&mut client, None, ConnPref::Ble).await;
 
         assert_eq!(check.name, "print_task");
         assert_eq!(check.status, CheckStatus::Warn);
@@ -660,7 +671,8 @@ mod tests {
         transport.set_model_id(4097); // B1 Pro
         let mut client = diagnostic_client(transport, Model::B1, Some(PrintTask::B1));
 
-        let check = evaluate_connected_print_task(&mut client, Some(PrintTask::B1)).await;
+        let check =
+            evaluate_connected_print_task(&mut client, Some(PrintTask::B1), ConnPref::Ble).await;
 
         assert_eq!(check.status, CheckStatus::Warn);
         assert!(check.detail.contains("model=b1pro"), "{}", check.detail);
@@ -674,7 +686,7 @@ mod tests {
         transport.set_model_id(0xffff);
         let mut client = diagnostic_client(transport, Model::B1, None);
 
-        let check = evaluate_connected_print_task(&mut client, None).await;
+        let check = evaluate_connected_print_task(&mut client, None, ConnPref::Ble).await;
 
         assert_eq!(check.status, CheckStatus::Fail);
         assert!(check.detail.contains("model id 65535"), "{}", check.detail);
@@ -692,7 +704,7 @@ mod tests {
         let mut client = diagnostic_client(transport, Model::B1, None)
             .with_pacing(crate::printer::Pacing::INSTANT);
 
-        let check = evaluate_connected_print_task(&mut client, None).await;
+        let check = evaluate_connected_print_task(&mut client, None, ConnPref::Ble).await;
 
         assert_eq!(check.status, CheckStatus::Fail);
         assert!(

@@ -96,6 +96,31 @@ impl Packet {
         Ok(out)
     }
 
+    /// Encode into caller-owned storage large enough for any valid frame.
+    ///
+    /// The transport hot path keeps this buffer inline, avoiding one heap
+    /// allocation for every row packet while retaining [`Packet::encode`] as
+    /// the convenient public API.
+    pub(crate) fn encode_into<'a>(
+        &self,
+        out: &'a mut [u8; MAX_FRAME_LEN],
+    ) -> Result<&'a [u8], PacketError> {
+        let len = u8::try_from(self.data.len()).map_err(|_| PacketError::DataTooLong {
+            len: self.data.len(),
+        })?;
+        let data_end = 4 + self.data.len();
+        let frame_len = FRAME_OVERHEAD + self.data.len();
+
+        out[..2].copy_from_slice(&HEAD);
+        out[2] = self.cmd;
+        out[3] = len;
+        out[4..data_end].copy_from_slice(&self.data);
+        out[data_end] = Self::checksum(self.cmd, len, &self.data);
+        out[data_end + 1..frame_len].copy_from_slice(&TAIL);
+
+        Ok(&out[..frame_len])
+    }
+
     /// Decode a single complete packet from `buf`.
     pub fn decode(buf: &[u8]) -> Result<Self, PacketError> {
         if buf.len() < 7 {
@@ -298,6 +323,42 @@ mod tests {
         let enc = p.encode().unwrap();
         assert_eq!(enc[3] as usize, MAX_DATA_LEN);
         assert_eq!(Packet::decode(&enc).unwrap(), p);
+    }
+
+    #[test]
+    fn fixed_buffer_encoding_matches_allocating_encoding_at_every_length() {
+        let mut frame = [0xCC; MAX_FRAME_LEN];
+        for len in 0..=MAX_DATA_LEN {
+            let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37)).collect();
+            let packet = Packet::new((len as u8).wrapping_mul(11), data);
+            let expected = packet.encode().unwrap();
+            let actual = packet.encode_into(&mut frame).unwrap();
+            assert_eq!(actual, expected, "payload length {len}");
+        }
+    }
+
+    #[test]
+    fn fixed_buffer_can_be_reused_and_rejects_oversized_payloads() {
+        let mut frame = [0xCC; MAX_FRAME_LEN];
+        let longest = Packet::new(0x85, vec![0xAB; MAX_DATA_LEN]);
+        assert_eq!(
+            longest.encode_into(&mut frame).unwrap(),
+            longest.encode().unwrap()
+        );
+
+        let shortest = Packet::new(0x1A, [0x01]);
+        assert_eq!(
+            shortest.encode_into(&mut frame).unwrap(),
+            hex::decode("55551a01011aaaaa").unwrap()
+        );
+
+        let before = frame;
+        let oversized = Packet::new(0x85, vec![0xAB; MAX_DATA_LEN + 1]);
+        assert!(matches!(
+            oversized.encode_into(&mut frame),
+            Err(PacketError::DataTooLong { len }) if len == MAX_DATA_LEN + 1
+        ));
+        assert_eq!(frame, before, "failed encoding must not alter the buffer");
     }
 
     #[test]

@@ -409,26 +409,6 @@ fn load_font(path: Option<&std::path::Path>, name: Option<&str>) -> Result<Label
     }
 }
 
-/// Convenience wrapper.
-pub fn make_qr_label(
-    url: &str,
-    side_text: &str,
-    label: LabelPx,
-    text_side: TextSide,
-) -> Result<GrayImage> {
-    make_qr_label_opts(&QrLabelOptions {
-        url: url.into(),
-        side_text: side_text.into(),
-        label,
-        safe: SafeArea::default(),
-        text_side,
-        border: false,
-        font_path: None,
-        font_name: None,
-        font_size: None,
-    })
-}
-
 /// Smallest module size a thermal print can hold and still scan reliably.
 ///
 /// Below this the code is emitted but unreadable — heat bleed closes the gaps
@@ -565,8 +545,18 @@ mod tests {
             height_px: 240,
         };
         assert_eq!(max_qr_side(lp, SafeArea::default()), 0);
-        let err = make_qr_label("https://example.com", "HI", lp, TextSide::Right)
-            .expect_err("96px label cannot fit QR + text");
+        let err = make_qr_label_opts(&QrLabelOptions {
+            url: "https://example.com".into(),
+            side_text: "HI".into(),
+            label: lp,
+            safe: SafeArea::default(),
+            text_side: TextSide::Right,
+            border: false,
+            font_path: Some(test_font_path()),
+            font_name: None,
+            font_size: None,
+        })
+        .expect_err("96px label cannot fit QR + text");
         assert!(err.to_string().contains("too small"), "{err}");
     }
 

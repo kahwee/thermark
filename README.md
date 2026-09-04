@@ -19,15 +19,16 @@ the owned printer.
 
 ## Support
 
-| Model family | Status |
+| Model family / path | Status |
 |---|---|
-| B1 | Hardware-tested |
+| B1 over BLE | Hardware-tested |
+| B1 over USB serial | Experimental; implemented and mock-tested |
 | B1 Pro, B21 Pro, D11, D11_H, D110 | Experimental monochrome profiles |
 | B18 | Geometry known; print task unresolved |
 
-Printing with any profile/task pair other than the tested B1+B1 path requires
-`--allow-experimental`; offline previews and saved renders do not. Multi-colour
-printheads and colour raster protocols are out of scope.
+Printing with any profile/task/connection combination other than B1+B1 over
+BLE requires `--allow-experimental`; offline previews and saved renders do not.
+Multi-colour printheads and colour raster protocols are out of scope.
 
 Requires Rust 1.98 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
 the current stable toolchain for rustup users.
@@ -41,6 +42,38 @@ cargo build --release
 ./target/release/thermark scan --save
 ./target/release/thermark identify
 ./target/release/thermark doctor --use-config
+```
+
+For the smallest primary-path binary, omit USB serial support and build BLE
+only:
+
+```bash
+cargo build --locked --release --no-default-features --features ble
+```
+
+Tagged GitHub releases publish both `full` (BLE + USB serial) and `ble`
+archives for Linux x86_64/ARM64 and macOS Apple Silicon/Intel, with SHA-256
+checksum files. Linux binaries are built on Ubuntu 24.04 and macOS binaries on
+macOS 15. The release workflow also supports a manual branch run for testing
+downloadable artifacts without creating a release. A pushed release tag must
+exactly match the Cargo version, such as `v0.32.0` for package version
+`0.32.0`.
+
+Archive names include the package version and platform, for example
+`thermark-0.32.0-macOS-ARM64-ble.tar.gz`. After downloading the archive and its
+`.sha256` sidecar from GitHub Releases, verify and unpack it:
+
+```bash
+# Linux
+sha256sum --check thermark-0.32.0-Linux-X64-ble.tar.gz.sha256
+
+# macOS
+shasum -a 256 --check thermark-0.32.0-macOS-ARM64-ble.tar.gz.sha256
+
+tar -xzf thermark-0.32.0-macOS-ARM64-ble.tar.gz
+cd thermark-0.32.0-macOS-ARM64-ble
+./thermark --version
+./thermark tasks
 ```
 
 Refresh compatible dependency versions deliberately, then review the lockfile
@@ -243,12 +276,30 @@ cargo bench --bench image_pipeline
 The benchmark reports CPU-only medians. Compare runs on the same host, and
 measure peak RSS in separate processes when evaluating memory changes.
 
+Representative same-host Apple Silicon measurements for 0.32.0:
+
+| Optimization | Before | After |
+|---|---:|---:|
+| 2000×1500 RGB trim scratch storage | 3,000,000 B | at most 512,000 B |
+| 2000×1500 RGB trim median | 7.11 ms | 7.20 ms |
+| macOS ARM64 release binary | 3,670,016 B full | 3,601,600 B BLE-only |
+
+The RGB change removes 82.9% of temporary scan storage while keeping runtime
+effectively flat. Protocol sends also avoid one heap allocation per packet;
+exhaustive tests compare the fixed-buffer and public allocating encoders for
+all payload lengths from 0 through 255. These figures are evidence from one
+machine, not cross-platform performance guarantees.
+
 The architecture keeps four concerns separate:
 
-- `profile.rs`: detected printer identity and physical capabilities.
+- `profile.rs`: detected printer identity, physical capabilities, default task,
+  and the single support-status registry exposed as `PROFILES`.
 - `transport/`: BLE and USB communication.
 - `printer/`: validated job lifecycle and protocol queries.
 - `label.rs` / `image_encode.rs`: layout and monochrome raster generation.
+
+For library API migrations, see the explicit old-to-new mappings under
+[0.32.0 → Removed](CHANGELOG.md#removed).
 
 See [`AGENTS.md`](AGENTS.md) for protocol details, hardware measurements, and
 contributor invariants.

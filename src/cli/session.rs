@@ -103,6 +103,7 @@ impl Transport for AnyTransport {
 /// An open BLE or USB printer session.
 pub struct Session<T: Transport = AnyTransport> {
     client: PrinterClient<T>,
+    connection: ConnPref,
     allow_experimental: bool,
 }
 
@@ -189,8 +190,14 @@ impl Session<AnyTransport> {
                     .context("BLE connect")?;
                     let client = PrinterClient::new_with_task(AnyTransport::Ble(ble), model, task)
                         .with_pacing(pacing_from_env());
-                    Self::finish_connect(client, auto_task, allow_experimental, identity_detail)
-                        .await
+                    Self::finish_connect(
+                        client,
+                        ConnPref::Ble,
+                        auto_task,
+                        allow_experimental,
+                        identity_detail,
+                    )
+                    .await
                 }
             }
             ConnPref::Usb => {
@@ -202,8 +209,14 @@ impl Session<AnyTransport> {
                         .with_context(|| format!("open serial {}", conn.addr))?;
                     let client = PrinterClient::new_with_task(AnyTransport::Usb(ser), model, task)
                         .with_pacing(pacing_from_env());
-                    Self::finish_connect(client, auto_task, allow_experimental, identity_detail)
-                        .await
+                    Self::finish_connect(
+                        client,
+                        ConnPref::Usb,
+                        auto_task,
+                        allow_experimental,
+                        identity_detail,
+                    )
+                    .await
                 }
             }
         }
@@ -214,6 +227,7 @@ impl<T: Transport> Session<T> {
     #[cfg_attr(not(any(feature = "ble", feature = "serial")), allow(dead_code))]
     async fn finish_connect(
         mut client: PrinterClient<T>,
+        connection: ConnPref,
         auto_task: bool,
         allow_experimental: bool,
         identity_detail: IdentityDetail,
@@ -231,7 +245,7 @@ impl<T: Transport> Session<T> {
         };
         if let Some(identity) = &identity {
             if let Some(profile) = client.apply_identity(identity, auto_task) {
-                tracing::info!(model = %profile.model, model_id = identity.model_id, dpi = profile.dpi, task = ?profile.task, "identified printer");
+                tracing::info!(model = %profile.model, model_id = identity.model_id, dpi = profile.dpi, task = ?profile.default_task, "identified printer");
             } else {
                 tracing::warn!(
                     model_id = identity.model_id,
@@ -241,6 +255,7 @@ impl<T: Transport> Session<T> {
         }
         Ok(Self {
             client,
+            connection,
             allow_experimental,
         })
     }
@@ -295,10 +310,11 @@ impl<T: Transport> Session<T> {
         }
         let model = self.client.model();
         let task = self.client.print_task();
-        ensure_print_path_allowed(model, task, self.allow_experimental)?;
-        if !thermark::profile_for_model(model).print_path_hardware_tested(task) {
+        ensure_print_path_allowed(model, task, self.connection, self.allow_experimental)?;
+        if !thermark::profile_for_model(model).print_path_hardware_tested(task, self.connection) {
+            let connection = self.connection;
             eprintln!(
-                "warning: printer profile '{model}' with print task '{task}' is experimental \
+                "warning: printer profile '{model}' with print task '{task}' over '{connection}' is experimental \
                  (not hardware-tested in this project)"
             );
         }
@@ -361,7 +377,7 @@ pub async fn print_file_resolved(
     opts: PrintOptions,
     full_bleed: bool,
 ) -> Result<()> {
-    ensure_target_print_allowed(target)?;
+    ensure_target_print_allowed(target, cfg.resolve_connection(conn.conn))?;
     let conn = conn.resolve(cfg)?;
     let session = Session::connect(
         &conn,
@@ -381,7 +397,7 @@ pub async fn render_and_print_gray_resolved<R>(
     density: thermark::Density,
     render: impl FnOnce(&'static PrinterProfile) -> Result<(image::GrayImage, R)>,
 ) -> Result<R> {
-    ensure_target_print_allowed(target)?;
+    ensure_target_print_allowed(target, cfg.resolve_connection(conn.conn))?;
     let resolved_conn = conn.resolve(cfg)?;
     let session = Session::connect(
         &resolved_conn,
@@ -410,8 +426,13 @@ pub fn resolve_task(model: Model, args: &TaskArgs) -> Result<PrintTask> {
 /// Reject an unverified configured task before opening a hardware connection.
 /// The session checks again after identification because auto-detection may
 /// replace the configured task with a different protocol sequence.
-fn ensure_target_print_allowed(target: PrintTarget) -> Result<()> {
-    ensure_print_path_allowed(target.model, target.task, target.allow_experimental)
+fn ensure_target_print_allowed(target: PrintTarget, connection: ConnPref) -> Result<()> {
+    ensure_print_path_allowed(
+        target.model,
+        target.task,
+        connection,
+        target.allow_experimental,
+    )
 }
 
 /// Require opt-in unless this exact physical profile and wire task form the
@@ -419,15 +440,16 @@ fn ensure_target_print_allowed(target: PrintTarget) -> Result<()> {
 fn ensure_print_path_allowed(
     model: Model,
     task: PrintTask,
+    connection: ConnPref,
     allow_experimental: bool,
 ) -> Result<()> {
     let profile = thermark::profile_for_model(model);
-    if !profile.print_path_hardware_tested(task) && !allow_experimental {
+    if !profile.print_path_hardware_tested(task, connection) && !allow_experimental {
         bail!(
-            "printer profile '{model}' with print task '{task}' is experimental \
+            "printer profile '{model}' with print task '{task}' over '{connection}' is experimental \
              (not hardware-tested in this project). \
              Re-run with --allow-experimental if you accept the risk, \
-             or use the hardware-tested B1 profile and task. See: thermark tasks"
+             or use the hardware-tested B1 profile and task over BLE. See: thermark tasks"
         );
     }
     Ok(())
@@ -501,11 +523,21 @@ mod tests {
         auto_task: bool,
         allow_experimental: bool,
     ) -> (Session<ObservedTransport>, Events) {
+        detected_session_over(model_id, ConnPref::Ble, auto_task, allow_experimental).await
+    }
+
+    async fn detected_session_over(
+        model_id: u16,
+        connection: ConnPref,
+        auto_task: bool,
+        allow_experimental: bool,
+    ) -> (Session<ObservedTransport>, Events) {
         let (transport, events) = ObservedTransport::with_model_id(model_id);
         let client = PrinterClient::new_with_task(transport, Model::B1, PrintTask::B1)
             .with_pacing(Pacing::INSTANT);
         let session = Session::<ObservedTransport>::finish_connect(
             client,
+            connection,
             auto_task,
             allow_experimental,
             IdentityDetail::Profile,
@@ -581,13 +613,13 @@ mod tests {
     fn experimental_task_is_gated_at_print_boundary() {
         let target =
             resolve_target(&Config::default(), Some(Model::D110), &args(None, false)).unwrap();
-        assert!(ensure_target_print_allowed(target).is_err());
+        assert!(ensure_target_print_allowed(target, ConnPref::Ble).is_err());
 
         let allowed = PrintTarget {
             allow_experimental: true,
             ..target
         };
-        assert!(ensure_target_print_allowed(allowed).is_ok());
+        assert!(ensure_target_print_allowed(allowed, ConnPref::Ble).is_ok());
     }
 
     #[test]
@@ -606,8 +638,21 @@ mod tests {
         client.apply_identity(&identity, false).unwrap();
         assert_eq!(client.model(), Model::B21Pro);
         assert_eq!(client.print_task(), PrintTask::B1);
-        assert!(ensure_print_path_allowed(client.model(), client.print_task(), false).is_err());
-        assert!(ensure_print_path_allowed(client.model(), client.print_task(), true).is_ok());
+        assert!(
+            ensure_print_path_allowed(client.model(), client.print_task(), ConnPref::Ble, false)
+                .is_err()
+        );
+        assert!(
+            ensure_print_path_allowed(client.model(), client.print_task(), ConnPref::Ble, true)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn b1_usb_path_requires_explicit_opt_in() {
+        assert!(ensure_print_path_allowed(Model::B1, PrintTask::B1, ConnPref::Usb, false).is_err());
+        assert!(ensure_print_path_allowed(Model::B1, PrintTask::B1, ConnPref::Usb, true).is_ok());
+        assert!(ensure_print_path_allowed(Model::B1, PrintTask::B1, ConnPref::Ble, false).is_ok());
     }
 
     #[tokio::test]
@@ -733,6 +778,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn detected_b1_over_usb_is_gated_before_render_and_still_closes() {
+        let (session, events) = detected_session_over(4096, ConnPref::Usb, true, false).await;
+        let render_events = Arc::clone(&events);
+        let error = run_rendered_session(
+            session,
+            thermark::Density::NORMAL,
+            |_profile| -> Result<(GrayImage, ())> {
+                render_events.lock().unwrap().push(Event::Render);
+                Ok((GrayImage::from_pixel(1, 1, Luma([255])), ()))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("over 'usb'"), "{message}");
+        assert!(message.contains("--allow-experimental"), "{message}");
+        let events = events.lock().unwrap();
+        assert!(!events.iter().any(|event| matches!(event, Event::Render)));
+        assert!(!events.iter().any(is_print_mutation));
+        assert_eq!(events.last(), Some(&Event::Close));
+    }
+
+    #[tokio::test]
     async fn render_failure_still_closes_without_starting_a_print() {
         let (session, events) = detected_session(4097, true, true).await;
         let render_events = Arc::clone(&events);
@@ -788,6 +857,7 @@ mod tests {
         let client = PrinterClient::new(transport, Model::B1).with_pacing(Pacing::INSTANT);
         let session = Session::<ObservedTransport>::finish_connect(
             client,
+            ConnPref::Ble,
             true,
             true,
             IdentityDetail::Profile,

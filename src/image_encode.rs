@@ -546,13 +546,21 @@ fn crop_to_bounds(img: DynamicImage, bounds: Option<Rect>) -> DynamicImage {
 /// Find matching luminance directly in native grayscale images. Other formats
 /// go through the same color conversion and white alpha composite as encoding,
 /// so trimming cannot disagree with the eventual print at a threshold edge.
-fn image_luma_bounds(img: &DynamicImage, mut predicate: impl FnMut(u8) -> bool) -> Option<Rect> {
+fn image_luma_bounds(img: &DynamicImage, predicate: impl FnMut(u8) -> bool) -> Option<Rect> {
     if let Some(gray) = img.as_luma8() {
         return luma_bounds_by(
             gray.enumerate_pixels()
                 .map(|(x, y, pixel)| (x, y, pixel[0])),
             predicate,
         );
+    }
+
+    // RGB8 is the common decoded-photo path. A full `to_luma8` conversion
+    // temporarily retains one byte per source pixel solely to calculate four
+    // coordinates. Convert bounded stripes instead, preserving the image
+    // crate's exact color-space-aware conversion at threshold boundaries.
+    if let Some(rgb) = img.as_rgb8() {
+        return striped_rgb8_luma_bounds(rgb, predicate);
     }
 
     if !img.has_alpha() {
@@ -565,16 +573,57 @@ fn image_luma_bounds(img: &DynamicImage, mut predicate: impl FnMut(u8) -> bool) 
     }
 
     // Alpha-bearing images need compositing before luma conversion, but trim
-    // borrows its input so it can later return the original pixel format. Do
-    // that conversion in bounded stripes rather than cloning the whole source
-    // alongside a page-sized grayscale allocation.
+    // borrows its input so it can later return the original pixel format.
+    striped_luma_bounds(img, predicate, grayscale_on_white)
+}
+
+fn striped_rgb8_luma_bounds(
+    rgb: &image::RgbImage,
+    mut predicate: impl FnMut(u8) -> bool,
+) -> Option<Rect> {
+    const STRIPE_ROWS: u32 = 64;
+    let (width, height) = rgb.dimensions();
+    let row_bytes = width as usize * 3;
+    let color_space = rgb.color_space();
+    let mut bounds = LumaBounds::new();
+    let mut y = 0;
+    while width != 0 && y < height {
+        let rows = (height - y).min(STRIPE_ROWS);
+        let start = y as usize * row_bytes;
+        let end = (y + rows) as usize * row_bytes;
+        let mut stripe = image::RgbImage::from_raw(width, rows, rgb.as_raw()[start..end].to_vec())
+            .expect("a source-aligned RGB stripe has valid dimensions");
+        stripe
+            .set_color_space(color_space)
+            .expect("the source RGB image already has a valid color space");
+        let gray = DynamicImage::ImageRgb8(stripe).into_luma8();
+        for (x, stripe_y, pixel) in gray.enumerate_pixels() {
+            if predicate(pixel[0]) {
+                bounds.include(x, y + stripe_y);
+            }
+        }
+        y += rows;
+    }
+    bounds.finish()
+}
+
+/// Convert borrowed input in bounded-height stripes while accumulating bounds.
+///
+/// Cropping copies the source color-space metadata into each stripe, which is
+/// important: calculating RGB luminance ourselves would disagree with
+/// `DynamicImage::to_luma8` for non-sRGB inputs.
+fn striped_luma_bounds(
+    img: &DynamicImage,
+    mut predicate: impl FnMut(u8) -> bool,
+    mut into_gray: impl FnMut(DynamicImage) -> GrayImage,
+) -> Option<Rect> {
     const STRIPE_ROWS: u32 = 64;
     let (width, height) = img.dimensions();
     let mut bounds = LumaBounds::new();
     let mut y = 0;
     while width != 0 && y < height {
         let rows = (height - y).min(STRIPE_ROWS);
-        let gray = grayscale_on_white(img.crop_imm(0, y, width, rows));
+        let gray = into_gray(img.crop_imm(0, y, width, rows));
         for (x, stripe_y, pixel) in gray.enumerate_pixels() {
             if predicate(pixel[0]) {
                 bounds.include(x, y + stripe_y);
@@ -1546,6 +1595,102 @@ mod tests {
         }
         let out = trim_white(DynamicImage::ImageLuma8(g), 127);
         assert_eq!(out.dimensions(), (20, 20));
+    }
+
+    fn trim_from_reference_gray(
+        source: &DynamicImage,
+        gray: &GrayImage,
+        predicate: impl FnMut(u8) -> bool,
+    ) -> DynamicImage {
+        let bounds = luma_bounds_by(
+            gray.enumerate_pixels()
+                .map(|(x, y, pixel)| (x, y, pixel[0])),
+            predicate,
+        );
+        crop_to_bounds(source.clone(), bounds)
+    }
+
+    #[test]
+    fn striped_rgb8_trim_matches_full_conversion_at_every_threshold() {
+        let mut rgb = image::RgbImage::from_fn(23, 139, |x, y| {
+            if !(2..21).contains(&x) || !(3..136).contains(&y) {
+                image::Rgb([255, 255, 255])
+            } else {
+                image::Rgb([
+                    ((x * 17 + y * 3) & 0xff) as u8,
+                    ((x * 5 + y * 29) & 0xff) as u8,
+                    ((x * 11 + y * 7) & 0xff) as u8,
+                ])
+            }
+        });
+        rgb.set_color_space(image::metadata::Cicp::DISPLAY_P3)
+            .unwrap();
+        let image = DynamicImage::ImageRgb8(rgb);
+        let full_page_gray = image.to_luma8();
+
+        // Make this sensitive to accidentally losing the source color space
+        // while splitting it at the 64-row stripe boundary.
+        let mut srgb = image.as_rgb8().unwrap().clone();
+        srgb.set_color_space(image::metadata::Cicp::SRGB).unwrap();
+        assert_ne!(full_page_gray, DynamicImage::ImageRgb8(srgb).to_luma8());
+
+        for threshold in 0..=u8::MAX {
+            let expected =
+                trim_from_reference_gray(&image, &full_page_gray, |luma| luma <= threshold);
+            assert_eq!(
+                trim_white(image.clone(), threshold),
+                expected,
+                "public trim differs at threshold {threshold}"
+            );
+
+            let expected = trim_from_reference_gray(&image, &full_page_gray, |luma| {
+                burns_at_threshold(luma, threshold)
+            });
+            assert_eq!(
+                trim_for_print(image.clone(), threshold, false),
+                expected,
+                "print trim differs at threshold {threshold}"
+            );
+        }
+    }
+
+    #[test]
+    fn high_precision_and_alpha_trim_still_match_full_conversion() {
+        let rgb16 = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_fn(17, 73, |x, y| {
+            image::Rgb([
+                ((x * 4_099 + y * 307) & 0xffff) as u16,
+                ((x * 977 + y * 8_191) & 0xffff) as u16,
+                ((x * 65_521 + y * 31) & 0xffff) as u16,
+            ])
+        });
+        let high_precision = DynamicImage::ImageRgb16(rgb16);
+        let high_precision_gray = high_precision.to_luma8();
+
+        let rgba = RgbaImage::from_fn(19, 137, |x, y| {
+            image::Rgba([
+                ((x * 47 + y * 13) & 0xff) as u8,
+                ((x * 7 + y * 53) & 0xff) as u8,
+                ((x * 31 + y * 19) & 0xff) as u8,
+                ((x * 61 + y * 23) & 0xff) as u8,
+            ])
+        });
+        let alpha = DynamicImage::ImageRgba8(rgba);
+        let alpha_gray = grayscale_on_white(alpha.clone());
+
+        for threshold in 0..=u8::MAX {
+            assert_eq!(
+                trim_white(high_precision.clone(), threshold),
+                trim_from_reference_gray(&high_precision, &high_precision_gray, |luma| {
+                    luma <= threshold
+                }),
+                "RGB16 trim differs at threshold {threshold}"
+            );
+            assert_eq!(
+                trim_white(alpha.clone(), threshold),
+                trim_from_reference_gray(&alpha, &alpha_gray, |luma| luma <= threshold),
+                "RGBA8 trim differs at threshold {threshold}"
+            );
+        }
     }
 
     #[test]

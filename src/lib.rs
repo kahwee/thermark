@@ -41,14 +41,14 @@ pub use image_encode::Raster;
 pub use label::{TextAlign, TextLabelOptions, TextSide, make_qr_label_opts, make_text_label};
 pub use mock::MockTransport;
 pub use packet::Packet;
-pub use print_task::{PrintTask, SupportStatus, hardware_matrix};
+pub use print_task::PrintTask;
 pub use printer::{
     Heartbeat, InfoValue, OnTimeout, Pacing, PrintOptions, PrintStatus, PrinterClient,
     PrinterSummary, RawPrinter, RfidInfo,
 };
 pub use profile::{
-    PROFILES, PrintDirection, PrinterDevice, PrinterIdentity, PrinterProfile, profile_for_identity,
-    profile_for_model, task_for_identity,
+    PROFILES, PrintDirection, PrinterDevice, PrinterIdentity, PrinterProfile, SupportStatus,
+    profile_for_identity, profile_for_model, task_for_identity,
 };
 pub use protocol::Model;
 pub use transport::{

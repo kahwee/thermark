@@ -1,0 +1,140 @@
+name: Release binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Install Linux Bluetooth dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
+
+      - name: Read package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r \
+            '.packages[] | select(.name == "thermark") | .version')"
+          test -n "$version"
+          echo "THERMARK_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Verify release tag matches Cargo version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "v$THERMARK_VERSION"
+
+      - name: Test full feature set
+        run: cargo test --locked
+
+      - name: Test BLE-only feature set
+        run: cargo test --locked --no-default-features --features ble
+
+      - name: Build and package full and BLE-only binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          stem="thermark-${THERMARK_VERSION}-${RUNNER_OS}-${RUNNER_ARCH}"
+          full_dir="package/${stem}-full"
+          ble_dir="package/${stem}-ble"
+          mkdir -p "$full_dir" "$ble_dir" dist
+
+          cargo build --locked --release
+          install -m 755 target/release/thermark "$full_dir/thermark"
+          cp README.md LICENSE "$full_dir/"
+          tar -czf "dist/${stem}-full.tar.gz" -C package "${stem}-full"
+
+          cargo build --locked --release --no-default-features --features ble
+          install -m 755 target/release/thermark "$ble_dir/thermark"
+          cp README.md LICENSE "$ble_dir/"
+          tar -czf "dist/${stem}-ble.tar.gz" -C package "${stem}-ble"
+
+          for archive in dist/*.tar.gz; do
+            archive_name="${archive##*/}"
+            if command -v sha256sum >/dev/null 2>&1; then
+              (cd dist && sha256sum "$archive_name" > "${archive_name}.sha256")
+            else
+              (cd dist && shasum -a 256 "$archive_name" > "${archive_name}.sha256")
+            fi
+          done
+
+          "$ble_dir/thermark" tasks
+          "$full_dir/thermark" --help >/dev/null
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: thermark-${{ runner.os }}-${{ runner.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: thermark-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify downloaded checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          shopt -s nullglob
+          archives=(*.tar.gz)
+          checksums=(*.tar.gz.sha256)
+          test "${#archives[@]}" -eq 8
+          test "${#checksums[@]}" -eq 8
+          for archive in "${archives[@]}"; do
+            test -f "${archive}.sha256"
+          done
+          for checksum in "${checksums[@]}"; do
+            sha256sum --check "$checksum"
+          done
+
+      - name: Create release and upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
+          fi

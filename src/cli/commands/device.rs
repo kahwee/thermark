@@ -3,11 +3,11 @@
 use anyhow::{Context, Result};
 #[cfg(feature = "ble")]
 use std::time::Duration;
+use thermark::PROFILES;
 use thermark::config::Config;
 #[cfg(feature = "ble")]
 use thermark::config::ConnPref;
 use thermark::font;
-use thermark::print_task::hardware_matrix;
 #[cfg(feature = "serial")]
 use thermark::transport::SerialTransport;
 #[cfg(feature = "ble")]
@@ -249,19 +249,23 @@ pub fn fonts() {
 }
 
 pub fn tasks() {
-    println!("{:<16} {:<10} {:<14} NOTES", "MODEL", "TASK", "STATUS");
-    for row in hardware_matrix() {
+    println!(
+        "{:<16} {:<10} {:<14} {:<12} NOTES",
+        "MODEL", "TASK", "STATUS", "TESTED VIA"
+    );
+    for profile in PROFILES {
         println!(
-            "{:<16} {:<10} {:<14} {}",
-            row.model,
-            row.task.map_or("-", |task| task.as_str()),
-            row.status,
-            row.notes
+            "{:<16} {:<10} {:<14} {:<12} {}",
+            profile.display_name,
+            profile.default_task.map_or("-", |task| task.as_str()),
+            profile.support_status,
+            profile.tested_connection.map_or("-", |conn| conn.as_str()),
+            profile.support_notes
         );
     }
     println!();
     println!("Default: detected profile or b1. Override: --task b1|d11v1|d110|d110mv4");
-    println!("Any profile/task pair except B1+b1 requires: --allow-experimental");
+    println!("Any path except B1+b1 over BLE requires: --allow-experimental");
 }
 
 pub fn encode(cmd: &str, data: &str) -> Result<()> {

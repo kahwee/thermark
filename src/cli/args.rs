@@ -53,7 +53,7 @@ pub struct TaskArgs {
     /// Print task override: b1, d11v1, d110, or d110mv4
     #[arg(long, value_enum)]
     pub task: Option<PrintTask>,
-    /// Allow a printer profile/task pair not hardware-tested by thermark
+    /// Allow a profile/task/connection path not hardware-tested by thermark
     #[arg(long, default_value_t = false)]
     pub allow_experimental: bool,
 }

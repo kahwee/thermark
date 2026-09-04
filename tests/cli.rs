@@ -53,16 +53,20 @@ fn scan_help_mentions_save() {
 }
 
 #[test]
-fn tasks_prints_matrix() {
+fn tasks_prints_profile_registry() {
     thermark()
         .arg("tasks")
         .assert()
         .success()
-        .stdout(predicate::str::contains("b1"))
+        .stdout(predicate::str::contains("B1 Pro"))
+        .stdout(predicate::str::contains("B21 Pro"))
+        .stdout(predicate::str::contains("B18"))
+        .stdout(predicate::str::contains("D11_H"))
+        .stdout(predicate::str::contains("D110"))
         .stdout(predicate::str::contains("tested"))
-        .stdout(predicate::str::contains(
-            "Any profile/task pair except B1+b1",
-        ));
+        .stdout(predicate::str::contains("experimental"))
+        .stdout(predicate::str::contains("unresolved"))
+        .stdout(predicate::str::contains("Any path except B1+b1 over BLE"));
 }
 
 #[test]
@@ -172,6 +176,18 @@ fn experimental_model_with_b1_task_requires_allow_flag_before_connecting() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("allow-experimental"))
+        .stderr(predicate::str::contains("no printer address").not());
+}
+
+#[test]
+fn unverified_b1_usb_path_requires_allow_flag_before_address_resolution() {
+    let (_dir, cfg) = temp_config_path();
+    thermark_with_config(&cfg)
+        .args(["print", "-i", "fixtures/sticker_wifi.png", "--conn", "usb"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("allow-experimental"))
+        .stderr(predicate::str::contains("over 'usb'"))
         .stderr(predicate::str::contains("no printer address").not());
 }
 

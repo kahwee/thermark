@@ -25,7 +25,7 @@ pub enum Completion {
 
 impl PrintTask {
     pub fn for_model(model: Model) -> Option<Self> {
-        crate::profile::profile_for_model(model).task
+        crate::profile::profile_for_model(model).default_task
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
@@ -35,15 +35,6 @@ impl PrintTask {
             "d110mv4" => Some(Self::D110MV4),
             _ => None,
         }
-    }
-
-    /// Whether this wire sequence has a hardware-tested use.
-    ///
-    /// This does not authorize using the task with an arbitrary printer model;
-    /// hardware-write gates must also check
-    /// [`crate::profile::PrinterProfile::print_path_hardware_tested`].
-    pub const fn hardware_tested(self) -> bool {
-        matches!(self, Self::B1)
     }
 
     pub fn print_start(self, total_pages: u16) -> Packet {
@@ -123,66 +114,6 @@ impl std::str::FromStr for PrintTask {
         Self::parse(s)
             .ok_or_else(|| format!("unknown print task '{s}' (try b1, d11v1, d110, d110mv4)"))
     }
-}
-
-pub fn hardware_matrix() -> &'static [HardwareSupport] {
-    &[
-        HardwareSupport {
-            model: "B1",
-            task: Some(PrintTask::B1),
-            status: SupportStatus::Tested,
-            notes: "BLE print, QR+text, calibrate, info/RFID on real unit",
-        },
-        HardwareSupport {
-            model: "B1 Pro / B21 Pro / D11_H",
-            task: Some(PrintTask::D110MV4),
-            status: SupportStatus::Experimental,
-            notes: "complete 9-byte/13-byte community-validated sequence",
-        },
-        HardwareSupport {
-            model: "D11",
-            task: Some(PrintTask::D11V1),
-            status: SupportStatus::Experimental,
-            notes: "complete old-D11 sequence; firmware variants exist",
-        },
-        HardwareSupport {
-            model: "D110",
-            task: Some(PrintTask::D110),
-            status: SupportStatus::Experimental,
-            notes: "complete 1-byte/4-byte/quantity sequence",
-        },
-        HardwareSupport {
-            model: "B18",
-            task: None,
-            status: SupportStatus::Unresolved,
-            notes: "96px left-feed geometry known; print sequence needs capture",
-        },
-    ]
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SupportStatus {
-    Tested,
-    Experimental,
-    Unresolved,
-}
-
-impl std::fmt::Display for SupportStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.pad(match self {
-            Self::Tested => "tested",
-            Self::Experimental => "experimental",
-            Self::Unresolved => "unresolved",
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct HardwareSupport {
-    pub model: &'static str,
-    pub task: Option<PrintTask>,
-    pub status: SupportStatus,
-    pub notes: &'static str,
 }
 
 #[cfg(test)]

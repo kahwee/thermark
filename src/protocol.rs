@@ -118,10 +118,6 @@ impl Model {
             _ => None,
         }
     }
-
-    pub fn max_width_px(self) -> u32 {
-        crate::profile::profile_for_model(self).max_width_px
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

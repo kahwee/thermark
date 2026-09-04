@@ -44,19 +44,25 @@ impl ConnPref {
             Self::Usb => "usb",
         }
     }
-
-    /// Parse `"ble"`, `"usb"`, or `"serial"` (alias for usb). Unknown → Ble.
-    pub fn parse(s: &str) -> Self {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "usb" | "serial" => Self::Usb,
-            _ => Self::Ble,
-        }
-    }
 }
 
 impl std::fmt::Display for ConnPref {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.pad(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ConnPref {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ble" => Ok(Self::Ble),
+            "usb" | "serial" => Ok(Self::Usb),
+            _ => Err(Error::msg(format!(
+                "unknown connection '{value}' (try ble or usb)"
+            ))),
+        }
     }
 }
 
@@ -385,6 +391,14 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_from_str_is_typed_and_rejects_unknown_values() {
+        assert_eq!(" BLE ".parse::<ConnPref>().unwrap(), ConnPref::Ble);
+        assert_eq!("usb".parse::<ConnPref>().unwrap(), ConnPref::Usb);
+        assert_eq!("serial".parse::<ConnPref>().unwrap(), ConnPref::Usb);
+        assert!("bluetooth".parse::<ConnPref>().is_err());
+    }
 
     #[test]
     fn roundtrip_json_file() {
