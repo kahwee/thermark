@@ -35,6 +35,12 @@ the current stable toolchain for rustup users.
 
 ## Build and set up
 
+For a prebuilt binary, [download the latest release](https://github.com/kahwee/thermark/releases/latest).
+Choose `ble` for the hardware-tested B1-over-Bluetooth path, or `full` to also
+include experimental USB serial support. Builds are available for Linux
+x86_64/ARM64 and macOS Apple Silicon/Intel; verification and unpacking commands
+are below. Building from source requires Rust:
+
 ```bash
 cargo build --release
 
