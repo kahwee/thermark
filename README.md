@@ -88,14 +88,13 @@ Before pushing, run the validation and feature matrix used by CI:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo build
-cargo test
-cargo test --lib --no-default-features
-cargo test --lib --no-default-features --features ble
-cargo test --lib --no-default-features --features serial
-cargo build --bin thermark --no-default-features --features ble
-cargo build --bin thermark --no-default-features --features serial
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo test --locked --lib --no-default-features
+cargo test --locked --lib --no-default-features --features ble
+cargo test --locked --lib --no-default-features --features serial
+cargo build --locked --bin thermark --no-default-features --features ble
+cargo build --locked --bin thermark --no-default-features --features serial
 ```
 
 Direct dependencies intentionally use compatible major-version ranges while
