@@ -1,27 +1,47 @@
 name: Rust
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
+# A newer commit replaces obsolete CI work on the same branch or PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     # Install stable explicitly. The runner image ships some Rust, but it can
     # lag behind the `rust-version` in Cargo.toml, and then the build fails for
     # a reason unrelated to the change under test.
-    - uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       with:
         components: rustfmt, clippy
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        # PRs can restore main's cache without storing a cache for every PR.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Show toolchain
       run: rustc --version && cargo --version
@@ -29,31 +49,26 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
-
-    - name: Check formatting
-      run: cargo fmt --all -- --check
+        sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
 
     - name: Clippy
-      run: cargo clippy --all-targets -- -D warnings
+      run: cargo clippy --locked --all-targets -- -D warnings
 
-    - name: Build (default features)
-      run: cargo build --verbose
-
+    # Integration tests build and exercise the default binary too.
     - name: Test (default features)
-      run: cargo test --verbose
+      run: cargo test --locked
 
     - name: Test library without hardware deps
-      run: cargo test --lib --no-default-features --verbose
+      run: cargo test --locked --lib --no-default-features
 
     - name: Test library with ble only
-      run: cargo test --lib --no-default-features --features ble --verbose
+      run: cargo test --locked --lib --no-default-features --features ble
 
     - name: Test library with serial only
-      run: cargo test --lib --no-default-features --features serial --verbose
+      run: cargo test --locked --lib --no-default-features --features serial
 
     - name: Build BLE-only binary
-      run: cargo build --bin thermark --no-default-features --features ble --verbose
+      run: cargo build --locked --bin thermark --no-default-features --features ble
 
     - name: Build serial-only binary
-      run: cargo build --bin thermark --no-default-features --features serial --verbose
+      run: cargo build --locked --bin thermark --no-default-features --features serial

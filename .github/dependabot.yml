@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # One review/CI run for action updates instead of one per dependency.
+    groups:
+      github-actions:
+        patterns:
+          - "*"

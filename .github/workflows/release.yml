@@ -14,26 +14,35 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   build:
     name: Build ${{ matrix.os }} binaries
     strategy:
-      fail-fast: false
+      # A release needs every platform; stop wasting work if one fails.
+      fail-fast: true
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Separate platform/release caches from the regular CI build.
+          key: release-${{ matrix.os }}
 
       - name: Install Linux Bluetooth dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
 
       - name: Read package version
         shell: bash
@@ -89,24 +98,29 @@ jobs:
           "$full_dir/thermark" --help >/dev/null
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: thermark-${{ runner.os }}-${{ runner.arch }}
           path: dist/*
           if-no-files-found: error
+          # Archives are already compressed; keep workflow copies for one week.
+          # Published GitHub release assets are independent of this retention.
+          compression-level: 0
+          retention-days: 7
 
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: thermark-*
           path: dist
