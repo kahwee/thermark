@@ -2,6 +2,21 @@
 
 Guidance for coding agents working in this repository.
 
+## Start here
+
+1. Read `git status --short --branch` before editing; preserve unrelated work.
+2. Find the owning module in the map below and read its tests before changing
+   behavior. Treat `src/profile.rs` as the authority for hardware support.
+3. Reproduce a bug with an offline test when possible. Keep CLI tests isolated
+   with a temporary `THERMARK_CONFIG` and remove inherited `THERMARK_ADDR` from
+   child commands. Do not change process-wide environment or working directory
+   in parallel tests; use explicit arguments or subprocess configuration.
+4. Run the checks under **Tests** that match the change. A general repository
+   cleanup does not require printing labels or changing saved printer settings.
+5. Review `git diff --check` and the final diff. Keep personal output in `local/`
+   and never commit real Wi-Fi credentials or printer identity captures. Report
+   the behavior changed, checks run, and any limits to verification.
+
 ## What this project is
 
 **`thermark`** — local, scriptable **sticker printing** for pocket thermal printers over **Bluetooth LE** (and USB serial), without vendor apps or cloud.
@@ -96,6 +111,8 @@ not proof that the printer accepts thermark's serial protocol.
 | `cli/commands/` | One module per command group |
 | `cli/tips.rs` | Advisory stderr only; never changes behaviour |
 
+Paths in this map are relative to `src/`.
+
 ### Invariants worth keeping
 
 - **Widths:** physical geometry belongs to `PrinterProfile`; print tasks describe
@@ -153,9 +170,10 @@ the printer **stops mid-page**. That is indistinguishable from a clipped layout
 in a single sample, and it moved the apparent "printable area" by 7 mm between
 a flat and a charged battery.
 
-**The tell is inconsistency.** If the same bitmap prints differently twice, it
-is power — no buffer-size, pacing, or geometry model produces run-to-run
-variation. Chase geometry only after two identical runs agree.
+**Inconsistency is a reason to check power first.** Low battery caused varying
+cutoff positions on the owned B1. It does not rule out transport or firmware
+faults. Charge the printer and compare repeated runs of the same bitmap before
+changing geometry; use status and transport evidence if variation persists.
 
 ### Then decide what kind of question you have
 
@@ -291,8 +309,24 @@ Library API is unrestricted.
 ## Tests
 
 ```bash
-cargo test
-cargo test --test golden              # 14 stored renders, pixel-exact
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo test --locked --lib --no-default-features
+cargo test --locked --lib --no-default-features --features ble
+cargo test --locked --lib --no-default-features --features serial
+```
+
+For Rust changes, run formatting, Clippy, and the full suite. Also run the
+feature-specific library tests after dependency, shared-library, or transport
+changes. For CLI feature gating, build the BLE-only and serial-only binaries
+as in `.github/workflows/rust.yml`. Documentation-only edits need a diff and
+command/reference review; they do not require rebuilding.
+
+Additional checks for rendering or performance changes:
+
+```bash
+cargo test --test golden              # stored renders, pixel-exact
 UPDATE_GOLDEN=1 cargo test --test golden   # accept new output, deliberately
 scripts/compare-render.sh v0.12.0     # byte-compare renders against a ref
 cargo bench --bench image_pipeline    # CPU-only image-pipeline medians

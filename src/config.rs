@@ -116,8 +116,17 @@ impl Config {
     }
 
     /// Path used by the CLI (`THERMARK_CONFIG` or `…/config.json`).
+    /// A non-Unicode override is an error, never a fallback to the default.
     pub fn default_path() -> Result<PathBuf> {
-        let env = std::env::var("THERMARK_CONFIG").ok();
+        let env = match std::env::var("THERMARK_CONFIG") {
+            Ok(path) => Some(path),
+            Err(std::env::VarError::NotPresent) => None,
+            // Never redirect an invalid override to the user's default config,
+            // especially when the caller intends to update or clear that file.
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(Error::msg("THERMARK_CONFIG must be valid Unicode"));
+            }
+        };
         Self::default_path_with(env.as_deref())
     }
 

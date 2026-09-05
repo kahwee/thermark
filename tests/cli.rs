@@ -521,6 +521,33 @@ fn doctor_host_only_runs() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn config_rejects_non_unicode_override() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join(std::ffi::OsString::from_vec(b"config-\xff.json".to_vec()));
+    // Check the read-only command first: a regression must fail before any
+    // mutating command could fall back to the developer's real config.
+    for args in [
+        vec!["config", "path"],
+        vec!["config", "show", "--json"],
+        vec!["config", "set", "--addr", "B1-TestPrinter"],
+        vec!["config", "clear"],
+    ] {
+        thermark_with_config(&path)
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "THERMARK_CONFIG must be valid Unicode",
+            ));
+    }
+}
+
 #[test]
 fn config_set_show_clear() {
     let (_dir, path) = temp_config_path();
