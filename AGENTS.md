@@ -1,396 +1,152 @@
 # AGENTS.md — thermark
 
-Guidance for coding agents working in this repository.
-
-## Start here
-
-1. Read `git status --short --branch` before editing; preserve unrelated work.
-2. Find the owning module in the map below and read its tests before changing
-   behavior. Treat `src/profile.rs` as the authority for hardware support.
-3. Reproduce a bug with an offline test when possible. Keep CLI tests isolated
-   with a temporary `THERMARK_CONFIG` and remove inherited `THERMARK_ADDR` from
-   child commands. Do not change process-wide environment or working directory
-   in parallel tests; use explicit arguments or subprocess configuration.
-4. Run the checks under **Tests** that match the change. A general repository
-   cleanup does not require printing labels or changing saved printer settings.
-5. Review `git diff --check` and the final diff. Keep personal output in `local/`
-   and never commit real Wi-Fi credentials or printer identity captures. Report
-   the behavior changed, checks run, and any limits to verification.
-
-## What this project is
-
-**`thermark`** — local, scriptable **sticker printing** for pocket thermal printers over **Bluetooth LE** (and USB serial), without vendor apps or cloud.
-
-**Problem:** pocket thermals are stuck behind vendor apps; you can’t easily print guest Wi‑Fi / URL stickers offline with exact mm size from a CLI.
-
-**Positioning:** local tool for stickers on real objects — **scan to join (Wi‑Fi)** and **scan to open (URL)** first; inventory, badges, line-art second. Offline, scriptable, no cloud.
-
-**Scope:** monochrome direct-thermal output only. Do not add colour-layer
-separation, compressed colour raster protocols, or multi-colour media support.
-The owned B1 is the primary product path and the only path considered
-hardware-verified; all other monochrome profiles stay experimental until run
-on the corresponding physical printer.
-
-- Crate / binary: **`thermark`**
-- Do **not** put vendor brand names in the package or product name
-- Not AirPrint / CUPS — custom binary protocol (B1-class)
-
-### Hardware exercised in development
-
-| Item | Value |
-|------|--------|
-| Class | Pocket thermal, B1-class |
-| Example BLE name | `B1-YourPrinter` (use full name) |
-| Common label | **50×30 mm** → **384×240 px** |
-
-macOS CoreBluetooth uses **UUID** device ids, not classic MACs.
-The owned B1-over-BLE path is hardware-verified. USB serial is implemented and
-mock-tested, but has not been verified against the owned printer.
-
----
-
-## Commands
-
-```bash
-cargo build --release
-cargo build --locked --release --no-default-features --features ble
-cargo test
-cargo test --lib --no-default-features
-cargo test --test fixtures_readme   # sticker fixtures + boundary checks
-
-# One-time setup (full BLE advertising name → config.json)
-./target/release/thermark scan --save
-./target/release/thermark identify --json > local/printer-identity.json
-./target/release/thermark doctor --use-config
-
-# Stickers (fixtures/ product demos; personal art → local/prints/)
-./target/release/thermark print -i fixtures/sticker_wifi.png \
-  --label 50x30 --no-fill --margin 0 -d 4
-./target/release/thermark qr --url "https://example.com/o/1042" \
-  --text $'ORDER #1042\nShip by Fri\nPriority' --font-name helvetica --label 50x30
-./target/release/thermark text --text $'FRAGILE\nthis way up' --label 50x30
-./target/release/thermark calibrate --label 50x30   # rings + safe-area box
-```
-
-Artwork demo: `cargo run --example bulldozer -- local/prints/bulldozer.png`
-
-Check placement without a printer: `thermark print -i art.png --label 50x30 --preview out.png`
-
-Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
-Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
-Experimental profile/task/connection paths need `--allow-experimental`.
-
-On macOS, Bluetooth Settings may show the printer as **Connected** while
-CoreBluetooth cannot discover it. Treat that as an exclusive-session conflict:
-another client owns the printer's GATT connection. `thermark doctor
---use-config` reports a matching `/dev/cu.…` endpoint as supporting evidence;
-disconnect the printer in macOS Bluetooth settings, quit vendor apps, and
-power-cycle or wake the printer before retrying BLE. A serial endpoint alone is
-not proof that the printer accepts thermark's serial protocol.
-
----
-
-## Module map
-
-| File | Role |
-|------|------|
-| `config.rs` | User `config.json` (default BLE addr) |
-| `packet.rs` | `55 55 \| CMD \| LEN \| DATA \| XOR \| AA AA` |
-| `protocol.rs` | Commands, B1 PrintStart / page size, models |
-| `profile.rs` | `PrinterDevice`, identity, capabilities, default task, support registry |
-| `errors.rs` | Print error 0xDB reason codes |
-| `transport.rs`, `transport/` | Common transport/matching + BLE and serial implementations |
-| `printer/` | Client core, safe print jobs, queries, validated pacing, explicit raw API |
-| `geometry.rs` | Profile-aware mm/pixel conversion, label and safe-area geometry |
-| `image_encode.rs` | Image → `Raster` (rows + dimensions together) |
-| `font.rs` | System TTF/TTC (`ab_glyph`), named fonts |
-| `label.rs` | Square QR + side text; `qr_layout` owns the geometry |
-| `main.rs` | Entry point only (parse → dispatch → exit) |
-| `cli/args.rs` | clap types + shared arg groups (`ConnArgs`, `TaskArgs`, `FontArgs`) |
-| `cli/session.rs` | Connect → print → disconnect; `resolve_task` |
-| `cli/commands/` | One module per command group |
-| `cli/tips.rs` | Advisory stderr only; never changes behaviour |
-
-Paths in this map are relative to `src/`.
-
-### Invariants worth keeping
-
-- **Widths:** physical geometry belongs to `PrinterProfile`; print tasks describe
-  wire behavior only. Compose and validate through the connected client's
-  profile so model, DPI, and width cannot drift apart.
-- **Layout:** QR-beside-text geometry lives only in `label::qr_layout`.
-- **Printer names:** the "looks like a label printer" heuristic lives only in
-  `transport::name_looks_like_label_printer`.
-- **Pacing:** tests use `Pacing::INSTANT`, which differs from `Pacing::REAL`
-  only in durations — never in retry counts or control flow.
-- **Support:** `profile::PROFILES` is the single authority for model display
-  names, default tasks, verification status, and evidence notes. Never recreate
-  a parallel hardware matrix in `print_task` or the CLI.
-
----
-
-## Protocol essentials
-
-- BLE service `e7810a71-73ae-499d-8c15-faa9aef0c3f2`
-- Characteristic `bef8d6c9-9c21-4c9e-b632-bd58c1009f9f`
-- Write without response; notifications for replies
-- B1: 7-byte PrintStart; 6-byte SetPageSize (rows, cols, copies)
-- rows = image height (feed); cols = width ≤ 384
-- `0xDB` first byte = `PrinterFault` (0x01 cover, 0x02 no paper, …)
-- Info response cmd = `0x40 + key`
-
-Protocol notes: see the command table in `src/protocol.rs`.
-
----
-
-## Geometry & fonts
-
-- **Owned B1 profile:** 8 px/mm; max width **384**. Other registered profiles
-  use their own DPI and printhead width from `PrinterProfile`.
-- Printable area on a **charged** B1 is the **whole canvas** — measured with
-  `calibrate --boundary`, the last bar (rows 232-239) prints. `SafeArea::B1` is
-  1 mm top/bottom as registration margin only. A low battery truncates dense
-  pages and looks exactly like a printable-area limit; charge before measuring
-- Always use `--label` for full-size media
-- Prefer system fonts (`--font-name helvetica|times|arial`) over bitmap fallback
-- Default no decorative border; QR is square beside text column
-- `--font-size N` for fixed small/large type; omit for auto-fit
-
----
-
-## Diagnosing a bad print
-
-Read this before changing any layout constant. Most of the effort spent on this
-project went into a printable-area limit that did not exist.
-
-### Check the battery first
-
-`thermark info` → `battery: N/4`. At level 1 a dense page sags the supply and
-the printer **stops mid-page**. That is indistinguishable from a clipped layout
-in a single sample, and it moved the apparent "printable area" by 7 mm between
-a flat and a charged battery.
-
-**Inconsistency is a reason to check power first.** Low battery caused varying
-cutoff positions on the owned B1. It does not rule out transport or firmware
-faults. Charge the printer and compare repeated runs of the same bitmap before
-changing geometry; use status and transport evidence if variation persists.
-
-### Then decide what kind of question you have
-
-| Question | How to answer it | Costs a label? |
-|---|---|---|
-| What exactly will the printer receive? | `thermark print --preview out.png` | no |
-| Did output change when it should not have? | `scripts/compare-render.sh <ref>` | no |
-| Did a renderer change unexpectedly? | `cargo test --test golden` | no |
-| Does content land inside the printable area? | `cargo test --test label_placement` | no |
-| Where does this printer actually stop? | `thermark calibrate --boundary` | yes, one |
-| Is a deliberate visual change right? | print one label | yes, one |
-
-Only the last two need hardware. Everything above them used to be answered by
-printing and photographing, which is slow, ambiguous, and burns media.
-
-### Measure, do not infer
-
-- Photographs of a **curled** label are unreliable: estimating a scale from one
-  produced two contradictory measurements of the same printer, out by 5 mm.
-  Lay it flat, or read a printed numeral instead of estimating.
-- `calibrate --boundary` prints one numbered bar per millimetre, each at its own
-  horizontal position. Read the highest complete bar — no counting, no scale
-  estimation. If the **last** bar prints, there is no unprintable band at all.
-- Quote numbers from the artifact (ink row extents, byte counts), not from
-  reading the code.
-
-### Do not let a test encode a theory
-
-A test asserting `safe.bottom > safe.top` locked in a "the feed edge is
-unreachable" belief. When the correct value arrived, the test failed and
-argued for the wrong number. Pin observable behaviour — ink stays inside the
-printable area — not conclusions that have not been verified on hardware.
-
----
-
-## Protocol behaviour and deliberate omissions
-
-Reference points that are optional, deliberately omitted, already implemented,
-or easy to misinterpret. Keep each status explicit. Row-repeat coalescing is
-implemented; the encoder splits long runs at the one-byte repeat limit of 255.
-
-1. **`PrinterCheckLine` (0x86)**, payload `[line: u16, 0x01]`, reply `0xd3`.
-   Conventionally slotted every 200 rows (`row % 200 == 199`), but it is
-   optional and commonly left disabled — it is not required for reliable
-   printing, on long pages or otherwise. Closing this "gap" is optional; treat
-   earlier notes calling it the clearest gap as superseded.
-
-2. **`PrintBitmapRowIndexed` (0x83)** for sparse rows — used when a row has
-   **≤ 6 black pixels**, sending 2-byte pixel indices instead of a bitmap. This
-   threshold is a firmware quirk rather than a size optimisation: above 6 black
-   pixels the indexed form is reportedly unsafe, and clients refuse to build it.
-   Our `Cmd` enum names it but nothing emits it, and no misbehaviour has been
-   seen here. The rows that would land under the threshold are hairlines: 1 px
-   rules, thin borders, the boundary probe's lettering.
-
-3. **Black-pixel counts can be computed**, not zeroed. The bitmap row packet has
-   a three-byte count field, computed against the printhead width in either a
-   split (three chunks) or total form; thermark sends three zero bytes. Zeros
-   are widely reported to work, and ours do print, so this is likely optional —
-   but it is a deliberate deviation, not an accident.
-
-4. **Print direction is per-model.** B-series images top-down; the D11/D110
-   family images left-to-right, so clients for those rotate the canvas 90°
-   clockwise during encoding and take the column count from the canvas *height*.
-   thermark does not rotate; a D110 label is authored narrow-side-first
-   (`--label 12x40`) and the wire bytes come out the same. Same output,
-   different authoring convention — do not "fix" this by adding a rotation.
-
-5. **`PrintStatus` (0xa3) has a payload worth reading**, and thermark now
-   reads it: `[page: i16, pagePrintProgress: u8, pageFeedProgress: u8]`, and in
-   the **10-byte form only**, a fault code at offset 6. That fault arrives
-   inside a *successful* 0xb3 reply, so the framing layer never sees it — it is
-   only catchable by parsing. The progress pair is also the direct answer to
-   "how far did it get?", which is the question the battery episode was really
-   asking. Do not read offset 6 at other lengths; it is a different field.
-
-6. **`printEnd` returning 0 means refused, not failed.** Polling `printEnd`
-   until it returns 1 is a valid completion signal in its own right — thermark
-   already retries on `Ok(false)`, which is the same idea.
-
-7. **`labelPositioningCalibration` ejects ~15 cm of paper on B1** when sent 1 or
-   2. Deliberately not exposed; there is no way to make that non-destructive to
-   a roll.
-
-8. **RFID tells you the consumable, not its size** — see
-   [Label size and RFID](README.md#label-size-and-rfid). `consumablesType` could
-   auto-select the label type instead of thermark's hardcoded
-   `set_label_type(1)`, which is the one place a wrong default costs a mis-feed
-   on continuous stock. Not implemented; needs a roll of continuous paper to
-   verify.
-
-No label-height limit exists in the protocol — no preset table, no clamp, no
-per-model maximum. Page height is bounded only by the `u16` row count. 50x80
-media (384×640 px, ~38 KB worst case) is a supported size, not an edge case; it
-is simply the one most likely to expose a weak battery.
-
-Also confirmed: row data is written unacknowledged with a fixed inter-packet
-interval (**10 ms** is the common figure), which is why thermark paces by bytes
-to roughly the same total. Acknowledged writes were tried here and made no
-measurable difference.
-
----
-
-## Pitfalls
-
-1. BLE address match is **exact** by default (full advertising name or id). Short selectors no longer substring-match; use full name from `scan`, or pass `--fuzzy` only if intentional  
-2. Require real printer GATT UUID; no random characteristic fallback  
-3. Stuck CLI holds BLE lock — mostly addressed: Ctrl-C aborts the local job and
-   `BleTransport::drop` blocks until disconnect on a multi-threaded runtime.
-   It does not send the protocol's cancel-print command. `SIGKILL` still leaves
-   the link held until the printer times out
-4. Tiny prints = missing `--label` / wrong canvas, not “broken printer”  
-5. Bitmap 5×7 font had mirrored text bugs — do not use for user labels  
-
----
-
-## Print tasks
-
-`PrintTask` in `src/print_task.rs` selects the on-wire sequence. It does not own
-physical geometry.
-
-| Task | Hardware-tested here? |
-|------|------------------------|
-| `b1` | **Yes** |
-| `d11v1`, `d110`, `d110mv4` | No (experimental) |
-
-`PrinterClient` defaults via `PrintTask::for_model`. Override: `--task` / `.with_print_task()`.
-
-CLI: every profile/task/connection path other than the owned B1 profile with
-its B1 task over BLE requires `--allow-experimental` on printing commands.
-Library API is unrestricted.
-
-## Tests
+## Working contract
+
+Carry the requested task through implementation, appropriate verification, and
+any authorized delivery. Make routine implementation decisions from the task and
+repository evidence; do not stop at a plan or first patch. Continue through fixes
+and rerun affected checks without asking for permission at every step.
+
+- Check `git status --short --branch` before editing and preserve unrelated work.
+- Read the relevant code and tests, not every document. Use the reference map
+  below to find the owner of a behavior; reuse context already gathered.
+- Ask when missing information materially changes the outcome or an action falls
+  outside the user's authorization. Continue independent work while waiting.
+  Explicit user instructions take precedence over repository workflow defaults.
+- A request to push includes committing, checking the remote, and a normal push
+  once validation passes. Reuse authorization from the current task; do not ask
+  again. Preserve concurrent changes and do not force-push shared history.
+- Publishing releases, contacting people, and spending label media are separate
+  actions: perform them when requested or authorized by the task, not as an
+  automatic consequence of a code cleanup. Local builds, tests, and previews
+  can proceed without additional approval.
+- Work directly on small tasks. Use parallel agents only when requested and when
+  independent work justifies the coordination cost. Hardware access is serial.
+- Finish with what changed, the verification result, delivery status, and any
+  material limit (especially missing hardware verification). Keep it concise.
+  If blocked, name the exact blocker and what is needed to proceed.
+
+## Product and boundaries
+
+**thermark** is a local Rust CLI/library for monochrome stickers over BLE or USB
+serial: guest Wi-Fi and URL QR labels first; text, inventory, badges, and line art
+second. No vendor app or cloud service. Keep vendor names out of the product and
+crate name; interoperability descriptions are fine.
+
+The owned **B1 over BLE** is the only hardware-verified path. USB serial is
+implemented and mock-tested. Other profiles remain experimental until exercised
+on their physical printers. Do not add colour separation, colour raster
+protocols, or multi-colour media support.
+
+`src/profile.rs::PROFILES` owns model names, geometry, default tasks, verification
+status, and evidence. Do not recreate a parallel support table in code. Printing
+outside B1 + b1 task + BLE requires `--allow-experimental`; the library API is
+unrestricted. Mock tests and successful builds do not establish hardware support.
+
+## Invariants
+
+- Physical geometry belongs to `PrinterProfile`; `PrintTask` owns wire behavior.
+  Compose and validate through the connected client's profile so model, DPI,
+  and effective width agree. Defaults come from `PrintTask::for_model`.
+- `label::qr_layout` is the only owner of QR-beside-text geometry.
+- `transport::name_looks_like_label_printer` owns printer-name heuristics.
+  BLE selection is exact by default; substring matching requires `--fuzzy`.
+  Require the printer GATT UUIDs, never a random characteristic fallback.
+- `Pacing::INSTANT` differs from `Pacing::REAL` only in durations, not retries or
+  control flow. Keep pacing validation, transport separation, safe printing,
+  raw-printer access, and disconnect guarantees as explicit boundaries.
+- The charged B1 can print the whole canvas. Its 1 mm top/bottom safe area is a
+  registration margin, not a proven unprintable band. Check power and repeated
+  output before changing geometry; use measured artifacts as evidence.
+- Keep personal artwork, printer identity captures, and real Wi-Fi labels under
+  gitignored `local/`. Public fixtures contain demo data only.
+
+## Find the relevant context
+
+Paths below are relative to the repository root. Load hardware notes only for
+connection, protocol, rendering, or physical print work.
+
+| Work | Owner / reference |
+| --- | --- |
+| Hardware limits, connection diagnosis, protocol omissions, printing examples | [Hardware notes](docs/hardware-notes.md) |
+| Setup, user commands, RFID and consumables | [README](README.md) |
+| Saved config and resolution | `src/config.rs` |
+| Frames, commands, faults, task sequences | `src/packet.rs`, `src/protocol.rs`, `src/errors.rs`, `src/print_task.rs` |
+| Device profiles and support evidence | `src/profile.rs` |
+| BLE/serial connections and matching | `src/transport.rs`, `src/transport/`, `src/doctor.rs` |
+| Jobs, queries, pacing, raw access, teardown | `src/printer/` |
+| Dimensions, raster encoding, fonts, QR/text layout | `src/geometry.rs`, `src/image_encode.rs`, `src/font.rs`, `src/label.rs` |
+| Wi-Fi payloads | `src/wifi.rs` |
+| CLI arguments, command dispatch, sessions | `src/cli/args.rs`, `src/cli/commands/`, `src/cli/session.rs` |
+| Entry point and advisory stderr | `src/main.rs`, `src/cli/tips.rs` |
+| Job ordering and error tests without a printer | `src/mock.rs`, `tests/protocol_integration.rs` |
+| CI and release packaging | `.github/workflows/rust.yml`, `.github/workflows/release.yml` |
+
+## Verification
+
+Use tests that exercise observable behavior. Reproduce bugs offline where
+possible; avoid tests that merely restate implementation or encode unverified
+hardware theories. CLI tests use temporary `THERMARK_CONFIG` files and remove
+inherited `THERMARK_ADDR` in child commands. Do not mutate process-wide environment
+or working directory in parallel tests; use explicit inputs or subprocess settings.
+
+For Rust changes, run:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
+```
+
+For dependency, shared-library, or transport changes, also run:
+
+```bash
 cargo test --locked --lib --no-default-features
 cargo test --locked --lib --no-default-features --features ble
 cargo test --locked --lib --no-default-features --features serial
 ```
 
-For Rust changes, run formatting, Clippy, and the full suite. Also run the
-feature-specific library tests after dependency, shared-library, or transport
-changes. For CLI feature gating, build the BLE-only and serial-only binaries
-as in `.github/workflows/rust.yml`. Documentation-only edits need a diff and
-command/reference review; they do not require rebuilding.
-
-Additional checks for rendering or performance changes:
+For CLI feature gating or transport dependency changes, build both binaries:
 
 ```bash
-cargo test --test golden              # stored renders, pixel-exact
-UPDATE_GOLDEN=1 cargo test --test golden   # accept new output, deliberately
-scripts/compare-render.sh v0.12.0     # byte-compare renders against a ref
-cargo bench --bench image_pipeline    # CPU-only image-pipeline medians
+cargo build --locked --bin thermark --no-default-features --features ble
+cargo build --locked --bin thermark --no-default-features --features serial
 ```
 
-Rendering changes are invisible until a label prints, so verify without media:
-`--preview` for the exact bitmap, golden tests for unintended changes,
-`compare-render.sh` for behaviour-preserving work, `label_placement` for the
-printable-band invariant. Print only to confirm a *deliberate* visual change.
+The full suite includes golden renders, fixture boundaries, and label placement.
+For focused rendering iteration, use `--preview`,
+`cargo test --locked --test golden`, `cargo test --locked --test label_placement`, or
+`scripts/compare-render.sh <ref>`. Accept golden changes with `UPDATE_GOLDEN=1`
+only after inspecting an intended visual change. Do not update baselines just to
+make a failure pass. Physical printing is for hardware questions or confirming
+a deliberate visual change, not routine regression checks.
 
-- Pure logic: packets, geometry, layout, fonts
-- **Mock transport** (`src/mock.rs`): full print job command order, 0xDB errors, summary
-- Live BLE print remains manual
+Documentation-only edits need a diff and reference/command review, not a rebuild.
+Workflow edits need workflow validation and relevant hosted checks. Once required
+checks pass, repeat or broaden them only for new changes or unresolved evidence.
+Review `git diff --check` and the final diff before committing.
 
-Compare benchmark runs on the same host. The benchmark does not measure peak
-RSS; use separate processes for memory measurements so allocator state from one
-case cannot affect another.
+## Maintenance and releases
 
-`.github/workflows/release.yml` packages full and BLE-only binaries for Linux
-x86_64/ARM64 and macOS Apple Silicon/Intel, verifies their checksums, and pins
-release actions to immutable commits. Manual branch dispatch validates
-downloadable artifacts without publishing; a pushed `v*` tag publishes only
-when it exactly matches the Cargo version.
+Check current stable Rust and direct crate releases when upgrading dependencies.
+Prefer compatible `cargo update` changes; take a major upgrade for a concrete
+feature, fix, or meaningful deletion. Keep `Cargo.toml`'s `rust-version`,
+`rust-toolchain.toml`, CI, and `Cargo.lock` compatible. Verify with `--locked`.
 
-```bash
-# coverage (needs Homebrew llvm + cargo-llvm-cov)
-export LLVM_COV=/opt/homebrew/opt/llvm/bin/llvm-cov
-export LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata
-cargo llvm-cov --workspace --summary-only
-```
+Simplify by deleting duplicate representations and passing typed values directly.
+Extract abstractions when a rule has multiple real callers or one named owner
+protects an invariant. File age or line count alone is not a reason to refactor.
+Remove compatibility aliases only in a deliberate breaking release after
+checking existing scripts.
 
-## Modernization and simplification
+`scripts/compare-render.sh <ref>` checks rendering preservation.
+`cargo bench --bench image_pipeline` measures CPU-only medians; compare on the same
+host. Measure peak RSS in separate processes to avoid allocator carry-over.
+Optional coverage uses `cargo llvm-cov --workspace --summary-only`; on macOS set
+`LLVM_COV` and `LLVM_PROFDATA` to the Homebrew LLVM tools when needed.
 
-Modernize from evidence, not from file age or line count alone:
-
-1. Check the current stable toolchain and direct crate releases. Keep
-   `rust-version`, `rust-toolchain.toml`, CI, and `Cargo.lock` aligned.
-2. Prefer compatible lockfile updates (`cargo update`) before considering a
-   major dependency bump. Take a major only for a concrete feature, fix, or
-   meaningful deletion.
-3. Run format, Clippy, the full suite, and the feature-specific library tests
-   after dependency or structural changes.
-4. Delete duplicate representations and pass typed values through directly.
-   A good simplification removes translation code; moving the same code into
-   more files is not a simplification.
-5. Keep wrappers only when they enforce a policy boundary (safe printing vs.
-   raw commands, validated geometry, guaranteed disconnect). Do not collapse
-   those boundaries just to reduce line count.
-6. Avoid speculative abstractions. Extract code after a rule has at least two
-   real callers or when one named owner protects an invariant.
-
-Good candidates for future code reduction:
-
-- Keep tests close to their owner, but count production and test code
-  separately before calling a large module a maintenance problem.
-- Remove compatibility aliases only in a deliberate breaking release and only
-  after confirming they no longer protect real scripts.
-
-Do not simplify away the explicit raw-printer API, transport split, pacing
-control flow, effective-width validation, or `label::qr_layout`. Those are
-small boundaries around hardware failure modes and measured invariants.
-
----
-
-## Naming
-
-Product/crate: **thermark**. Interoperability language in docs is fine (“B1-class printers”); avoid vendor branding in crate name.
+Release jobs package full and BLE-only binaries for Linux x86_64/ARM64 and macOS
+Apple Silicon/Intel, with checksums and pinned actions. Manual workflow dispatch
+builds downloadable artifacts without publishing. A pushed `v*` tag publishes
+only when it matches the Cargo package version. A dependency update or ordinary
+push does not by itself authorize a new release.
