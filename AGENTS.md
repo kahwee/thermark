@@ -90,28 +90,19 @@ hardware theories. CLI tests use temporary `THERMARK_CONFIG` files and remove
 inherited `THERMARK_ADDR` in child commands. Do not mutate process-wide environment
 or working directory in parallel tests; use explicit inputs or subprocess settings.
 
-For Rust changes, run:
+`scripts/check.sh` is the shared local/CI entry point; use `--help` for setup.
 
-```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-```
+| Change | Checks |
+| --- | --- |
+| Rust code | `scripts/check.sh` (formatting, Clippy, full default suite) |
+| Dependencies, shared library, transports, or CLI feature gating | `scripts/check.sh all` (also feature tests and binary builds) |
+| Focused rendering iteration | `scripts/check.sh render` |
+| Documentation only | Diff and reference/command review; no rebuild |
 
-For dependency, shared-library, or transport changes, also run:
-
-```bash
-cargo test --locked --lib --no-default-features
-cargo test --locked --lib --no-default-features --features ble
-cargo test --locked --lib --no-default-features --features serial
-```
-
-For CLI feature gating or transport dependency changes, build both binaries:
-
-```bash
-cargo build --locked --bin thermark --no-default-features --features ble
-cargo build --locked --bin thermark --no-default-features --features serial
-```
+The script rejects inherited `UPDATE_GOLDEN` settings. Failed golden images are
+in `target/golden-actual/` and CI's `golden-actual` artifact; inspect them before
+changing code or accepting baselines. A failing check reports its command and
+exit status so you can rerun that command directly while fixing it.
 
 The full suite includes golden renders, fixture boundaries, and label placement.
 For focused rendering iteration, use `--preview`,
@@ -121,7 +112,6 @@ only after inspecting an intended visual change. Do not update baselines just to
 make a failure pass. Physical printing is for hardware questions or confirming
 a deliberate visual change, not routine regression checks.
 
-Documentation-only edits need a diff and reference/command review, not a rebuild.
 Workflow edits need workflow validation and relevant hosted checks. Once required
 checks pass, repeat or broaden them only for new changes or unresolved evidence.
 Review `git diff --check` and the final diff before committing.

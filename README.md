@@ -90,18 +90,18 @@ cargo update --dry-run
 cargo update
 ```
 
-Before pushing, run the validation and feature matrix used by CI:
+Run the same validation entry point locally and in CI:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-cargo test --locked --lib --no-default-features
-cargo test --locked --lib --no-default-features --features ble
-cargo test --locked --lib --no-default-features --features serial
-cargo build --locked --bin thermark --no-default-features --features ble
-cargo build --locked --bin thermark --no-default-features --features serial
+scripts/check.sh           # formatting, Clippy, default-feature tests
+scripts/check.sh all       # also test and build the transport feature matrix
+scripts/check.sh render    # focused golden / fixture / placement checks
 ```
+
+Use `scripts/check.sh --help` for prerequisites and modes. The checks use no
+printer. They reject inherited `UPDATE_GOLDEN` settings so verification cannot
+silently accept changed images. Failed golden renders are written to
+`target/golden-actual/`; CI uploads those images as a `golden-actual` artifact.
 
 Direct dependencies intentionally use compatible major-version ranges while
 `Cargo.lock` pins reproducible builds. A major-version bump should earn its
