@@ -28,8 +28,8 @@ case "$mode" in
     *) usage >&2; exit 64 ;;
 esac
 
-# Golden tests treat even UPDATE_GOLDEN=0 as acceptance. Verification must never
-# inherit that opt-in and quietly rewrite its expected output.
+# Golden acceptance is an explicit, separate operation. Verification must never
+# inherit UPDATE_GOLDEN=1 and quietly rewrite its expected output.
 if [[ ${UPDATE_GOLDEN+x} ]]; then
     echo 'error: unset UPDATE_GOLDEN before verification; accept reviewed golden changes separately.' >&2
     exit 64

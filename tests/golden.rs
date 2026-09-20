@@ -231,7 +231,14 @@ fn diff(actual: &GrayImage, expected: &GrayImage) -> Option<(u64, u32, u32)> {
 
 #[test]
 fn golden_renders_are_unchanged() {
-    let update = std::env::var_os("UPDATE_GOLDEN").is_some();
+    let update = match std::env::var_os("UPDATE_GOLDEN") {
+        None => false,
+        Some(value) if value == "1" => true,
+        Some(_) => panic!(
+            "invalid UPDATE_GOLDEN: unset it to verify, or use UPDATE_GOLDEN=1 \
+             to accept reviewed rendering changes"
+        ),
+    };
     if update {
         std::fs::create_dir_all(GOLDEN_DIR).expect("create golden dir");
     }
