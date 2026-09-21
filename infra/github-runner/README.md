@@ -42,3 +42,16 @@ disk space or investigating a cache issue; do not remove registration volumes.
 Validate workflow edits with actionlint and dispatch the main workflows. Compare
 step durations across a cold run and a rerun of the same commit, including checkout
 and queue costs. The NAS does not replace macOS or physical printer testing.
+
+## Verified GitHub timings
+
+On 2026-09-20 (Pacific), commit `8c93e4a` passed the full workflow on
+`stash-thermark-ci`. [Run 35551259978](https://github.com/kahwee/thermark/actions/runs/35551259978)
+attempt 2 took 307 seconds including setup, with 256 seconds in the check matrix.
+Attempt 3 on the same commit took 29 seconds total and 18 seconds in the check
+matrix. Attempt 2 still compiled feature variants after the initial runner image's
+missing-font failure; it was not a completely empty cache. All tests ran again.
+
+These are single samples on a shared NAS, not medians or a controlled comparison
+with GitHub-hosted machines. The earlier font failure was fixed in the image with
+DejaVu and Liberation fonts; rendering assertions and golden fixtures were unchanged.
