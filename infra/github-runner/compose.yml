@@ -1,0 +1,31 @@
+name: rust-ci
+x-runner: &runner
+  build: .
+  image: stash-rust-ci:latest
+  restart: unless-stopped
+  init: true
+  cpus: 2
+  mem_limit: 2g
+  memswap_limit: 3g
+  pids_limit: 512
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  environment:
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/runner-job-started.sh
+    CARGO_BUILD_JOBS: '2'
+  command: [bash, -c, 'until test -f .runner; do sleep 2; done; exec ./run.sh']
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+services:
+  thermark:
+    <<: *runner
+    container_name: thermark-gh-runner
+    volumes: [thermark-state:/home/runner]
+  denki:
+    <<: *runner
+    container_name: denki-gh-runner
+    volumes: [denki-state:/home/runner]
+volumes:
+  thermark-state:
+  denki-state:
