@@ -9,3 +9,7 @@ ENV PATH="/home/runner/.cargo/bin:/home/runner/externals/node24/bin:${PATH}"
 ENV CARGO_BUILD_JOBS=2
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --component rustfmt,clippy
 WORKDIR /home/runner
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+USER runner
