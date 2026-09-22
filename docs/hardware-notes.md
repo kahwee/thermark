@@ -18,6 +18,7 @@ mkdir -p local
 ./target/release/thermark scan --save
 ./target/release/thermark identify --json > local/printer-identity.json
 ./target/release/thermark doctor --use-config
+./target/release/thermark doctor --use-config --json > local/thermark-report.json
 
 # Stickers (fixtures/ product demos; personal art → local/prints/)
 ./target/release/thermark print -i fixtures/sticker_wifi.png \
@@ -35,6 +36,9 @@ Check placement without a printer: `thermark print -i art.png --label 50x30 --pr
 Fixtures locked by `tests/fixtures_readme.rs` (wifi, link, inventory, name, calibrate only).
 Quit vendor apps before BLE connect. BLE `-a` is **exact** by default (`--fuzzy` optional).  
 Experimental profile/task/connection paths need `--allow-experimental`.
+The JSON doctor report is suitable for a public support issue: it keeps check
+outcomes while omitting printer identifiers, RFID barcodes, serial numbers, and
+local paths.
 
 On macOS, Bluetooth Settings may show the printer as **Connected** while
 CoreBluetooth cannot discover it. An exclusive-session conflict is one possible cause:

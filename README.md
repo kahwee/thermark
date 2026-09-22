@@ -281,13 +281,14 @@ For connection failures on macOS, follow the
 ## Development
 
 ```bash
-cargo test
-cargo test --lib --no-default-features
-cargo test --test golden
-cargo test --test label_placement
-cargo test --test fixtures_readme
+scripts/check.sh all       # formatting, Clippy, tests, and feature builds
+scripts/check.sh render    # golden, fixture, and placement checks
 cargo bench --bench image_pipeline
 ```
+
+Linux BLE builds require `libdbus-1-dev` and `pkg-config`. The shared check
+script uses locked dependencies, rejects accidental golden-image updates, and
+matches the validation run by CI.
 
 The benchmark reports CPU-only medians. Compare runs on the same host, and
 measure peak RSS in separate processes when evaluating memory changes.

@@ -16,6 +16,12 @@ such change is listed under **Changed** with the old and new spelling.
   host platform, enabled transports, and check outcomes while omitting printer
   identifiers, RFID barcodes, serial numbers, and local filesystem paths.
 
+### Changed
+
+- Refreshed the locked dependency graph, including `btleplug` 0.13.2 and
+  `libredox` 0.1.25, and aligned development documentation on the shared
+  `scripts/check.sh` validation entry point.
+
 ## [0.32.0] - 2026-09-04
 
 ### Added
