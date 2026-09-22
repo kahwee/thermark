@@ -68,17 +68,8 @@ only:
 cargo build --locked --release --no-default-features --features ble
 ```
 
-Tagged GitHub releases publish both `full` (BLE + USB serial) and `ble`
-archives for Linux x86_64/ARM64 and macOS Apple Silicon/Intel, with SHA-256
-checksum files. Linux binaries are built on Ubuntu 24.04 and macOS binaries on
-macOS 15. The release workflow also supports a manual branch run for testing
-downloadable artifacts without creating a release. A pushed release tag must
-exactly match the Cargo version, such as `v0.32.0` for package version
-`0.32.0`.
-
-Archive names include the package version and platform, for example
-`thermark-0.32.0-macOS-ARM64-ble.tar.gz`. After downloading the archive and its
-`.sha256` sidecar from GitHub Releases, verify and unpack it:
+Releases include SHA-256 checksums. Verify the checksum before unpacking, for
+example (replace the version and platform with your download):
 
 ```bash
 # Linux
@@ -93,15 +84,7 @@ cd thermark-0.32.0-macOS-ARM64-ble
 ./thermark tasks
 ```
 
-Refresh compatible dependency versions deliberately, then review the lockfile
-diff:
-
-```bash
-cargo update --dry-run
-cargo update
-```
-
-Run the same validation entry point locally and in CI:
+Contributors can run the same validation entry point locally and in CI:
 
 ```bash
 scripts/check.sh           # formatting, Clippy, default-feature tests
@@ -109,15 +92,8 @@ scripts/check.sh all       # also test and build the transport feature matrix
 scripts/check.sh render    # focused golden / fixture / placement checks
 ```
 
-Use `scripts/check.sh --help` for prerequisites and modes. The checks use no
-printer. They reject inherited `UPDATE_GOLDEN` settings so verification cannot
-silently accept changed images. Failed golden renders are written to
-`target/golden-actual/`; CI uploads those images as a `golden-actual` artifact.
-
-Direct dependencies intentionally use compatible major-version ranges while
-`Cargo.lock` pins reproducible builds. A major-version bump should earn its
-complexity with a concrete feature, fix, or code deletion; newer by itself is
-not enough.
+Use `scripts/check.sh --help` for prerequisites and modes. Checks require no
+printer; failed golden renders appear in `target/golden-actual/`.
 
 To capture the exact model, firmware, geometry, and task for a hardware report:
 
@@ -292,20 +268,6 @@ matches the validation run by CI.
 
 The benchmark reports CPU-only medians. Compare runs on the same host, and
 measure peak RSS in separate processes when evaluating memory changes.
-
-Representative same-host Apple Silicon measurements for 0.32.0:
-
-| Optimization | Before | After |
-|---|---:|---:|
-| 2000×1500 RGB trim scratch storage | 3,000,000 B | at most 512,000 B |
-| 2000×1500 RGB trim median | 7.11 ms | 7.20 ms |
-| macOS ARM64 release binary | 3,670,016 B full | 3,601,600 B BLE-only |
-
-The RGB change removes 82.9% of temporary scan storage while keeping runtime
-effectively flat. Protocol sends also avoid one heap allocation per packet;
-exhaustive tests compare the fixed-buffer and public allocating encoders for
-all payload lengths from 0 through 255. These figures are evidence from one
-machine, not cross-platform performance guarantees.
 
 The architecture keeps four concerns separate:
 
