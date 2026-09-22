@@ -497,7 +497,9 @@ fn doctor_help_mentions_fuzzy() {
         .args(["doctor", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("fuzzy"));
+        .stdout(predicate::str::contains("fuzzy"))
+        .stdout(predicate::str::contains("--json"))
+        .stdout(predicate::str::contains("privacy-safe"));
 }
 
 #[test]
@@ -519,6 +521,28 @@ fn doctor_host_only_runs() {
         "status {:?}",
         output.status
     );
+}
+
+#[test]
+fn doctor_json_is_machine_readable_and_privacy_labeled() {
+    let (_dir, path) = temp_config_path();
+    let assert = thermark_with_config(&path)
+        .args(["doctor", "--json"])
+        .assert();
+    let output = assert.get_output();
+    assert!(
+        output.status.code() == Some(0) || output.status.code() == Some(1),
+        "status {:?}",
+        output.status
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(
+        report["privacy"],
+        "printer identifiers and local paths omitted"
+    );
+    assert!(report["checks"].is_array());
 }
 
 #[cfg(unix)]

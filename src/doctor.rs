@@ -6,6 +6,7 @@ use crate::print_task::PrintTask;
 use crate::printer::{Heartbeat, RfidInfo};
 use crate::profile::{PROFILES, SupportStatus};
 use crate::protocol::Model;
+use serde::Serialize;
 use std::fmt;
 
 use crate::transport::BleMatchMode;
@@ -24,7 +25,8 @@ use crate::transport::SerialTransport;
 #[cfg(feature = "ble")]
 use crate::transport::{self, BleTransport};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CheckStatus {
     Pass,
     Warn,
@@ -115,6 +117,26 @@ pub struct DoctorReport {
     pub checks: Vec<Check>,
 }
 
+#[derive(Serialize)]
+struct SupportCheck<'a> {
+    name: &'a str,
+    status: CheckStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct SupportReport<'a> {
+    schema_version: u8,
+    thermark_version: &'static str,
+    os: &'static str,
+    arch: &'static str,
+    features: Vec<&'static str>,
+    overall: CheckStatus,
+    privacy: &'static str,
+    checks: Vec<SupportCheck<'a>>,
+}
+
 impl DoctorReport {
     pub fn overall(&self) -> CheckStatus {
         self.checks
@@ -128,6 +150,54 @@ impl DoctorReport {
             CheckStatus::Pass | CheckStatus::Warn => 0,
             CheckStatus::Fail => 1,
         }
+    }
+
+    /// Serialize a support report that is safe to attach to a public issue.
+    ///
+    /// Only diagnostics whose details cannot contain device identifiers or
+    /// local paths are included verbatim. Sensitive checks retain their name
+    /// and status, which preserves the useful failure signal without leaking
+    /// printer names, addresses, serials, RFID barcodes, or filesystem paths.
+    pub fn support_json_pretty(&self) -> serde_json::Result<String> {
+        let features = [
+            ("ble", cfg!(feature = "ble")),
+            ("serial", cfg!(feature = "serial")),
+        ]
+        .into_iter()
+        .filter_map(|(name, enabled)| enabled.then_some(name))
+        .collect();
+
+        let checks = self
+            .checks
+            .iter()
+            .map(|check| SupportCheck {
+                name: &check.name,
+                status: check.status,
+                detail: matches!(
+                    check.name.as_str(),
+                    "thermark"
+                        | "print_task"
+                        | "heartbeat"
+                        | "cover"
+                        | "paper"
+                        | "rfid"
+                        | "battery"
+                        | "support_matrix"
+                )
+                .then_some(check.detail.as_str()),
+            })
+            .collect();
+
+        serde_json::to_string_pretty(&SupportReport {
+            schema_version: 1,
+            thermark_version: env!("CARGO_PKG_VERSION"),
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            features,
+            overall: self.overall(),
+            privacy: "printer identifiers and local paths omitted",
+            checks,
+        })
     }
 }
 
@@ -545,6 +615,35 @@ mod tests {
     use super::*;
     use crate::mock::MockTransport;
     use crate::printer::Heartbeat;
+
+    #[test]
+    fn support_json_keeps_results_and_omits_identifiers() {
+        let report = DoctorReport {
+            checks: vec![
+                Check::pass("serial", "PRIVATE-SERIAL-123"),
+                Check::pass("ble_connect", "connected via 'PRIVATE-PRINTER'"),
+                Check::warn("battery", "low (1) — charge before printing"),
+            ],
+        };
+
+        let body = report.support_json_pretty().unwrap();
+        assert!(!body.contains("PRIVATE-SERIAL-123"));
+        assert!(!body.contains("PRIVATE-PRINTER"));
+
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["schema_version"], 1);
+        assert_eq!(json["overall"], "warn");
+        assert_eq!(
+            json["privacy"],
+            "printer identifiers and local paths omitted"
+        );
+        assert_eq!(json["checks"][0]["name"], "serial");
+        assert!(json["checks"][0].get("detail").is_none());
+        assert_eq!(
+            json["checks"][2]["detail"],
+            "low (1) — charge before printing"
+        );
+    }
 
     #[test]
     fn heartbeat_ready_all_pass() {

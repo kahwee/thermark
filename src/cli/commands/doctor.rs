@@ -16,6 +16,7 @@ pub async fn run(cfg: &Config, args: DoctorCommand) -> Result<i32> {
         seconds,
         use_config,
         fuzzy,
+        json,
     } = args;
     // Host-only by default; -a or --use-config enables connect + sensors.
     let addr = match addr {
@@ -35,6 +36,10 @@ pub async fn run(cfg: &Config, args: DoctorCommand) -> Result<i32> {
     .await
     .context("doctor")?;
 
-    print!("{report}");
+    if json {
+        println!("{}", report.support_json_pretty()?);
+    } else {
+        print!("{report}");
+    }
     Ok(report.exit_code())
 }

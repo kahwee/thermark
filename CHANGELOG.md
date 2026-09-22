@@ -10,6 +10,12 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Added
+
+- `thermark doctor --json` emits a stable, privacy-safe support report with the
+  host platform, enabled transports, and check outcomes while omitting printer
+  identifiers, RFID barcodes, serial numbers, and local filesystem paths.
+
 ## [0.32.0] - 2026-09-04
 
 ### Added

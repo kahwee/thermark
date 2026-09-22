@@ -50,6 +50,17 @@ cargo build --release
 ./target/release/thermark doctor --use-config
 ```
 
+When asking for setup help, create a support report that is safe to attach to
+a public issue:
+
+```bash
+./target/release/thermark doctor --use-config --json > thermark-report.json
+```
+
+The JSON includes the operating system, architecture, enabled transports, and
+check results. Printer names and addresses, serial numbers, RFID barcodes, and
+local filesystem paths are omitted.
+
 For the smallest primary-path binary, omit USB serial support and build BLE
 only:
 

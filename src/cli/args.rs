@@ -338,6 +338,9 @@ pub struct DoctorCommand {
     /// Allow substring BLE name matching when connecting (default: exact only)
     #[arg(long, default_value_t = false)]
     pub fuzzy: bool,
+    /// Emit a privacy-safe JSON support report (identifiers and local paths omitted)
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]
