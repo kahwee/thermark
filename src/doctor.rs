@@ -118,15 +118,13 @@ pub struct DoctorReport {
 }
 
 #[derive(Serialize)]
-struct SupportCheck<'a> {
-    name: &'a str,
+struct SupportCheck {
+    name: &'static str,
     status: CheckStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<&'a str>,
 }
 
 #[derive(Serialize)]
-struct SupportReport<'a> {
+struct SupportReport {
     schema_version: u8,
     thermark_version: &'static str,
     os: &'static str,
@@ -134,7 +132,35 @@ struct SupportReport<'a> {
     features: Vec<&'static str>,
     overall: CheckStatus,
     privacy: &'static str,
-    checks: Vec<SupportCheck<'a>>,
+    checks: Vec<SupportCheck>,
+}
+
+/// A report may be assembled by library callers, so even check names cannot
+/// be trusted as public-safe text. Unknown names keep their status under a
+/// fixed label rather than passing arbitrary strings into the JSON.
+fn support_check_name(name: &str) -> &'static str {
+    match name {
+        "thermark" => "thermark",
+        "print_task" => "print_task",
+        "fonts" => "fonts",
+        "serial_ports" => "serial_ports",
+        "bluetooth" => "bluetooth",
+        "ble_scan" => "ble_scan",
+        "ble_session" => "ble_session",
+        "ble_connect" => "ble_connect",
+        "ble_disconnect" => "ble_disconnect",
+        "heartbeat" => "heartbeat",
+        "cover" => "cover",
+        "paper" => "paper",
+        "rfid" => "rfid",
+        "battery" => "battery",
+        "rfid_tag" => "rfid_tag",
+        "serial" => "serial",
+        "support_matrix" => "support_matrix",
+        "usb_open" => "usb_open",
+        "usb" => "usb",
+        _ => "other",
+    }
 }
 
 impl DoctorReport {
@@ -154,10 +180,9 @@ impl DoctorReport {
 
     /// Serialize a support report that is safe to attach to a public issue.
     ///
-    /// Only diagnostics whose details cannot contain device identifiers or
-    /// local paths are included verbatim. Sensitive checks retain their name
-    /// and status, which preserves the useful failure signal without leaking
-    /// printer names, addresses, serials, RFID barcodes, or filesystem paths.
+    /// Check names and details are public library data, so only canonical
+    /// names and statuses enter this report. The human-readable doctor output
+    /// retains the full detail for local diagnosis.
     pub fn support_json_pretty(&self) -> serde_json::Result<String> {
         let features = [
             ("ble", cfg!(feature = "ble")),
@@ -171,20 +196,8 @@ impl DoctorReport {
             .checks
             .iter()
             .map(|check| SupportCheck {
-                name: &check.name,
+                name: support_check_name(&check.name),
                 status: check.status,
-                detail: matches!(
-                    check.name.as_str(),
-                    "thermark"
-                        | "print_task"
-                        | "heartbeat"
-                        | "cover"
-                        | "paper"
-                        | "rfid"
-                        | "battery"
-                        | "support_matrix"
-                )
-                .then_some(check.detail.as_str()),
             })
             .collect();
 
@@ -622,27 +635,32 @@ mod tests {
             checks: vec![
                 Check::pass("serial", "PRIVATE-SERIAL-123"),
                 Check::pass("ble_connect", "connected via 'PRIVATE-PRINTER'"),
-                Check::warn("battery", "low (1) — charge before printing"),
+                Check::warn("battery", "PRIVATE-PATH-/Users/me/labels"),
+                Check::fail("print_task", "identity query failed: PRIVATE-PRINTER"),
+                Check::warn("PRIVATE-NAME", "PRIVATE-DETAIL"),
             ],
         };
 
         let body = report.support_json_pretty().unwrap();
         assert!(!body.contains("PRIVATE-SERIAL-123"));
         assert!(!body.contains("PRIVATE-PRINTER"));
+        assert!(!body.contains("PRIVATE-PATH"));
+        assert!(!body.contains("PRIVATE-NAME"));
+        assert!(!body.contains("PRIVATE-DETAIL"));
 
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["schema_version"], 1);
-        assert_eq!(json["overall"], "warn");
+        assert_eq!(json["overall"], "fail");
         assert_eq!(
             json["privacy"],
             "printer identifiers and local paths omitted"
         );
         assert_eq!(json["checks"][0]["name"], "serial");
         assert!(json["checks"][0].get("detail").is_none());
-        assert_eq!(
-            json["checks"][2]["detail"],
-            "low (1) — charge before printing"
-        );
+        assert_eq!(json["checks"][2]["name"], "battery");
+        assert!(json["checks"][2].get("detail").is_none());
+        assert_eq!(json["checks"][3]["status"], "fail");
+        assert_eq!(json["checks"][4]["name"], "other");
     }
 
     #[test]

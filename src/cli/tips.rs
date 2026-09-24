@@ -27,7 +27,17 @@ pub fn resolve_wifi_password(flag: String) -> Result<String> {
 
 /// Paths under `fixtures/` are public product demos — block secret Wi‑Fi saves.
 pub fn guard_wifi_save_path(path: &Path) -> Result<()> {
-    if path.components().any(|c| c.as_os_str() == "fixtures") {
+    let contains_fixtures = |path: &Path| {
+        path.components()
+            .any(|component| component.as_os_str() == "fixtures")
+    };
+    let resolved = path.canonicalize().or_else(|_| {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .canonicalize()
+    });
+    if contains_fixtures(path) || resolved.as_deref().is_ok_and(contains_fixtures) {
         bail!(
             "refusing to save a Wi‑Fi sticker under fixtures/ \
              (that path is committed product demos — real credentials must not land there).\n  \
@@ -160,6 +170,25 @@ mod tests {
         assert!(guard_wifi_save_path(Path::new("fixtures/x.png")).is_err());
         assert!(guard_wifi_save_path(Path::new("a/fixtures/x.png")).is_err());
         assert!(guard_wifi_save_path(Path::new("local/prints/x.png")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fixtures_symlink_is_refused() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixtures = dir.path().join("fixtures");
+        std::fs::create_dir(&fixtures).unwrap();
+        let alias = dir.path().join("output");
+        symlink(&fixtures, &alias).unwrap();
+        assert!(guard_wifi_save_path(&alias.join("wifi.png")).is_err());
+
+        let file = fixtures.join("existing.png");
+        std::fs::write(&file, b"demo").unwrap();
+        let file_alias = dir.path().join("alias.png");
+        symlink(&file, &file_alias).unwrap();
+        assert!(guard_wifi_save_path(&file_alias).is_err());
     }
 
     #[test]
