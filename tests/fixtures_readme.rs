@@ -6,6 +6,7 @@
 //! ```text
 //! cargo test --test fixtures_readme
 //! cargo test --test fixtures_readme regenerate_calibrate -- --ignored --nocapture
+//! cargo test --test fixtures_readme regenerate_qr_demos -- --ignored --nocapture
 //! ```
 
 use std::collections::HashSet;
@@ -40,7 +41,12 @@ struct Fixture {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Calibrate,
-    QrSticker,
+    QrSticker {
+        payload: &'static str,
+        /// Hand-curated art has no renderer to compare against. Pin its pixels
+        /// so changing the text requires explicit visual review.
+        pixel_fingerprint: Option<u64>,
+    },
 }
 
 /// Product fixtures only (committed). Keep in sync with README.
@@ -49,22 +55,34 @@ fn curated() -> &'static [Fixture] {
         Fixture {
             name: "sticker_wifi.png",
             purpose: "Guest Wi‑Fi demo (fake SSID/password only)",
-            kind: Kind::QrSticker,
+            kind: Kind::QrSticker {
+                payload: "WIFI:T:WPA;S:Demo-Guest;P:demo-not-real;;",
+                pixel_fingerprint: None,
+            },
         },
         Fixture {
             name: "sticker_link.png",
             purpose: "Package / share URL QR + text",
-            kind: Kind::QrSticker,
+            kind: Kind::QrSticker {
+                payload: "https://example.com/o/1042",
+                pixel_fingerprint: None,
+            },
         },
         Fixture {
             name: "sticker_inventory.png",
             purpose: "Bin / inventory QR + dense text",
-            kind: Kind::QrSticker,
+            kind: Kind::QrSticker {
+                payload: "https://example.com/bin/A3",
+                pixel_fingerprint: Some(0xeded_8a5f_9385_2929),
+            },
         },
         Fixture {
             name: "sticker_name.png",
             purpose: "Name badge QR + identity lines",
-            kind: Kind::QrSticker,
+            kind: Kind::QrSticker {
+                payload: "https://example.com/u/ada",
+                pixel_fingerprint: Some(0x6388_836d_335f_dc40),
+            },
         },
         Fixture {
             name: "sticker_calibrate.png",
@@ -92,6 +110,56 @@ fn ink_stats(gray: &image::GrayImage) -> (usize, usize, f64) {
     let light = total - dark;
     let dark_frac = dark as f64 / total as f64;
     (dark, light, dark_frac)
+}
+
+fn assert_same_pixels(name: &str, actual: &image::GrayImage, expected: &image::GrayImage) {
+    assert_eq!(
+        actual.dimensions(),
+        expected.dimensions(),
+        "{name} dimensions"
+    );
+    if let Some(index) = actual
+        .as_raw()
+        .iter()
+        .zip(expected.as_raw())
+        .position(|(actual, expected)| actual != expected)
+    {
+        panic!(
+            "{name} differs from its renderer at ({}, {}); inspect the fixture before updating it",
+            index as u32 % actual.width(),
+            index as u32 / actual.width()
+        );
+    }
+}
+
+fn pixel_fingerprint(gray: &image::GrayImage) -> u64 {
+    gray.as_raw()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325, |hash, pixel| {
+            (hash ^ u64::from(*pixel)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+}
+
+fn assert_qr_payload(name: &str, gray: &image::GrayImage, expected: &str) {
+    let mut decoder = quircs::Quirc::default();
+    let codes: Vec<_> = decoder
+        .identify(gray.width() as usize, gray.height() as usize, gray.as_raw())
+        .collect();
+    assert_eq!(
+        codes.len(),
+        1,
+        "{name} must contain exactly one scannable QR"
+    );
+    let data = codes
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap_or_else(|error| panic!("{name}: extract QR: {error}"))
+        .decode()
+        .unwrap_or_else(|error| panic!("{name}: decode QR: {error}"));
+    let actual = std::str::from_utf8(&data.payload)
+        .unwrap_or_else(|error| panic!("{name}: QR payload is not UTF-8: {error}"));
+    assert_eq!(actual, expected, "{name} QR payload");
 }
 
 fn assert_encodes(name: &str) {
@@ -175,14 +243,29 @@ fn all_fixtures_open_and_encode() {
                     (0.05..0.45).contains(&frac),
                     "calibrate dark fraction {frac:.3} out of band"
                 );
-                for &(x, y) in &[(2u32, 2), (W - 3, 2), (2, H - 3), (W - 3, H - 3)] {
+                for &(x, y) in &[(0u32, 0), (W - 1, 0), (0, H - 1), (W - 1, H - 1)] {
                     assert!(
                         gray.get_pixel(x, y)[0] < 128,
                         "calibrate should ink near corner ({x},{y})"
                     );
                 }
+                let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
+                let expected = image_encode::calibration_pattern(lp, None, 8.0);
+                assert_same_pixels(f.name, &gray, &expected);
             }
-            Kind::QrSticker => {
+            Kind::QrSticker {
+                payload,
+                pixel_fingerprint: fingerprint,
+            } => {
+                assert_qr_payload(f.name, &gray, payload);
+                if let Some(expected) = fingerprint {
+                    assert_eq!(
+                        pixel_fingerprint(&gray),
+                        expected,
+                        "{} pixels changed; inspect text and QR before updating the baseline",
+                        f.name
+                    );
+                }
                 assert!(
                     (0.08..0.55).contains(&frac),
                     "{} dark fraction {frac:.3} unrealistic for QR sticker",
@@ -218,10 +301,9 @@ fn all_fixtures_open_and_encode() {
     }
 }
 
-#[test]
-fn wifi_demo_layout_api_matches_canvas() {
+fn render_wifi_demo() -> image::GrayImage {
     let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
-    let img = make_wifi_label(&WifiLabelOptions {
+    make_wifi_label(&WifiLabelOptions {
         ssid: "Demo-Guest".into(),
         password: "demo-not-real".into(),
         security: WifiSecurity::Wpa,
@@ -235,16 +317,20 @@ fn wifi_demo_layout_api_matches_canvas() {
         font_size: None,
         border: false,
     })
-    .expect("render Wi-Fi demo with vendored font");
-    assert_eq!(img.dimensions(), (W, H));
-    let fix = open_gray("sticker_wifi.png");
-    assert_eq!(fix.dimensions(), (W, H));
+    .expect("render Wi-Fi demo with vendored font")
 }
 
 #[test]
-fn link_sticker_layout_is_full_canvas_square_qr() {
+fn wifi_demo_layout_api_matches_canvas() {
+    let img = render_wifi_demo();
+    assert_eq!(img.dimensions(), (W, H));
+    let fix = open_gray("sticker_wifi.png");
+    assert_same_pixels("sticker_wifi.png", &fix, &img);
+}
+
+fn render_link_demo() -> image::GrayImage {
     let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
-    let img = make_qr_label_opts(&QrLabelOptions {
+    make_qr_label_opts(&QrLabelOptions {
         url: "https://example.com/o/1042".into(),
         side_text: "ORDER #1042\nShip by Fri\nPriority".into(),
         label: lp,
@@ -255,12 +341,29 @@ fn link_sticker_layout_is_full_canvas_square_qr() {
         font_name: None,
         font_size: None,
     })
-    .expect("render link sticker with vendored font");
+    .expect("render link sticker with vendored font")
+}
+
+#[test]
+fn link_sticker_layout_is_full_canvas_square_qr() {
+    let lp = LabelMm::parse("50x30").unwrap().to_pixels(MAX_W, 8.0);
+    let img = render_link_demo();
     assert_eq!(img.dimensions(), (W, H));
     let side = thermark::label::max_qr_side(lp, thermark::geometry::SafeArea::default());
     assert_eq!(side, side.min(lp.height_px));
     let fix = open_gray("sticker_link.png");
-    assert_eq!(fix.dimensions(), (W, H));
+    assert_same_pixels("sticker_link.png", &fix, &img);
+}
+
+#[test]
+#[ignore = "writes fixtures/sticker_wifi.png and fixtures/sticker_link.png"]
+fn regenerate_qr_demos() {
+    render_wifi_demo()
+        .save(fixtures_dir().join("sticker_wifi.png"))
+        .unwrap();
+    render_link_demo()
+        .save(fixtures_dir().join("sticker_link.png"))
+        .unwrap();
 }
 
 #[test]

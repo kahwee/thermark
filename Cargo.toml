@@ -56,6 +56,7 @@ uuid = { version = "1", optional = true }
 assert_cmd = "2"
 predicates = "3"
 proptest = "1"
+quircs = "0.10.3"
 
 [profile.release]
 lto = true
