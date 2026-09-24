@@ -34,6 +34,7 @@ pub struct MockTransport {
     /// Override the `PrintStatus` (0xa3) reply body.
     print_status: Option<Vec<u8>>,
     recv_error: Option<String>,
+    recv_error_after_cmd: Option<(u8, String)>,
     page_index_pending: bool,
     model_id: u16,
 }
@@ -58,6 +59,7 @@ impl MockTransport {
             heartbeat: None,
             print_status: None,
             recv_error: None,
+            recv_error_after_cmd: None,
             page_index_pending: false,
             model_id: 4096,
         }
@@ -146,6 +148,12 @@ impl MockTransport {
 
     pub fn fail_receives(&mut self, message: impl Into<String>) -> &mut Self {
         self.recv_error = Some(message.into());
+        self
+    }
+
+    /// Fail receives after a particular command has been sent.
+    pub fn fail_receives_after_cmd(&mut self, cmd: u8, message: impl Into<String>) -> &mut Self {
+        self.recv_error_after_cmd = Some((cmd, message.into()));
         self
     }
 
@@ -264,6 +272,14 @@ impl Transport for MockTransport {
 
     async fn recv_raw(&mut self, _wait: Duration) -> Result<Vec<u8>> {
         if let Some(message) = &self.recv_error {
+            return Err(Error::transport(message.clone()));
+        }
+        if let Some((cmd, message)) = &self.recv_error_after_cmd
+            && self
+                .tx_packets
+                .last()
+                .is_some_and(|packet| packet.cmd == *cmd)
+        {
             return Err(Error::transport(message.clone()));
         }
         if self.rx_queue.is_empty() {

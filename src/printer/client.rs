@@ -121,8 +121,8 @@ impl<T: Transport> PrinterClient<T> {
 
     /// Heartbeat preflight: abort on open cover, missing paper, or empty battery.
     ///
-    /// If heartbeat cannot be read, printing continues (firmware-dependent; doctor is
-    /// the place for full diagnostics).
+    /// If the heartbeat response is unavailable, printing continues
+    /// (firmware-dependent). A transport failure aborts the job.
     pub async fn preflight_ready(&mut self) -> Result<()> {
         match self.heartbeat().await {
             Ok(hb) => {
@@ -139,6 +139,7 @@ impl<T: Transport> PrinterClient<T> {
                 warn_if_battery_low(hb.power_level);
                 Ok(())
             }
+            Err(e @ (Error::Printer(_) | Error::Transport(_))) => Err(e),
             Err(e) => {
                 warn!(error = %e, "preflight heartbeat unavailable; continuing");
                 Ok(())

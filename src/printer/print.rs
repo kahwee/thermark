@@ -180,7 +180,7 @@ impl<T: Transport> PrinterClient<T> {
                     )
                     .await
                 {
-                    Err(error @ Error::Printer(_)) => return Err(error),
+                    Err(Error::Timeout { .. }) => {}
                     Ok(packet) => {
                         if let Some(status) = PrintStatus::parse(&packet.data) {
                             debug!(%status, "print status");
@@ -193,7 +193,7 @@ impl<T: Transport> PrinterClient<T> {
                             }
                         }
                     }
-                    Err(_) => {}
+                    Err(error) => return Err(error),
                 },
             }
             self.maybe_sleep(self.pacing.between_polls()).await;

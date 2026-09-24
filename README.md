@@ -42,7 +42,7 @@ x86_64/ARM64 and macOS Apple Silicon/Intel; verification and unpacking commands
 are below. Building from source requires Rust:
 
 ```bash
-cargo build --release
+scripts/build.sh
 
 # Quit the vendor app first; only one BLE client can hold the printer.
 ./target/release/thermark scan --save
@@ -65,8 +65,16 @@ For the smallest primary-path binary, omit USB serial support and build BLE
 only:
 
 ```bash
-cargo build --locked --release --no-default-features --features ble
+scripts/build.sh --no-default-features --features ble
 ```
+
+The build script and local `scripts/check.sh` reset `target/` on the first run
+after 14 days, then regenerate the artifacts needed by that command. Between
+resets, builds reuse the cache normally. The first use starts the retention
+clock for existing artifacts. Cleanup removes generated binaries, debug/release
+caches, and diagnostics under `target/`; source files, `local/`, and printer
+settings are unaffected. Plain `cargo build` does not run this cleanup. CI
+retains its own cache policy.
 
 Releases include SHA-256 checksums. Verify the checksum before unpacking, for
 example (replace the version and platform with your download):

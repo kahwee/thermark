@@ -74,8 +74,7 @@ pub fn wifi_qr_payload(
     security: WifiSecurity,
     hidden: bool,
 ) -> Result<String> {
-    let ssid = ssid.trim();
-    if ssid.is_empty() {
+    if ssid.trim().is_empty() {
         return Err(Error::msg("Wi‑Fi SSID must not be empty"));
     }
     if security.requires_password() && password.is_empty() {
@@ -114,7 +113,6 @@ pub fn wifi_qr_payload(
 
 /// Human-readable side text: network name large and clear (password optional).
 pub fn wifi_side_text(ssid: &str, show_password: Option<&str>) -> String {
-    let ssid = ssid.trim();
     match show_password {
         Some(pw) if !pw.is_empty() => format!("Wi‑Fi\n{ssid}\n{pw}"),
         _ => format!("Wi‑Fi\n{ssid}\nScan to join"),
@@ -182,6 +180,17 @@ mod tests {
     fn escapes_special_chars_in_ssid() {
         let p = wifi_qr_payload(r"Net;Work", "x", WifiSecurity::Wpa, false).unwrap();
         assert!(p.contains(r"S:Net\;Work;"), "{p}");
+    }
+
+    #[test]
+    fn preserves_spaces_in_the_exact_network_name() {
+        let ssid = " Guest ";
+        let payload = wifi_qr_payload(ssid, "secret", WifiSecurity::Wpa, false).unwrap();
+        assert!(payload.contains("S: Guest ;"), "{payload}");
+        assert!(wifi_side_text(ssid, None).contains("\n Guest \n"));
+
+        let overlong = format!(" {} ", "a".repeat(31));
+        assert!(wifi_qr_payload(&overlong, "secret", WifiSecurity::Wpa, false).is_err());
     }
 
     #[test]

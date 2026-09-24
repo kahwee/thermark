@@ -111,11 +111,13 @@ impl<T: Transport> PrinterClient<T> {
     }
 
     pub async fn heartbeat(&mut self) -> Result<Heartbeat> {
-        if let Ok(packet) = self
+        match self
             .transceive_offset(Cmd::Heartbeat as u8, vec![0x01], 1, OnTimeout::Resend)
             .await
         {
-            return Ok(Heartbeat::parse(&packet.data));
+            Ok(packet) => return Ok(Heartbeat::parse(&packet.data)),
+            Err(Error::Timeout { .. }) => {}
+            Err(error) => return Err(error),
         }
 
         self.send_pkt(&protocol::heartbeat()).await?;

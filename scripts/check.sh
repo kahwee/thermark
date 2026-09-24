@@ -37,6 +37,11 @@ fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# CI manages its own cache lifetime. Keep local build artifacts bounded.
+if [[ ${CI:-} != true && ${GITHUB_ACTIONS:-} != true && -z ${CARGO_TARGET_DIR:-} ]]; then
+    bash scripts/prune-build-cache.sh
+fi
+
 run() {
     if [[ ${GITHUB_ACTIONS:-} == true ]]; then
         printf '::group::%s\n' "$*"

@@ -369,6 +369,32 @@ async fn preflight_blocks_no_paper() {
 }
 
 #[tokio::test]
+async fn preflight_preserves_fault_reported_by_heartbeat() {
+    let mut mock = MockTransport::new();
+    mock.fail_cmd(Cmd::Heartbeat as u8, PrinterFault::COVER_OPEN.code());
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+    let err = c
+        .print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Printer(PrinterFault::COVER_OPEN)),
+        "got {err:?}"
+    );
+    assert_eq!(
+        c.transport()
+            .tx_cmds()
+            .iter()
+            .filter(|&&cmd| cmd == Cmd::Heartbeat as u8)
+            .count(),
+        1,
+        "a printer fault must not trigger a fallback heartbeat"
+    );
+    assert!(!c.transport().tx_cmds().contains(&(Cmd::PrintStart as u8)));
+}
+
+#[tokio::test]
 async fn print_image_file_opts_aborts_preflight() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dot.png");
@@ -455,6 +481,20 @@ async fn print_gray_image_continues_when_heartbeat_is_unavailable() {
     let cmds = c.transport().tx_cmds();
     assert!(cmds.contains(&(Cmd::Heartbeat as u8)));
     assert!(cmds.contains(&(Cmd::PrintStart as u8)));
+}
+
+#[tokio::test]
+async fn print_gray_image_stops_when_preflight_loses_transport() {
+    let mut mock = MockTransport::new();
+    mock.fail_receives("link down before printing");
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+    let err = c
+        .print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Transport(_)), "got {err:?}");
+    assert!(!c.transport().tx_cmds().contains(&(Cmd::PrintStart as u8)));
 }
 
 #[tokio::test]
@@ -607,6 +647,32 @@ async fn missing_status_reply_is_not_confirmed() {
         c.print_gray_image(&gray, Density::NORMAL).await,
         Err(Error::PrintNotConfirmed)
     ));
+}
+
+#[tokio::test]
+async fn transport_failure_during_status_poll_is_reported_immediately() {
+    let mut mock = MockTransport::new();
+    mock.fail_receives_after_cmd(0xa3, "link down during status poll");
+    let mut c = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+
+    let err = c
+        .print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Transport(ref message) if message == "link down during status poll"),
+        "got {err:?}"
+    );
+    assert_eq!(
+        c.transport()
+            .tx_cmds()
+            .iter()
+            .filter(|&&cmd| cmd == 0xa3)
+            .count(),
+        1,
+        "a broken link cannot recover through more status polls"
+    );
+    assert!(!c.transport().tx_cmds().contains(&0xf3));
 }
 
 #[tokio::test]
