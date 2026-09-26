@@ -5,7 +5,7 @@ actually owns. B1 over BLE is the only hardware-tested path today.
 
 ## Test another printer
 
-1. Install from the [release downloads](https://github.com/kahwee/thermark/releases/latest).
+1. Follow the [installation guide](docs/installation.md) for Homebrew, Cargo, or release downloads.
 2. Run `thermark --version`, `thermark scan`, and `thermark doctor --json`.
 3. Choose the correct model and actual label dimensions. Experimental paths
    require `--allow-experimental`; review `thermark tasks` before printing.

@@ -1,0 +1,42 @@
+name: Installation or first-label problem
+description: Report a blocked install, offline preview, or connection setup.
+title: "[Setup] Short description"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See https://github.com/kahwee/thermark/blob/main/docs/installation.md first. Remove printer addresses, serial numbers, real Wi-Fi credentials, and personal paths from reports. Use `thermark doctor --json` rather than raw debug logs.
+  - type: dropdown
+    id: method
+    attributes:
+      label: Installation method
+      options: [Homebrew, Cargo, Release archive, Source checkout]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS version and CPU architecture
+      placeholder: macOS 15 ARM64 or Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: thermark version
+      description: Run thermark --version, or give the version you tried to install.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Command, expected result, and actual error
+      description: Include Cargo feature flags if used. An offline preview does not require a printer.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Optional privacy-safe diagnostics
+      description: Output from thermark doctor --json, reviewed before posting.
+      render: json

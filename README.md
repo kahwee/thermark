@@ -5,7 +5,7 @@ stickers, inventory tags, and text for pocket thermal printers. No cloud or
 account needed to print.
 
 [Download for macOS or Linux](https://github.com/kahwee/thermark/releases/latest) ·
-[Watch the offline demo](https://kahwee.github.io/thermark/) ·
+[View the offline demo](https://kahwee.github.io/thermark/) ·
 [Report your printer](https://github.com/kahwee/thermark/issues/new?template=hardware-report.yml)
 
 **Hardware-tested: B1 over Bluetooth LE.** USB and other printer profiles are
@@ -24,6 +24,15 @@ For Linux, or macOS without Homebrew, use the
 [prebuilt downloads](https://github.com/kahwee/thermark/releases/latest).
 Choose `ble` for Bluetooth or `full` for experimental USB serial support.
 No Rust compiler is needed for a prebuilt download.
+
+With Rust 1.98 or newer, install from crates.io:
+
+```sh
+cargo install thermark --locked
+```
+
+See the [installation guide](docs/installation.md) for Linux prerequisites,
+archive installation, upgrades, and troubleshooting.
 
 Turn on your B1, load 50×30 mm labels, and quit the vendor app. Then:
 
@@ -93,22 +102,24 @@ For a prebuilt binary, [download the latest release](https://github.com/kahwee/t
 Choose `ble` for the hardware-tested B1-over-Bluetooth path, or `full` to also
 include experimental USB serial support. Builds are available for Linux
 x86_64/ARM64 and macOS Apple Silicon/Intel; verification and unpacking commands
-are below. Building from source requires Rust:
+are below. To install a development checkout instead:
 
 ```bash
-scripts/build.sh
+git clone https://github.com/kahwee/thermark.git
+cd thermark
+cargo install --path . --locked
 
 # Quit the vendor app first; only one BLE client can hold the printer.
-./target/release/thermark scan --save
-./target/release/thermark identify
-./target/release/thermark doctor --use-config
+thermark scan --save
+thermark identify
+thermark doctor --use-config
 ```
 
 When asking for setup help, create a support report that is safe to attach to
 a public issue:
 
 ```bash
-./target/release/thermark doctor --use-config --json > thermark-report.json
+thermark doctor --use-config --json > thermark-report.json
 ```
 
 The JSON includes the operating system, architecture, enabled transports, and
@@ -160,7 +171,8 @@ printer; failed golden renders appear in `target/golden-actual/`.
 To capture the exact model, firmware, geometry, and task for a hardware report:
 
 ```bash
-./target/release/thermark identify --json \
+mkdir -p local
+thermark identify --json \
   > local/printer-identity.json
 ```
 
@@ -180,8 +192,8 @@ Before retrying, disconnect the printer in macOS Bluetooth settings, quit any
 vendor label app, wake or power-cycle the printer, and then run:
 
 ```bash
-./target/release/thermark scan
-./target/release/thermark doctor --use-config
+thermark scan
+thermark doctor --use-config
 ```
 
 If `doctor` reports a matching `/dev/cu.…` endpoint, that supports the ownership
@@ -199,7 +211,7 @@ Guest Wi-Fi:
 
 ```bash
 THERMARK_WIFI_PASSWORD='your-password' \
-  ./target/release/thermark wifi \
+  thermark wifi \
   --ssid "YourNetwork" \
   --label 50x30
 ```
@@ -207,7 +219,7 @@ THERMARK_WIFI_PASSWORD='your-password' \
 Open networks do not need a password:
 
 ```bash
-./target/release/thermark wifi \
+thermark wifi \
   --ssid "Cafe-Guest" \
   --security nopass \
   --label 50x30
@@ -216,7 +228,7 @@ Open networks do not need a password:
 URL with readable text:
 
 ```bash
-./target/release/thermark qr \
+thermark qr \
   --url "https://example.com/o/1042" \
   --text $'ORDER #1042\nPriority' \
   --font-name helvetica \
@@ -226,7 +238,7 @@ URL with readable text:
 Plain text:
 
 ```bash
-./target/release/thermark text \
+thermark text \
   --text $'FRAGILE\nthis way up' \
   --label 50x30
 ```
@@ -234,7 +246,7 @@ Plain text:
 Existing artwork:
 
 ```bash
-./target/release/thermark print \
+thermark print \
   -i local/prints/art.png \
   --label 50x30 \
   --no-fill \
@@ -272,7 +284,7 @@ explicitly saved pixel inset and `--full-bleed` remain exact.
 Preview the exact bitmap for the selected profile without printing:
 
 ```bash
-./target/release/thermark print \
+thermark print \
   -i local/prints/art.png \
   --label 50x30 \
   --preview local/preview.png
@@ -290,8 +302,8 @@ and printed page share the same profile-sized render.
 Check label placement on hardware:
 
 ```bash
-./target/release/thermark calibrate --label 50x30
-./target/release/thermark calibrate --boundary --label 50x30
+thermark calibrate --label 50x30
+thermark calibrate --boundary --label 50x30
 ```
 
 ### Label size and RFID
