@@ -82,18 +82,8 @@ impl Packet {
     /// Fails with [`PacketError::DataTooLong`] rather than truncating the
     /// length field and emitting an undecodable frame.
     pub fn encode(&self) -> Result<Vec<u8>, PacketError> {
-        let len = u8::try_from(self.data.len()).map_err(|_| PacketError::DataTooLong {
-            len: self.data.len(),
-        })?;
-        let sum = Self::checksum(self.cmd, len, &self.data);
-        let mut out = Vec::with_capacity(7 + self.data.len());
-        out.extend_from_slice(&HEAD);
-        out.push(self.cmd);
-        out.push(len);
-        out.extend_from_slice(&self.data);
-        out.push(sum);
-        out.extend_from_slice(&TAIL);
-        Ok(out)
+        let mut frame = [0; MAX_FRAME_LEN];
+        Ok(self.encode_into(&mut frame)?.to_vec())
     }
 
     /// Encode into caller-owned storage large enough for any valid frame.
@@ -354,14 +344,22 @@ mod tests {
     }
 
     #[test]
-    fn fixed_buffer_encoding_matches_allocating_encoding_at_every_length() {
+    fn encoding_preserves_wire_fields_at_every_length() {
         let mut frame = [0xCC; MAX_FRAME_LEN];
         for len in 0..=MAX_DATA_LEN {
             let data: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(37)).collect();
             let packet = Packet::new((len as u8).wrapping_mul(11), data);
-            let expected = packet.encode().unwrap();
-            let actual = packet.encode_into(&mut frame).unwrap();
-            assert_eq!(actual, expected, "payload length {len}");
+            let encoded = packet.encode().unwrap();
+            assert_eq!(encoded.len(), FRAME_OVERHEAD + len);
+            assert_eq!(&encoded[..2], &HEAD);
+            assert_eq!(encoded[2], packet.cmd);
+            assert_eq!(usize::from(encoded[3]), len);
+            assert_eq!(&encoded[4..4 + len], packet.data);
+            // Every byte from CMD through CHECKSUM XORs to zero.
+            assert_eq!(encoded[2..5 + len].iter().fold(0, |sum, b| sum ^ b), 0);
+            assert_eq!(&encoded[5 + len..], &TAIL);
+            assert_eq!(Packet::decode(&encoded).unwrap(), packet);
+            assert_eq!(packet.encode_into(&mut frame).unwrap(), encoded);
         }
     }
 

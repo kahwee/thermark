@@ -22,6 +22,55 @@ fn temp_config_path() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
+/// Exercise the documented first-run preview from an empty working directory.
+/// A vendored font makes the output portable even on a minimal CI image.
+#[test]
+fn installation_preview_is_scannable_without_creating_config() {
+    let dir = tempfile::tempdir().expect("temporary installation workspace");
+    let config = dir.path().join("config.json");
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf");
+    thermark_with_config(&config)
+        .current_dir(dir.path())
+        .args([
+            "qr",
+            "--url",
+            "https://example.com",
+            "--text",
+            "Hello, label!",
+            "--model",
+            "b1",
+            "--label",
+            "50x30",
+            "--save",
+            "hello-label.png",
+            "--no-print",
+            "--font",
+        ])
+        .arg(font)
+        .assert()
+        .success();
+
+    let gray = image::open(dir.path().join("hello-label.png"))
+        .expect("read first-run preview")
+        .to_luma8();
+    assert_eq!(gray.dimensions(), (384, 240));
+    let mut decoder = quircs::Quirc::default();
+    let codes: Vec<_> = decoder
+        .identify(gray.width() as usize, gray.height() as usize, gray.as_raw())
+        .map(|code| {
+            code.expect("detect QR")
+                .decode()
+                .expect("decode QR")
+                .payload
+        })
+        .collect();
+    assert_eq!(codes, vec![b"https://example.com".to_vec()]);
+    assert!(
+        !config.exists(),
+        "offline preview must not save printer config"
+    );
+}
+
 #[test]
 fn help_exits_zero() {
     thermark()

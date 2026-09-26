@@ -10,6 +10,14 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Changed
+
+- Share one packet encoder between allocating library calls and transport
+  buffer writes, preserving the existing wire format and public API.
+- Expand installation troubleshooting and contributor guidance, with an
+  offline CLI regression test that decodes the first-label QR and checks that
+  rendering creates no printer configuration across transport feature sets.
+
 ## [0.33.0] - 2026-09-25
 
 ### Added

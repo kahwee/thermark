@@ -330,6 +330,10 @@ For connection failures on macOS, follow the
 
 ## Development
 
+Start with the [contributor guide](CONTRIBUTING.md) for checkout instructions,
+module ownership, and choosing a useful regression test. Recent cleanup decisions
+and ongoing checks are recorded in [maintenance notes](docs/maintenance-notes.md).
+
 ```bash
 scripts/check.sh all       # formatting, Clippy, tests, and docs across feature sets
 scripts/check.sh render    # golden, fixture, and placement checks
