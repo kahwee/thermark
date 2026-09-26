@@ -10,8 +10,8 @@
 //!
 //! | Feature | Default | Enables |
 //! |---------|---------|---------|
-//! | `ble` | yes | [`BleTransport`] via btleplug |
-//! | `serial` | yes | [`SerialTransport`] via serialport |
+//! | `ble` | yes | `BleTransport` via btleplug |
+//! | `serial` | yes | `SerialTransport` via serialport |
 //!
 //! Protocol-only / mock testing: `cargo test --no-default-features`.
 //!

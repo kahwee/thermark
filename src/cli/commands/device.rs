@@ -134,6 +134,10 @@ pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
 }
 
 #[cfg(not(feature = "ble"))]
+#[expect(
+    clippy::unused_async,
+    reason = "matches the async signature of Bluetooth scanning"
+)]
 pub async fn scan(_seconds: u64, _save: bool, _prefer_name: Option<&str>) -> Result<()> {
     anyhow::bail!("this thermark binary was built without Bluetooth support")
 }

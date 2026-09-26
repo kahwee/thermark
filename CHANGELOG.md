@@ -10,13 +10,28 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-25
+
 ### Added
+
+- Packet-stream property tests for fragmentation, corruption recovery, and
+  bounded buffering, plus a reproducible decoder benchmark.
+- macOS CI, feature-matrix lint/test/documentation checks, and scheduled
+  RustSec dependency auditing.
 
 - `thermark doctor --json` emits a stable, privacy-safe support report with the
   host platform, enabled transports, and check outcomes while omitting printer
   identifiers, RFID barcodes, serial numbers, and local filesystem paths.
 
 ### Changed
+
+- Decode batched packets without repeatedly shifting the remaining buffer;
+  bound retained receive allocations and validate checksums before allocating
+  packet payloads.
+- Use Rust 1.98 buffered integer formatting for calibration labels, remove
+  redundant clones and async helpers, and forbid unsafe code in this crate.
+- Prepare the first crates.io source distribution with an explicit file list
+  and transport-free hosted API documentation.
 
 - Refreshed the locked dependency graph, including `btleplug` 0.13.2 and
   `libredox` 0.1.25, and aligned development documentation on the shared

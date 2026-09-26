@@ -72,8 +72,7 @@ impl PrinterDevice {
         identity: PrinterIdentity,
         update_task: bool,
     ) -> Option<&'static PrinterProfile> {
-        self.identity = Some(identity);
-        let identity = self.identity.as_ref().expect("identity was just stored");
+        let identity = self.identity.insert(identity);
         let profile = profile_for_identity(identity)?;
         let detected_task = task_for_identity(identity);
         self.profile = profile;

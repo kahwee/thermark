@@ -564,6 +564,10 @@ async fn doctor_ble(
 }
 
 #[cfg(not(feature = "ble"))]
+#[expect(
+    clippy::unused_async,
+    reason = "matches the async signature of the enabled transport diagnostic"
+)]
 async fn doctor_ble(
     checks: &mut Vec<Check>,
     _addr: Option<&str>,
@@ -613,6 +617,10 @@ async fn doctor_usb(
 }
 
 #[cfg(not(feature = "serial"))]
+#[expect(
+    clippy::unused_async,
+    reason = "matches the async signature of the enabled transport diagnostic"
+)]
 async fn doctor_usb(
     checks: &mut Vec<Check>,
     _addr: Option<&str>,

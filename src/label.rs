@@ -245,10 +245,9 @@ pub fn make_calibration_label(
     font_path: Option<&std::path::Path>,
 ) -> Result<GrayImage> {
     let mut img = crate::image_encode::calibration_pattern(label, Some(safe), pixels_per_mm);
-    let font = match load_font(font_path, None) {
-        Ok(f) => f,
+    let Ok(font) = load_font(font_path, None) else {
         // No system font: the geometric pattern is still perfectly usable.
-        Err(_) => return Ok(img),
+        return Ok(img);
     };
 
     let scale = pixels_per_mm / crate::geometry::PX_PER_MM;
@@ -259,13 +258,14 @@ pub fn make_calibration_label(
         ((crate::image_encode::CALIBRATION_RULER_MAJOR_PX + 4) as f64 * scale).round() as u32;
 
     let height_mm = (f64::from(label.height_px) / pixels_per_mm).floor() as u32;
+    let mut number = core::fmt::NumBuffer::new();
     for mm in (0..=height_mm).step_by(5) {
         let y = (f64::from(mm) * pixels_per_mm).round() as u32;
         if y >= label.height_px {
             break;
         }
-        let text = mm.to_string();
-        let w = font.text_width(&text, size);
+        let text = mm.format_into(&mut number);
+        let w = font.text_width(text, size);
         if inset + w >= label.width_px - inset {
             break; // too narrow to letter without colliding
         }
@@ -273,12 +273,12 @@ pub fn make_calibration_label(
         // falls past the printable band — and that is the reading that matters
         // most, so it is exactly the one you must not lose.
         let baseline = y.max(size as u32) as f32 - 1.0;
-        font.draw_text(&mut img, inset as f32, baseline, &text, size);
+        font.draw_text(&mut img, inset as f32, baseline, text, size);
         font.draw_text(
             &mut img,
             (label.width_px - inset - w) as f32,
             baseline,
-            &text,
+            text,
             size,
         );
     }

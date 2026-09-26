@@ -21,7 +21,12 @@ env:
 
 jobs:
   build:
-    runs-on: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","Linux","X64","thermark-ci"]') || fromJSON('["ubuntu-latest"]') }}
+    name: Rust / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, macos]
+    runs-on: ${{ matrix.platform == 'macos' && 'macos-15' || github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","Linux","X64","thermark-ci"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: 20
 
     steps:
@@ -45,7 +50,7 @@ jobs:
       run: rustc --version && cargo --version
 
     - name: Install system dependencies
-      if: runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
@@ -61,7 +66,7 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: golden-actual
+        name: golden-actual-${{ matrix.platform }}
         path: ${{ env.CARGO_TARGET_DIR || 'target' }}/golden-actual/
         if-no-files-found: ignore
         retention-days: 7

@@ -554,7 +554,7 @@ mod tests {
 
         let mut with_safe_area = Config {
             safe_area: Some(SafeArea::B1),
-            ..original.clone()
+            ..original
         };
         let unchanged = with_safe_area.clone();
         assert!(

@@ -1,8 +1,8 @@
 //! Transports: Bluetooth LE (macOS-friendly) and USB serial.
 //!
 //! Enable with Cargo features:
-//! - `ble` — [`BleTransport`] (btleplug)
-//! - `serial` — [`SerialTransport`]
+//! - `ble` — `BleTransport` (btleplug)
+//! - `serial` — `SerialTransport`
 
 use crate::errors::{Error, Result};
 use crate::packet::{MAX_FRAME_LEN, Packet};

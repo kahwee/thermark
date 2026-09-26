@@ -138,14 +138,17 @@ impl Packet {
         if buf[total - 2] != TAIL[0] || buf[total - 1] != TAIL[1] {
             return Err(PacketError::BadTail);
         }
-        let data = buf[4..4 + len].to_vec();
+        let data = &buf[4..4 + len];
         let got = buf[4 + len];
         // `len` came from a single byte, so the cast back is lossless.
-        let expected = Self::checksum(cmd, len as u8, &data);
+        let expected = Self::checksum(cmd, len as u8, data);
         if got != expected {
             return Err(PacketError::BadChecksum { got, expected });
         }
-        Ok(Self { cmd, data })
+        Ok(Self {
+            cmd,
+            data: data.to_vec(),
+        })
     }
 
     /// Pull zero or more complete packets from a growing receive buffer.
@@ -170,8 +173,14 @@ impl PacketDecoder {
 
     /// Append bytes and return every complete, valid frame now available.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<Packet> {
-        self.buf.extend_from_slice(bytes);
-        Self::drain(&mut self.buf)
+        let mut packets = Vec::new();
+        // Bound the retained allocation even when a caller supplies a large
+        // batch. At most one incomplete frame survives each chunk.
+        for chunk in bytes.chunks(MAX_FRAME_LEN) {
+            self.buf.extend_from_slice(chunk);
+            Self::drain_into(&mut self.buf, &mut packets);
+        }
+        packets
     }
 
     pub fn buffered_len(&self) -> usize {
@@ -180,45 +189,64 @@ impl PacketDecoder {
 
     fn drain(buf: &mut Vec<u8>) -> Vec<Packet> {
         let mut packets = Vec::new();
-        loop {
-            if let Some(pos) = buf.windows(2).position(|w| w == HEAD) {
-                if pos > 0 {
-                    buf.drain(..pos);
-                }
-            } else {
-                let keep_prefix = buf.last().copied() == Some(HEAD[0]);
-                buf.clear();
-                if keep_prefix {
-                    buf.push(HEAD[0]);
-                }
-                break;
-            }
+        Self::drain_into(buf, &mut packets);
+        packets
+    }
 
-            if buf.len() < FRAME_OVERHEAD {
+    fn drain_into(buf: &mut Vec<u8>, packets: &mut Vec<Packet>) {
+        let mut consumed = 0;
+        loop {
+            let remaining = &buf[consumed..];
+            let Some(pos) = remaining.windows(2).position(|w| w == HEAD) else {
+                // A trailing 0x55 may be the start of the next frame.
+                consumed = buf.len() - usize::from(remaining.last() == Some(&HEAD[0]));
+                break;
+            };
+            consumed += pos;
+            let remaining = &buf[consumed..];
+            if remaining.len() < FRAME_OVERHEAD {
                 break;
             }
-            let total = FRAME_OVERHEAD + usize::from(buf[3]);
-            if buf.len() < total {
+            let total = FRAME_OVERHEAD + usize::from(remaining[3]);
+            if remaining.len() < total {
                 break;
             }
-            match Packet::decode(&buf[..total]) {
+            match Packet::decode(&remaining[..total]) {
                 Ok(packet) => {
                     packets.push(packet);
-                    buf.drain(..total);
+                    consumed += total;
                 }
-                Err(_) => {
-                    buf.drain(..1);
-                }
+                Err(_) => consumed += 1,
             }
         }
-        debug_assert!(buf.len() <= MAX_FRAME_LEN);
-        packets
+        // Compact once per batch instead of shifting the remaining bytes for
+        // every frame (quadratic work for a large coalesced read).
+        buf.drain(..consumed);
+        debug_assert!(buf.len() < MAX_FRAME_LEN);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_input_does_not_leave_a_large_receive_allocation() {
+        let packet = Packet::new(0x85, vec![0x42; MAX_DATA_LEN]);
+        let mut bytes = packet.encode().unwrap().repeat(4_096);
+        bytes.push(HEAD[0]);
+        let mut decoder = PacketDecoder::new();
+        let packets = decoder.push(&bytes);
+        assert_eq!(packets.len(), 4_096);
+        assert!(packets.iter().all(|p| p == &packet));
+        assert_eq!(decoder.buffered_len(), 1);
+        assert!(decoder.buf.capacity() <= MAX_FRAME_LEN * 4);
+        assert!(decoder.push(&[]).is_empty());
+        assert_eq!(decoder.buffered_len(), 1);
+        let frame = packet.encode().unwrap();
+        assert_eq!(decoder.push(&frame[1..]), vec![packet]);
+        assert_eq!(decoder.buffered_len(), 0);
+    }
 
     #[test]
     fn encode_simple_rfid() {

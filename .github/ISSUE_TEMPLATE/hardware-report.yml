@@ -1,0 +1,51 @@
+name: Printer compatibility report
+description: Help expand hardware-tested support with a real print result.
+title: "[Hardware] Model / connection / result"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. Use public demo data for prints. Do not post real Wi-Fi passwords, device addresses, serial numbers, or RFID identifiers. `thermark doctor --json` is designed for public reports; raw verbose logs and `identify --json` may contain identifiers.
+  - type: input
+    id: printer
+    attributes:
+      label: Printer model and firmware
+      description: Model from the case; firmware version if known. Omit serial numbers.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and thermark version
+      placeholder: macOS / Linux version; thermark --version
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options: [Bluetooth LE, USB serial]
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and label dimensions
+      description: Remove printer addresses and use demo content. Include any explicit task and --allow-experimental flag.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Physical result
+      description: Did the whole label print? Was the QR scannable? Did repeated prints match? Include a photo of demo content if possible. A successful build alone does not verify a printer.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Privacy-safe diagnostics
+      description: Optional output from thermark doctor --json. Review before posting.
+      render: json

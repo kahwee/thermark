@@ -95,9 +95,8 @@ async fn wait_for_exact_match(
             }
             Err(_) => return None,
         };
-        let id = match event {
-            CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) => id,
-            _ => continue,
+        let (CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id)) = event else {
+            continue;
         };
         let id_only = BleCandidate::new(id.to_string(), None);
         if !can_finish_connect_scan(selector, &id_only, BleMatchMode::Exact) {
@@ -271,7 +270,7 @@ impl BleTransport {
             return Err(error);
         }
 
-        let characteristic = match find_printer_char(&peripheral).await {
+        let characteristic = match find_printer_char(&peripheral) {
             Ok(characteristic) => characteristic,
             Err(error) => return Err(error),
         };
@@ -442,7 +441,7 @@ pub async fn bluetooth_available() -> Result<String> {
     Ok(name)
 }
 
-async fn find_printer_char(peripheral: &Peripheral) -> Result<Characteristic> {
+fn find_printer_char(peripheral: &Peripheral) -> Result<Characteristic> {
     let chars = peripheral.characteristics();
 
     if let Some(c) = chars.iter().find(|c| c.uuid == PRINTER_CHAR) {

@@ -6,8 +6,8 @@ usage() {
     cat <<'HELP'
 Usage: scripts/check.sh [rust|features|render|all]
 
-  rust      Formatting, Clippy, and the full default-feature suite (default)
-  features  Library feature matrix and BLE-only / serial-only binary builds
+  rust      Formatting, Clippy, and the default-feature tests and docs (default)
+  features  Clippy, unit/CLI tests, and docs for each transport feature set
   render    Golden renders, public fixtures, and label placement
   all       rust + features; matches CI without rerunning rendering tests
 
@@ -64,14 +64,19 @@ if [[ $mode == rust || $mode == all ]]; then
     run cargo fmt --all -- --check
     run cargo clippy --locked --all-targets -- -D warnings
     run cargo test --locked
+    run cargo doc --locked --no-deps
 fi
 
 if [[ $mode == features || $mode == all ]]; then
-    run cargo test --locked --lib --no-default-features
-    run cargo test --locked --lib --no-default-features --features ble
-    run cargo test --locked --lib --no-default-features --features serial
-    run cargo build --locked --bin thermark --no-default-features --features ble
-    run cargo build --locked --bin thermark --no-default-features --features serial
+    for feature in none ble serial; do
+        feature_args=(--no-default-features)
+        if [[ $feature != none ]]; then
+            feature_args+=(--features "$feature")
+        fi
+        run cargo clippy --locked --all-targets "${feature_args[@]}" -- -D warnings
+        run cargo test --locked --lib --bins --test cli --test packet_stream "${feature_args[@]}"
+        run cargo doc --locked --no-deps "${feature_args[@]}"
+    done
 fi
 
 if [[ $mode == render ]]; then

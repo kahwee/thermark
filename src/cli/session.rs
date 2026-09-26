@@ -167,6 +167,10 @@ impl Session<AnyTransport> {
     }
 
     #[allow(unused_variables)]
+    #[cfg_attr(
+        not(any(feature = "ble", feature = "serial")),
+        expect(clippy::unused_async, reason = "connecting awaits enabled transports")
+    )]
     async fn connect_with_identity(
         conn: &ResolvedConn,
         model: Model,

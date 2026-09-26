@@ -1567,7 +1567,7 @@ mod tests {
 
         for placed in [
             fill_label(src.clone(), lp, safe, 0).unwrap(),
-            contain_label(src.clone(), lp, safe, 0).unwrap(),
+            contain_label(src, lp, safe, 0).unwrap(),
         ] {
             let g = placed.to_luma8();
             assert_eq!(g.dimensions(), (lp.width_px, lp.height_px));

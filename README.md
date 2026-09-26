@@ -1,13 +1,57 @@
 # thermark
 
-Local, scriptable sticker printing for pocket thermal printers over Bluetooth LE
-or USB serial. No vendor app, cloud service, or account.
+**Print labels without the vendor app.** Local, scriptable QR codes, Wi-Fi
+stickers, inventory tags, and text for pocket thermal printers. No cloud or
+account needed to print.
 
-thermark is intentionally **monochrome** and **B1-first**. The primary tested
-setup is a B1-class printer with 50×30 mm labels rendered at 384×240 px.
-The B1-over-BLE path is the only hardware-verified transport in this repository.
-USB serial is implemented and mock-tested, but has not been verified against
-the owned printer.
+[Download for macOS or Linux](https://github.com/kahwee/thermark/releases/latest) ·
+[Watch the offline demo](https://kahwee.github.io/thermark/) ·
+[Report your printer](https://github.com/kahwee/thermark/issues/new?template=hardware-report.yml)
+
+**Hardware-tested: B1 over Bluetooth LE.** USB and other printer profiles are
+experimental. thermark prints monochrome labels; it does not support colour
+printing.
+
+## Install and print your first label
+
+On macOS (Apple Silicon or Intel), install the prebuilt BLE binary:
+
+```sh
+brew install kahwee/thermark/thermark
+```
+
+For Linux, or macOS without Homebrew, use the
+[prebuilt downloads](https://github.com/kahwee/thermark/releases/latest).
+Choose `ble` for Bluetooth or `full` for experimental USB serial support.
+No Rust compiler is needed for a prebuilt download.
+
+Turn on your B1, load 50×30 mm labels, and quit the vendor app. Then:
+
+```sh
+thermark scan --save
+thermark doctor --use-config
+thermark qr --url "https://example.com" --text "Hello, label!" --label 50x30
+```
+
+If several printers appear, follow the scan selection hint. On macOS, allow
+Bluetooth access for your terminal when requested. See
+[connection troubleshooting](#macos-bluetooth-ownership) if discovery fails.
+
+### Try it without a printer
+
+```sh
+thermark qr --url "https://example.com" --text "Hello, label!" \
+  --model b1 --label 50x30 --save hello-label.png --no-print
+```
+
+This saves a real PNG locally without connecting to hardware. Scan its QR or
+inspect the layout before spending a label.
+
+| Guest Wi-Fi | Inventory | URL + text |
+| --- | --- | --- |
+| ![Demo Wi-Fi label with fake credentials](fixtures/sticker_wifi.png) | ![Demo inventory label](fixtures/sticker_inventory.png) | ![Demo URL label](fixtures/sticker_link.png) |
+
+These are rendered previews using public demo data, not photographs of prints.
 
 ## What it does
 
@@ -30,10 +74,21 @@ Printing with any profile/task/connection combination other than B1+B1 over
 BLE requires `--allow-experimental`; offline previews and saved renders do not.
 Multi-colour printheads and colour raster protocols are out of scope.
 
-Requires Rust 1.98 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
+Building from source requires Rust 1.98 or newer. [`rust-toolchain.toml`](rust-toolchain.toml) tracks
 the current stable toolchain for rustup users.
 
 ## Build and set up
+
+Build from GitHub with Cargo:
+
+```sh
+cargo install --git https://github.com/kahwee/thermark --locked
+# BLE only:
+cargo install --git https://github.com/kahwee/thermark --locked --no-default-features --features ble
+```
+
+The first crates.io release is prepared but not yet published. Until then,
+use the commands above or a prebuilt binary.
 
 For a prebuilt binary, [download the latest release](https://github.com/kahwee/thermark/releases/latest).
 Choose `ble` for the hardware-tested B1-over-Bluetooth path, or `full` to also
@@ -81,13 +136,13 @@ example (replace the version and platform with your download):
 
 ```bash
 # Linux
-sha256sum --check thermark-0.32.0-Linux-X64-ble.tar.gz.sha256
+sha256sum --check thermark-0.33.0-Linux-X64-ble.tar.gz.sha256
 
 # macOS
-shasum -a 256 --check thermark-0.32.0-macOS-ARM64-ble.tar.gz.sha256
+shasum -a 256 --check thermark-0.33.0-macOS-ARM64-ble.tar.gz.sha256
 
-tar -xzf thermark-0.32.0-macOS-ARM64-ble.tar.gz
-cd thermark-0.32.0-macOS-ARM64-ble
+tar -xzf thermark-0.33.0-macOS-ARM64-ble.tar.gz
+cd thermark-0.33.0-macOS-ARM64-ble
 ./thermark --version
 ./thermark tasks
 ```
@@ -95,8 +150,8 @@ cd thermark-0.32.0-macOS-ARM64-ble
 Contributors can run the same validation entry point locally and in CI:
 
 ```bash
-scripts/check.sh           # formatting, Clippy, default-feature tests
-scripts/check.sh all       # also test and build the transport feature matrix
+scripts/check.sh           # formatting, Clippy, default-feature tests and docs
+scripts/check.sh all       # also lint/test/document each transport feature set
 scripts/check.sh render    # focused golden / fixture / placement checks
 ```
 
@@ -265,17 +320,37 @@ For connection failures on macOS, follow the
 ## Development
 
 ```bash
-scripts/check.sh all       # formatting, Clippy, tests, and feature builds
+scripts/check.sh all       # formatting, Clippy, tests, and docs across feature sets
 scripts/check.sh render    # golden, fixture, and placement checks
-cargo bench --bench image_pipeline
+cargo bench --locked --bench image_pipeline
+cargo bench --locked --no-default-features --bench packet_decoder
+PROPTEST_CASES=4096 cargo test --locked --no-default-features --test packet_stream
 ```
 
 Linux BLE builds require `libdbus-1-dev` and `pkg-config`. The shared check
 script uses locked dependencies, rejects accidental golden-image updates, and
-matches the validation run by CI.
+matches the validation run by CI on Linux and macOS. Packet-stream property
+tests cover arbitrary fragmentation, full-size payloads, corruption recovery,
+and bounded retained input. Commit any generated `proptest-regressions/` seeds
+when fixing a failing property so the same input stays covered.
 
-The benchmark reports CPU-only medians. Compare runs on the same host, and
-measure peak RSS in separate processes when evaluating memory changes.
+Dependency security runs separately on dependency changes and weekly against
+the current RustSec advisory database, failing on vulnerabilities, unsoundness
+advisories, and yanked crates.
+Unmaintained notices remain visible: `ab_glyph` currently pulls in
+`ttf-parser`, covered by [RUSTSEC-2026-0192](https://rustsec.org/advisories/RUSTSEC-2026-0192).
+There is no patched upstream version; replacing the font engine needs dedicated
+rendering verification. To reproduce it locally:
+
+```bash
+cargo install cargo-audit --version 0.22.2 --locked
+cargo audit --deny unsound --deny yanked
+```
+
+The benchmarks report CPU-only medians. Compare runs on the same host, and
+measure peak RSS in separate processes when evaluating memory changes. See the
+[packet decoder measurements](docs/packet-decoder-benchmark.md) for the bulk-read
+optimization and its small-read tradeoff.
 
 The architecture keeps four concerns separate:
 
@@ -294,3 +369,13 @@ contributor invariants.
 ## License
 
 MIT
+
+## Help support more printers
+
+Own a B1 Pro, B21 Pro, D11, D11_H, or D110? A physical test with public demo
+content helps more than a successful compilation. Share your model, firmware,
+OS, connection, label size, privacy-safe diagnostics, and a photo of the result
+through the [hardware report form](https://github.com/kahwee/thermark/issues/new?template=hardware-report.yml).
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for a short testing checklist. Support
+status changes only when the evidence supports it.

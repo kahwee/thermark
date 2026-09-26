@@ -509,7 +509,8 @@ fn fonts_runs() {
 
 #[test]
 fn doctor_host_only_runs() {
-    let assert = thermark().arg("doctor").assert();
+    let (_dir, path) = temp_config_path();
+    let assert = thermark_with_config(&path).arg("doctor").assert();
     let output = assert.get_output();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
