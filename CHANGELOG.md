@@ -10,6 +10,12 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Fixed
+
+- Include `local/README.md` in the crates.io source package so the Wi-Fi
+  save-path guard's "see local/README.md" pointer resolves for registry
+  checkouts (personal prints under `local/` remain gitignored).
+
 ### Changed
 
 - Share one packet encoder between allocating library calls and transport

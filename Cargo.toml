@@ -15,10 +15,12 @@ categories = ["hardware-support", "command-line-utilities"]
 repository = "https://github.com/kahwee/thermark"
 # Publish the usable source distribution, including offline tests and licenses.
 # Personal output and runner infrastructure must never enter a registry package.
+# Keep local/README.md: the Wi-Fi save guard points at it; ignore real prints.
 include = [
     "/src/**", "/benches/**", "/examples/**", "/tests/**", "/fixtures/**",
     "/docs/*.md", "/scripts/**", "/Cargo.toml", "/Cargo.lock",
-    "/README.md", "/CHANGELOG.md", "/CONTRIBUTING.md", "/AGENTS.md", "/LICENSE", "/rust-toolchain.toml",
+    "/README.md", "/CHANGELOG.md", "/CONTRIBUTING.md", "/AGENTS.md", "/LICENSE",
+    "/rust-toolchain.toml", "/local/README.md",
 ]
 
 [package.metadata.docs.rs]
