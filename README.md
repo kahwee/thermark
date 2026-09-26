@@ -79,16 +79,15 @@ the current stable toolchain for rustup users.
 
 ## Build and set up
 
-Build from GitHub with Cargo:
+Install from [crates.io](https://crates.io/crates/thermark) with Cargo:
 
 ```sh
-cargo install --git https://github.com/kahwee/thermark --locked
+cargo install thermark --locked
 # BLE only:
-cargo install --git https://github.com/kahwee/thermark --locked --no-default-features --features ble
+cargo install thermark --locked --no-default-features --features ble
 ```
 
-The first crates.io release is prepared but not yet published. Until then,
-use the commands above or a prebuilt binary.
+Published library documentation is available on [docs.rs](https://docs.rs/thermark).
 
 For a prebuilt binary, [download the latest release](https://github.com/kahwee/thermark/releases/latest).
 Choose `ble` for the hardware-tested B1-over-Bluetooth path, or `full` to also
