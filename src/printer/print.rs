@@ -155,11 +155,6 @@ impl<T: Transport> PrinterClient<T> {
             match completion {
                 Completion::PageIndex => {
                     for packet in self.recv_pkts(self.pacing.poll_wait()).await? {
-                        if packet.cmd == 0xdb {
-                            return Err(Error::Printer(PrinterFault::from_u8(
-                                packet.data.first().copied().unwrap_or(0),
-                            )));
-                        }
                         if packet.cmd == 0xe0
                             && packet
                                 .data

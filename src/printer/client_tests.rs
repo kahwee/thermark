@@ -14,6 +14,56 @@ fn client_b1() -> PrinterClient<MockTransport> {
 }
 
 #[tokio::test]
+async fn coalesced_fault_takes_priority_over_ack_in_either_order() {
+    let ack = Packet::new(0x31, vec![0x01]).encode().unwrap();
+    let fault = Packet::new(0xdb, vec![PrinterFault::COVER_OPEN.code()])
+        .encode()
+        .unwrap();
+    for batch in [[ack.clone(), fault.clone()], [fault.clone(), ack.clone()]] {
+        let mut mock = MockTransport::new();
+        mock.auto_reply(false);
+        mock.push_rx_raw(batch.concat());
+        let mut client = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let error = client.set_density(Density::NORMAL).await.unwrap_err();
+        assert!(matches!(error, Error::Printer(PrinterFault::COVER_OPEN)));
+        assert_eq!(client.transport().tx_cmds(), [Cmd::SetDensity as u8]);
+    }
+}
+
+#[tokio::test]
+async fn fallback_heartbeat_preserves_fault_and_blocks_printing() {
+    // Exhaust the standard heartbeat attempts, then return an alternate
+    // heartbeat and a fault together in one transport read.
+    for with_heartbeat in [false, true] {
+        let mut mock = MockTransport::new();
+        mock.mute_cmd(Cmd::Heartbeat as u8);
+        for _ in 0..8 {
+            mock.push_rx_raw(Vec::new());
+        }
+        let mut batch = Vec::new();
+        if with_heartbeat {
+            let mut ready = vec![0; 13];
+            ready[10] = 3;
+            ready[12] = 1;
+            batch.extend(Packet::new(0xde, ready).encode().unwrap());
+        }
+        batch.extend(
+            Packet::new(0xdb, vec![PrinterFault::NO_PAPER.code()])
+                .encode()
+                .unwrap(),
+        );
+        mock.push_rx_raw(batch);
+        let mut client = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let error = client
+            .print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Printer(PrinterFault::NO_PAPER)));
+        assert_eq!(client.transport().tx_cmds(), vec![Cmd::Heartbeat as u8; 9]);
+    }
+}
+
+#[tokio::test]
 async fn b1_print_gray_sends_expected_command_order() {
     let mut c = client_b1();
     assert_eq!(c.print_task(), PrintTask::B1);

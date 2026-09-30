@@ -29,6 +29,15 @@ impl<T: Transport> PrinterClient<T> {
                 "RX pkt"
             );
         }
+        // A read can coalesce an ACK/completion and a later fault. Inspect
+        // the entire batch before callers return on the first matching reply,
+        // otherwise that fault is discarded. This also covers the alternate
+        // heartbeat fallback, which does not go through transceive_with.
+        if let Some(packet) = packets.iter().find(|packet| packet.cmd == 0xdb) {
+            return Err(Error::Printer(PrinterFault::from_u8(
+                packet.data.first().copied().unwrap_or(0),
+            )));
+        }
         Ok(packets)
     }
 
@@ -76,10 +85,6 @@ impl<T: Transport> PrinterClient<T> {
             }
 
             for p in self.recv_pkts(wait).await? {
-                if p.cmd == 0xdb {
-                    let code = p.data.first().copied().unwrap_or(0);
-                    return Err(Error::Printer(PrinterFault::from_u8(code)));
-                }
                 if p.cmd == response_cmd {
                     return Ok(p);
                 }
