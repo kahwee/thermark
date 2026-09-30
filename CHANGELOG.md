@@ -12,11 +12,18 @@ such change is listed under **Changed** with the old and new spelling.
 
 ### Fixed
 
+- Reject non-finite and non-positive font sizes in CLI and library label
+  rendering. Reject overflowing text before drawing or saving a partial label,
+  preserving the registration margins and adjacent QR code.
+
 - Include `local/README.md` in the crates.io source package so the Wi-Fi
   save-path guard's "see local/README.md" pointer resolves for registry
   checkouts (personal prints under `local/` remain gitignored).
 
 ### Changed
+
+- `label::draw_text_block(...) -> ()` now returns `Result<()>`; callers must
+  handle invalid font sizes and text that cannot fit inside its box.
 
 - Share one packet encoder between allocating library calls and transport
   buffer writes, preserving the existing wire format and public API.

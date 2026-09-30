@@ -44,6 +44,11 @@ thermark text \
   --label 50x30
 ```
 
+Text auto-fits by default. `--font-size` accepts a finite, positive number
+(rendered at 6–96 px). If text still cannot fit, rendering fails before saving
+or printing the label; shorten the text, use larger media, or reduce/omit the
+fixed font size. Text never spills into the registration margin or adjacent QR.
+
 Existing artwork:
 
 ```bash

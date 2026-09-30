@@ -10,6 +10,15 @@ use tracing::{debug, info};
 pub const MIN_FONT_PX: f32 = 10.0;
 pub const MAX_FONT_PX: f32 = 72.0;
 
+/// Validate an explicit font size before layout. Rendering retains its
+/// historical 6..=96 px clamp for finite, positive requests.
+pub fn validate_font_size(size: f32) -> Result<f32> {
+    if !size.is_finite() || size <= 0.0 {
+        return Err(Error::msg("font size must be a finite, positive number"));
+    }
+    Ok(size)
+}
+
 /// Well-known font locations on macOS (and a few cross-platform fallbacks).
 pub fn system_font_candidates() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -264,6 +273,38 @@ impl LabelFont {
             }
             caret += sf.h_advance(gid);
         }
+    }
+
+    /// Check the same positioned glyph bounds used by drawing, including
+    /// overhangs that advance-width measurements do not account for.
+    pub(crate) fn text_ink_fits(
+        &self,
+        text: &str,
+        px_height: f32,
+        x: f32,
+        baseline_y: f32,
+        bounds: crate::geometry::Rect,
+    ) -> bool {
+        let font = self.font();
+        let scale = PxScale::from(px_height);
+        let sf = font.as_scaled(scale);
+        let mut caret = x;
+        for ch in text.chars() {
+            let gid = font.glyph_id(ch);
+            let glyph = gid.with_scale_and_position(scale, ab_glyph::point(caret, baseline_y));
+            if let Some(outlined) = font.outline_glyph(glyph) {
+                let ink = outlined.px_bounds();
+                if ink.min.x < bounds.x as f32
+                    || ink.min.y < bounds.y as f32
+                    || ink.max.x > (u64::from(bounds.x) + u64::from(bounds.w)) as f32
+                    || ink.max.y > (u64::from(bounds.y) + u64::from(bounds.h)) as f32
+                {
+                    return false;
+                }
+            }
+            caret += sf.h_advance(gid);
+        }
+        true
     }
 
     /// Vertical extent of the *ink* in a wrapped block, relative to the first

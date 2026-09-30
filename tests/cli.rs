@@ -22,6 +22,49 @@ fn temp_config_path() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
+#[test]
+fn invalid_font_sizes_are_rejected_for_all_sticker_commands() {
+    let (dir, config) = temp_config_path();
+    let output = dir.path().join("label.png");
+    for command in [
+        vec!["text", "--text", "HELLO"],
+        vec!["qr", "--url", "https://example.com", "--text", "HELLO"],
+        vec!["wifi", "--ssid", "Demo-Guest", "--security", "nopass"],
+    ] {
+        for size in ["NaN", "inf", "-inf", "0", "-1"] {
+            thermark_with_config(&config)
+                .args(&command)
+                .arg(format!("--font-size={size}"))
+                .args(["--no-print", "--save"])
+                .arg(&output)
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("finite, positive"));
+            assert!(!output.exists());
+            assert!(!config.exists());
+        }
+    }
+}
+
+#[test]
+fn text_overflow_fails_without_saving_a_partial_label() {
+    let (dir, config) = temp_config_path();
+    let output = dir.path().join("label.png");
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf");
+    thermark_with_config(&config)
+        .args(["text", "--text"])
+        .arg("OVERFLOW\n".repeat(10))
+        .args(["--font-size", "96", "--no-print", "--font"])
+        .arg(&font)
+        .arg("--save")
+        .arg(&output)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("text does not fit"));
+    assert!(!output.exists());
+    assert!(!config.exists());
+}
+
 /// Exercise the documented first-run preview from an empty working directory.
 /// A vendored font makes the output portable even on a minimal CI image.
 #[test]

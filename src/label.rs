@@ -150,7 +150,7 @@ pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
         },
         TextAlign::Center,
         opts.font_size,
-    );
+    )?;
 
     if opts.border {
         draw_border(&mut img);
@@ -175,6 +175,8 @@ pub enum TextAlign {
 /// Wrap, size, and draw `text` inside `bx`. Shared by every label type.
 ///
 /// `font_size` of `None` auto-fits the largest size that keeps words whole.
+/// Returns an error without changing the image if the size is invalid or
+/// any text ink would fall outside `bx`.
 pub fn draw_text_block(
     img: &mut GrayImage,
     font: &LabelFont,
@@ -182,9 +184,22 @@ pub fn draw_text_block(
     bx: Rect,
     align: TextAlign,
     font_size: Option<f32>,
-) {
+) -> Result<()> {
+    if bx.w == 0
+        || bx.h == 0
+        || bx
+            .x
+            .checked_add(bx.w)
+            .is_none_or(|right| right > img.width())
+        || bx
+            .y
+            .checked_add(bx.h)
+            .is_none_or(|bottom| bottom > img.height())
+    {
+        return Err(Error::msg("text box must fit inside the label canvas"));
+    }
     let px = match font_size {
-        Some(s) => s.clamp(6.0, 96.0),
+        Some(s) => crate::font::validate_font_size(s)?.clamp(6.0, 96.0),
         None => font.fit_size(text, bx.w, bx.h),
     };
     let lines = font.wrap(text, bx.w, px);
@@ -206,6 +221,7 @@ pub fn draw_text_block(
         None => bx.y as f32 + font.ascent(px) as f32,
     };
 
+    let mut positions = Vec::with_capacity(lines.len());
     for line in &lines {
         let tw = font.text_width(line, px);
         let free = bx.w.saturating_sub(tw) as f32;
@@ -215,9 +231,19 @@ pub fn draw_text_block(
                 TextAlign::Center => free / 2.0,
                 TextAlign::Right => free,
             };
-        font.draw_text(img, tx, baseline, line, px);
+        if !font.text_ink_fits(line, px, tx, baseline, bx) {
+            return Err(Error::msg(
+                "text does not fit inside the label text area; shorten the text, use a larger label, \
+                 or reduce/omit --font-size",
+            ));
+        }
+        positions.push((tx, baseline));
         baseline += line_h;
     }
+    for (line, (tx, baseline)) in lines.iter().zip(positions) {
+        font.draw_text(img, tx, baseline, line, px);
+    }
+    Ok(())
 }
 
 fn draw_border(img: &mut GrayImage) {
@@ -393,7 +419,7 @@ pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
         area,
         opts.align,
         opts.font_size,
-    );
+    )?;
     if opts.border {
         draw_border(&mut img);
     }
@@ -494,6 +520,70 @@ mod tests {
 
     fn test_font_path() -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf")
+    }
+
+    #[test]
+    fn invalid_font_sizes_leave_the_image_unchanged() {
+        let font = LabelFont::load(&test_font_path()).unwrap();
+        let original = GrayImage::from_pixel(384, 240, Luma([255]));
+        let bx = Rect {
+            x: 4,
+            y: 12,
+            w: 376,
+            h: 216,
+        };
+        for size in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
+            let mut img = original.clone();
+            let error =
+                draw_text_block(&mut img, &font, "HELLO", bx, TextAlign::Center, Some(size))
+                    .unwrap_err();
+            assert!(error.to_string().contains("finite, positive"));
+            assert_eq!(img, original);
+        }
+    }
+
+    #[test]
+    fn overflowing_text_is_rejected_before_drawing_any_lines() {
+        let font = LabelFont::load(&test_font_path()).unwrap();
+        let original = GrayImage::from_pixel(384, 240, Luma([255]));
+        for (text, bx, size) in [
+            (
+                "OVERFLOW\n".repeat(10),
+                Rect {
+                    x: 4,
+                    y: 12,
+                    w: 376,
+                    h: 216,
+                },
+                Some(96.0),
+            ),
+            (
+                "OVERFLOW\n".repeat(100),
+                Rect {
+                    x: 4,
+                    y: 12,
+                    w: 376,
+                    h: 216,
+                },
+                None,
+            ),
+            (
+                "W".into(),
+                Rect {
+                    x: 4,
+                    y: 12,
+                    w: 16,
+                    h: 216,
+                },
+                Some(96.0),
+            ),
+        ] {
+            let mut img = original.clone();
+            let error =
+                draw_text_block(&mut img, &font, &text, bx, TextAlign::Center, size).unwrap_err();
+            assert!(error.to_string().contains("text does not fit"));
+            assert_eq!(img, original, "failed layout must not leave partial text");
+        }
     }
 
     #[test]

@@ -68,7 +68,7 @@ pub struct FontArgs {
     #[arg(long)]
     pub font_name: Option<String>,
     /// Text size in px (e.g. 11 = small). Default: auto-fit largest.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_font_size)]
     pub font_size: Option<f32>,
 }
 
@@ -97,6 +97,13 @@ impl ConnArgs {
 }
 
 // ─── Value parsers ──────────────────────────────────────────────────────────
+
+pub fn parse_font_size(s: &str) -> std::result::Result<f32, String> {
+    let size = s
+        .parse::<f32>()
+        .map_err(|_| "font size must be a finite, positive number".to_string())?;
+    thermark::font::validate_font_size(size).map_err(|error| error.to_string())
+}
 
 pub fn parse_density(s: &str) -> std::result::Result<Density, String> {
     s.parse::<Density>().map_err(|e| e.to_string())
