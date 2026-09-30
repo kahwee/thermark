@@ -62,6 +62,10 @@ inspect the layout before spending a label.
 
 These are rendered previews using public demo data, not photographs of prints.
 
+Explore [eight copy-and-paste label recipes](docs/recipes.md): Wi-Fi, inventory,
+manuals, return instructions, badges, storage, packing, and batch labels.
+Render the whole gallery with `sh examples/render-recipes.sh` from a source checkout.
+
 ## Support
 
 | Model family / path | Status |

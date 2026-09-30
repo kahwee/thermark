@@ -1,5 +1,8 @@
 # Printing, previews, and troubleshooting
 
+See the [label recipe gallery](recipes.md) for eight offline examples and a
+script that renders them all.
+
 ## Print stickers
 
 Always pass the physical label size. After `scan --save`, the printer address is
