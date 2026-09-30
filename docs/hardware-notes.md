@@ -179,7 +179,7 @@ implemented; the encoder splits long runs at the one-byte repeat limit of 255.
    a roll.
 
 8. **RFID tells you the consumable, not its size** — see
-   [Label size and RFID](../README.md#label-size-and-rfid). `consumablesType` could
+   [Label size and RFID](usage.md#label-size-and-rfid). `consumablesType` could
    auto-select the label type instead of thermark's hardcoded
    `set_label_type(1)`, which is the one place a wrong default costs a mis-feed
    on continuous stock. Not implemented; needs a roll of continuous paper to
