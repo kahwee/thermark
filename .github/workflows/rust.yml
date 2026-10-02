@@ -34,7 +34,7 @@ jobs:
 
     # Install the validated stable release explicitly. The runner image can lag
     # behind `rust-version` in Cargo.toml and fail before testing the change.
-    - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+    - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       with:
         toolchain: 1.99.0
         components: rustfmt, clippy
