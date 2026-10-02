@@ -5,8 +5,8 @@ edition = "2024"
 # Minimum supported Rust, not a request for a particular toolchain. Set to the
 # current stable so new language features can be used freely; the cost is that
 # anyone on an older toolchain cannot build, which is deliberate for a personal
-# CLI. CI installs stable explicitly so this stays honest.
-rust-version = "1.98"
+# CLI. CI installs the matching toolchain explicitly so this stays honest.
+rust-version = "1.99"
 description = "Local sticker printing for pocket thermal printers over BLE/USB — QR links, inventory tags, badges, photos; no vendor app"
 license = "MIT"
 readme = "README.md"

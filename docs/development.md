@@ -1,6 +1,6 @@
 # Build and verify thermark
 
-Requires Rust 1.98+; rustup follows `rust-toolchain.toml`. See
+Requires Rust 1.99+; rustup follows `rust-toolchain.toml`. See
 [installation prerequisites](installation.md) for native transport libraries.
 No printer is required for offline tests.
 

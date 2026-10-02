@@ -32,11 +32,11 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    # Install stable explicitly. The runner image ships some Rust, but it can
-    # lag behind the `rust-version` in Cargo.toml, and then the build fails for
-    # a reason unrelated to the change under test.
+    # Install the validated stable release explicitly. The runner image can lag
+    # behind `rust-version` in Cargo.toml and fail before testing the change.
     - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       with:
+        toolchain: 1.99.0
         components: rustfmt, clippy
 
     - name: Cache Rust dependencies

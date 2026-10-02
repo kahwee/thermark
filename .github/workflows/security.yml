@@ -30,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.99.0
       - name: Install RustSec audit tool
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Check locked dependencies against current advisories

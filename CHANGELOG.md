@@ -22,6 +22,9 @@ such change is listed under **Changed** with the old and new spelling.
 
 ### Changed
 
+- Build and test with Rust 1.99.0; raise the minimum Rust version to 1.99 in
+  line with the project's current-stable policy. Dependencies are unchanged.
+
 - `label::draw_text_block(...) -> ()` now returns `Result<()>`; callers must
   handle invalid font sizes and text that cannot fit inside its box.
 
