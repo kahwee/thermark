@@ -5,6 +5,17 @@ and crates.io. Finish and verify each step before reporting it as available.
 Only B1 with the b1 task over BLE is hardware-verified; automated checks do not
 establish support for another printer or transport.
 
+The repository's [release skill](../.agents/skills/release/SKILL.md) guides
+preparation, publication, and recovery. Its verifier checks an existing release
+without publishing or editing remote state:
+
+```sh
+python3 .agents/skills/release/scripts/verify_release.py \
+  --tag v<version> --expected-commit <tested-sha> \
+  --output <temporary-download-directory> --smoke \
+  --font tests/fonts/DejaVuSans.ttf
+```
+
 ## Prepare the source
 
 1. Review changes since the latest release and choose the version. While the
