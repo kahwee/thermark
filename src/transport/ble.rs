@@ -253,16 +253,26 @@ impl BleTransport {
             "connecting"
         );
 
-        peripheral.connect().await.map_err(|e| {
-            Error::transport(format!(
-                "BLE connect failed: {e}. \
+        let mut setup_guard = BleSetupGuard::new(&peripheral);
+        with_timeout("BLE connect", Duration::from_secs(15), async {
+            peripheral.connect().await.map_err(|e| {
+                Error::transport(format!(
+                    "BLE connect failed: {e}. \
                  Only one app can use the printer — quit the official label app, \
                  then retry. If it still fails: power-cycle the printer, move closer, \
                  and use the full name from `thermark scan` (exact match by default)."
-            ))
-        })?;
-        let mut setup_guard = BleSetupGuard::new(&peripheral);
-        if let Err(e) = peripheral.discover_services().await {
+                ))
+            })
+        })
+        .await?;
+        if let Err(e) = with_timeout("BLE discover services", Duration::from_secs(15), async {
+            peripheral
+                .discover_services()
+                .await
+                .map_err(|e| Error::transport(e.to_string()))
+        })
+        .await
+        {
             let error = Error::transport(format!(
                 "discover services failed: {e}. Wrong device or incomplete BLE connection — \
                  run `thermark scan` and pass -a with the full advertising name."
@@ -276,11 +286,25 @@ impl BleTransport {
         };
 
         let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        if let Err(e) = peripheral.subscribe(&characteristic).await {
+        if let Err(e) = with_timeout("BLE subscribe", IO_TIMEOUT, async {
+            peripheral
+                .subscribe(&characteristic)
+                .await
+                .map_err(|e| Error::transport(e.to_string()))
+        })
+        .await
+        {
             return Err(Error::transport(format!("subscribe: {e}")));
         }
 
-        let mut notif = match peripheral.notifications().await {
+        let mut notif = match with_timeout("BLE notifications", IO_TIMEOUT, async {
+            peripheral
+                .notifications()
+                .await
+                .map_err(|e| Error::transport(e.to_string()))
+        })
+        .await
+        {
             Ok(notifications) => notifications,
             Err(e) => return Err(Error::transport(format!("notifications stream: {e}"))),
         };
@@ -310,10 +334,13 @@ impl BleTransport {
         if let Some(task) = self.notify_task.take() {
             task.abort();
         }
-        self.peripheral
-            .disconnect()
-            .await
-            .map_err(|e| Error::transport(format!("BLE disconnect: {e}")))?;
+        with_timeout("BLE disconnect", IO_TIMEOUT, async {
+            self.peripheral
+                .disconnect()
+                .await
+                .map_err(|e| Error::transport(format!("BLE disconnect: {e}")))
+        })
+        .await?;
         self.closed = true;
         debug!("BLE disconnected");
         Ok(())
@@ -345,14 +372,17 @@ impl Drop for BleTransport {
 impl Transport for BleTransport {
     async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
         const CHUNK: usize = 180;
-        for chunk in data.chunks(CHUNK) {
-            self.peripheral
-                .write(&self.characteristic, chunk, self.write_type)
-                .await
-                .map_err(|e| Error::transport(format!("BLE write: {e}")))?;
-            sleep(Duration::from_millis(5)).await;
-        }
-        Ok(())
+        with_timeout("BLE write", IO_TIMEOUT, async {
+            for chunk in data.chunks(CHUNK) {
+                self.peripheral
+                    .write(&self.characteristic, chunk, self.write_type)
+                    .await
+                    .map_err(|e| Error::transport(format!("BLE write: {e}")))?;
+                sleep(Duration::from_millis(5)).await;
+            }
+            Ok(())
+        })
+        .await
     }
 
     async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
@@ -402,7 +432,14 @@ fn disconnect_on_drop(peripheral: Peripheral, success_message: &'static str) {
         RuntimeFlavor::MultiThread => {
             tokio::task::block_in_place(|| {
                 handle.block_on(async {
-                    match peripheral.disconnect().await {
+                    match with_timeout("BLE disconnect on drop", IO_TIMEOUT, async {
+                        peripheral
+                            .disconnect()
+                            .await
+                            .map_err(|e| Error::transport(e.to_string()))
+                    })
+                    .await
+                    {
                         Ok(()) => debug!("{success_message}"),
                         Err(e) => debug!(error = %e, "BLE disconnect on drop (ignored)"),
                     }
@@ -411,7 +448,13 @@ fn disconnect_on_drop(peripheral: Peripheral, success_message: &'static str) {
         }
         _ => {
             handle.spawn(async move {
-                let _ = peripheral.disconnect().await;
+                let _ = with_timeout("BLE disconnect on drop", IO_TIMEOUT, async {
+                    peripheral
+                        .disconnect()
+                        .await
+                        .map_err(|e| Error::transport(e.to_string()))
+                })
+                .await;
             });
         }
     }

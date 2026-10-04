@@ -13,7 +13,31 @@ fn client_b1() -> PrinterClient<MockTransport> {
     PrinterClient::new(MockTransport::new(), Model::B1).with_pacing(Pacing::INSTANT)
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
+async fn write_failure_is_never_retried_even_for_idempotent_commands() {
+    struct FailedWrite {
+        sends: usize,
+    }
+    impl Transport for FailedWrite {
+        async fn send_raw(&mut self, _data: &[u8]) -> crate::Result<()> {
+            self.sends += 1;
+            Err(Error::transport(
+                "write timed out; bytes may have been sent",
+            ))
+        }
+        async fn recv_raw(&mut self, _wait: Duration) -> crate::Result<Vec<u8>> {
+            panic!("must stop after a write failure")
+        }
+    }
+    let mut client = PrinterClient::new(FailedWrite { sends: 0 }, Model::B1);
+    assert!(matches!(
+        client.set_density(Density::NORMAL).await,
+        Err(Error::Transport(_))
+    ));
+    assert_eq!(client.transport().sends, 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn coalesced_fault_takes_priority_over_ack_in_either_order() {
     let ack = Packet::new(0x31, vec![0x01]).encode().unwrap();
     let fault = Packet::new(0xdb, vec![PrinterFault::COVER_OPEN.code()])
@@ -30,7 +54,7 @@ async fn coalesced_fault_takes_priority_over_ack_in_either_order() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fallback_heartbeat_preserves_fault_and_blocks_printing() {
     // Exhaust the standard heartbeat attempts, then return an alternate
     // heartbeat and a fault together in one transport read.
@@ -63,7 +87,7 @@ async fn fallback_heartbeat_preserves_fault_and_blocks_printing() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn b1_print_gray_sends_expected_command_order() {
     let mut c = client_b1();
     assert_eq!(c.print_task(), PrintTask::B1);
@@ -96,28 +120,104 @@ async fn b1_print_gray_sends_expected_command_order() {
     assert_eq!(st.data.len(), 7);
 }
 
-#[tokio::test]
-async fn transceive_decodes_a_header_split_across_transport_reads() {
-    let reply = Packet::new(0x31, vec![0x01]).encode().unwrap();
+#[tokio::test(start_paused = true)]
+async fn transceive_decodes_one_byte_reads_without_resending() {
+    for policy in [OnTimeout::Resend, OnTimeout::WaitOnly] {
+        let mut mock = MockTransport::new();
+        mock.auto_reply(false);
+        for byte in Packet::new(0x31, vec![0x01]).encode().unwrap() {
+            mock.push_rx_raw(vec![byte]);
+        }
+        let mut client = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+        let packet = client
+            .transceive_with(
+                protocol::set_density(3),
+                0x31,
+                1,
+                Duration::from_millis(50),
+                policy,
+            )
+            .await
+            .unwrap();
+        assert_eq!(packet.data, vec![0x01]);
+        assert_eq!(client.transport().tx_cmds(), vec![0x21]);
+    }
+}
+
+#[test]
+fn try_new_handles_models_without_default_tasks() {
+    let client = PrinterClient::try_new(MockTransport::new(), Model::B1).unwrap();
+    assert_eq!(client.print_task(), PrintTask::B1);
+    let Err(error) = PrinterClient::try_new(MockTransport::new(), Model::B18) else {
+        panic!("B18 has no default task");
+    };
+    assert!(error.to_string().contains("new_with_task"));
+    let client = PrinterClient::new_with_task(MockTransport::new(), Model::B18, PrintTask::B1);
+    assert_eq!(client.print_task(), PrintTask::B1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unrelated_packets_do_not_extend_deadlines() {
+    struct ChattyTransport {
+        sends: Vec<tokio::time::Instant>,
+    }
+    impl Transport for ChattyTransport {
+        async fn send_raw(&mut self, _data: &[u8]) -> crate::Result<()> {
+            self.sends.push(tokio::time::Instant::now());
+            Ok(())
+        }
+        async fn recv_raw(&mut self, _wait: Duration) -> crate::Result<Vec<u8>> {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            Ok(Packet::new(0x99, vec![1]).encode()?)
+        }
+    }
+    let start = tokio::time::Instant::now();
+    let mut client = PrinterClient::new(ChattyTransport { sends: Vec::new() }, Model::B1);
+    let error = client
+        .transceive_with(
+            protocol::set_density(3),
+            0x31,
+            2,
+            Duration::from_millis(50),
+            OnTimeout::Resend,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::Timeout { .. }));
+    assert_eq!(
+        client.transport().sends,
+        vec![start, start + Duration::from_millis(50)]
+    );
+    assert_eq!(
+        tokio::time::Instant::now() - start,
+        Duration::from_millis(100)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn partial_reply_can_finish_after_a_wait_only_deadline() {
+    let reply = Packet::new(0x31, vec![1]).encode().unwrap();
     let mut mock = MockTransport::new();
     mock.auto_reply(false);
-    mock.push_rx_raw(reply[..1].to_vec());
-    mock.push_rx_raw(reply[1..].to_vec());
-    let mut client = PrinterClient::new(mock, Model::B1).with_pacing(Pacing::INSTANT);
+    mock.push_rx_raw(reply[..3].to_vec());
+    mock.push_rx_raw(Vec::new());
+    mock.push_rx_raw(reply[3..].to_vec());
+    let mut client = PrinterClient::new(mock, Model::B1);
     let packet = client
         .transceive_with(
             protocol::set_density(3),
             0x31,
             2,
-            Duration::from_millis(1),
-            OnTimeout::Resend,
+            Duration::from_millis(50),
+            OnTimeout::WaitOnly,
         )
         .await
         .unwrap();
-    assert_eq!(packet.data, vec![0x01]);
+    assert_eq!(packet.data, vec![1]);
+    assert_eq!(client.transport().tx_cmds(), vec![0x21]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_start_error_lack_paper() {
     let mut mock = MockTransport::new();
     mock.fail_cmd(0x01, 0x02);
@@ -133,7 +233,7 @@ async fn print_start_error_lack_paper() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_start_error_cover_open() {
     let mut mock = MockTransport::new();
     mock.fail_cmd(0x01, 0x01);
@@ -149,7 +249,7 @@ async fn print_start_error_cover_open() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn d110_task_uses_short_print_start() {
     let mut c = PrinterClient::new(MockTransport::new(), Model::B1)
         .with_print_task(PrintTask::D110)
@@ -162,7 +262,7 @@ async fn d110_task_uses_short_print_start() {
     assert_eq!(ps.data.len(), 4);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn d110_sequence_orders_clear_and_quantity_inside_the_job() {
     let mut c = PrinterClient::new(MockTransport::new(), Model::D110).with_pacing(Pacing::INSTANT);
     c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
@@ -176,7 +276,7 @@ async fn d110_sequence_orders_clear_and_quantity_inside_the_job() {
     assert_eq!(c.transport().first_tx(0x13).unwrap().data.len(), 4);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn d11v1_uses_height_only_page_size_and_page_index_completion() {
     let mut c = PrinterClient::new(MockTransport::new(), Model::D11).with_pacing(Pacing::INSTANT);
     c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
@@ -187,7 +287,7 @@ async fn d11v1_uses_height_only_page_size_and_page_index_completion() {
     assert!(!c.transport().tx_cmds().contains(&0xa3));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn d110mv4_omits_page_start_and_uses_thirteen_byte_page_size() {
     let mut c = PrinterClient::new(MockTransport::new(), Model::B1Pro).with_pacing(Pacing::INSTANT);
     c.print_gray_image(&GrayImage::from_pixel(8, 1, Luma([0])), Density::NORMAL)
@@ -205,7 +305,7 @@ async fn d110mv4_omits_page_start_and_uses_thirteen_byte_page_size() {
     assert_eq!(commands.last(), Some(&0xdc));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn detected_identity_replaces_the_provisional_profile() {
     let mut mock = MockTransport::new();
     mock.set_model_id(4097);
@@ -219,7 +319,7 @@ async fn detected_identity_replaces_the_provisional_profile() {
     assert_eq!(c.transport().tx_cmds()[0], 0xc1);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn profile_identity_skips_presentation_metadata() {
     let mut c = client_b1();
     let identity = c.identify_profile().await.unwrap();
@@ -239,7 +339,7 @@ async fn profile_identity_skips_presentation_metadata() {
     assert_eq!(info_keys, vec![InfoKey::DeviceType as u8]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn full_identity_still_reads_version_metadata() {
     let mut c = client_b1();
     let identity = c.identify().await.unwrap();
@@ -263,7 +363,7 @@ async fn full_identity_still_reads_version_metadata() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fetch_summary_reads_info_keys() {
     let mut c = client_b1();
     let s = c.fetch_summary().await.unwrap();
@@ -274,7 +374,7 @@ async fn fetch_summary_reads_info_keys() {
     assert!(cmds.contains(&0xdc));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fetch_summary_does_not_hide_total_transport_failure() {
     let mut mock = MockTransport::new();
     mock.fail_receives("link down");
@@ -283,7 +383,7 @@ async fn fetch_summary_does_not_hide_total_transport_failure() {
     assert!(matches!(err, Error::Transport(message) if message.contains("link down")));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn rejects_zero_retry_budget() {
     let mut c = client_b1();
     let err = c
@@ -298,7 +398,7 @@ async fn rejects_zero_retry_budget() {
     assert!(matches!(err, Error::InvalidRetryBudget));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn density_out_of_range_errors() {
     assert!(Density::new(0).is_err());
     assert!(Density::new(6).is_err());
@@ -306,7 +406,7 @@ async fn density_out_of_range_errors() {
     assert!(c.set_density(Density::NORMAL).await.is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_not_confirmed_when_end_print_muted() {
     let mut mock = MockTransport::new();
     mock.mute_cmd(0xf3); // no PrintEnd reply
@@ -322,7 +422,7 @@ async fn print_not_confirmed_when_end_print_muted() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn density_nack_is_hard_error() {
     let mut mock = MockTransport::new();
     mock.reject_cmd(0x21);
@@ -344,7 +444,7 @@ async fn density_nack_is_hard_error() {
     assert!(!cmds.iter().any(|c| *c == 0x85 || *c == 0x84));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn start_print_nack_is_hard_error() {
     let mut mock = MockTransport::new();
     mock.reject_cmd(0x01);
@@ -366,7 +466,7 @@ async fn start_print_nack_is_hard_error() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn preflight_blocks_open_cover() {
     let mut mock = MockTransport::new();
     mock.heartbeat_not_ready_cover_open();
@@ -378,7 +478,7 @@ async fn preflight_blocks_open_cover() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn low_battery_warns_but_does_not_block() {
     // Level 1 is "low": dense pages may truncate, but ordinary labels
     // usually still print, so this must stay a warning.
@@ -393,7 +493,7 @@ async fn low_battery_warns_but_does_not_block() {
     assert!(c.preflight_ready().await.is_ok());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn empty_battery_still_blocks() {
     let mut mock = MockTransport::new();
     let mut d = [0u8; 13];
@@ -406,7 +506,7 @@ async fn empty_battery_still_blocks() {
     assert!(c.preflight_ready().await.is_err());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn preflight_blocks_no_paper() {
     let mut mock = MockTransport::new();
     mock.heartbeat_not_ready_no_paper();
@@ -418,7 +518,7 @@ async fn preflight_blocks_no_paper() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn preflight_preserves_fault_reported_by_heartbeat() {
     let mut mock = MockTransport::new();
     mock.fail_cmd(Cmd::Heartbeat as u8, PrinterFault::COVER_OPEN.code());
@@ -444,7 +544,7 @@ async fn preflight_preserves_fault_reported_by_heartbeat() {
     assert!(!c.transport().tx_cmds().contains(&(Cmd::PrintStart as u8)));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_image_file_opts_aborts_preflight() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dot.png");
@@ -483,7 +583,7 @@ async fn print_image_file_opts_aborts_preflight() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_gray_image_aborts_preflight_before_starting_a_job() {
     let mut mock = MockTransport::new();
     mock.heartbeat_not_ready_no_paper();
@@ -518,7 +618,7 @@ async fn print_gray_image_aborts_preflight_before_starting_a_job() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_gray_image_continues_when_heartbeat_is_unavailable() {
     let mut mock = MockTransport::new();
     mock.mute_cmd(Cmd::Heartbeat as u8);
@@ -533,7 +633,7 @@ async fn print_gray_image_continues_when_heartbeat_is_unavailable() {
     assert!(cmds.contains(&(Cmd::PrintStart as u8)));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn print_gray_image_stops_when_preflight_loses_transport() {
     let mut mock = MockTransport::new();
     mock.fail_receives("link down before printing");
@@ -547,7 +647,7 @@ async fn print_gray_image_stops_when_preflight_loses_transport() {
     assert!(!c.transport().tx_cmds().contains(&(Cmd::PrintStart as u8)));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn lost_write_is_recovered_by_resending_a_read() {
     // BLE writes are unacknowledged, so a dropped request can only be
     // recovered by sending it again — waiting longer never helps.
@@ -580,7 +680,7 @@ async fn lost_write_is_recovered_by_resending_a_read() {
     assert_eq!(frames, vec![expected.as_slice(); 3]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn state_advancing_commands_are_never_resent() {
     // Resending PrintStart after a lost *reply* would start a second job,
     // so it must go out exactly once no matter how long the reply takes.
@@ -600,7 +700,7 @@ async fn state_advancing_commands_are_never_resent() {
     assert_eq!(sends, 1, "PrintStart must not be retransmitted");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn idempotent_settings_are_resent() {
     // SetDensity twice equals SetDensity once, so recovery is safe.
     let mut mock = MockTransport::new();
@@ -617,7 +717,7 @@ async fn idempotent_settings_are_resent() {
     assert_eq!(sends, 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn mid_job_printer_error_surfaces_instead_of_print_not_confirmed() {
     // The printer reports "out of paper" via 0xDB on the status poll. That
     // result used to be dropped with `let _ =`, so the user got the useless
@@ -638,7 +738,7 @@ async fn mid_job_printer_error_surfaces_instead_of_print_not_confirmed() {
     assert!(!c.transport().tx_cmds().contains(&0xf3));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fault_in_the_status_payload_aborts_the_job() {
     // A fault reported *inside* a successful 0xb3 reply, not as a 0xDB
     // error packet. The framing layer sees a normal response, so this is
@@ -659,7 +759,7 @@ async fn fault_in_the_status_payload_aborts_the_job() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_page_that_stalls_without_a_fault_code_is_not_confirmed() {
     let mut mock = MockTransport::new();
     mock.set_print_status(vec![0x00, 0x01, 73, 0x00]);
@@ -671,7 +771,7 @@ async fn a_page_that_stalls_without_a_fault_code_is_not_confirmed() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_complete_page_stops_polling_early() {
     // The default mock reports 100/100 on the first poll. Continuing to
     // poll after that is pure latency on every single print.
@@ -687,7 +787,7 @@ async fn a_complete_page_stops_polling_early() {
     assert_eq!(polls, 1, "should stop at the first complete-page report");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn missing_status_reply_is_not_confirmed() {
     let mut mock = MockTransport::new();
     mock.mute_cmd(0xa3);
@@ -699,7 +799,7 @@ async fn missing_status_reply_is_not_confirmed() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn transport_failure_during_status_poll_is_reported_immediately() {
     let mut mock = MockTransport::new();
     mock.fail_receives_after_cmd(0xa3, "link down during status poll");
@@ -725,7 +825,7 @@ async fn transport_failure_during_status_poll_is_reported_immediately() {
     assert!(!c.transport().tx_cmds().contains(&0xf3));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn image_too_large_for_u16_page_size() {
     let mut c = client_b1();
     // Construct rows for absurd height via print_rows directly

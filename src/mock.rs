@@ -270,7 +270,7 @@ impl Transport for MockTransport {
         Ok(())
     }
 
-    async fn recv_raw(&mut self, _wait: Duration) -> Result<Vec<u8>> {
+    async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
         if let Some(message) = &self.recv_error {
             return Err(Error::transport(message.clone()));
         }
@@ -287,9 +287,14 @@ impl Transport for MockTransport {
                 self.page_index_pending = false;
                 return Ok(Packet::new(0xe0, vec![0x00, 0x01]).encode()?);
             }
+            tokio::time::sleep(wait).await;
             return Ok(Vec::new());
         }
-        Ok(self.rx_queue.remove(0))
+        let bytes = self.rx_queue.remove(0);
+        if bytes.is_empty() {
+            tokio::time::sleep(wait).await;
+        }
+        Ok(bytes)
     }
 }
 

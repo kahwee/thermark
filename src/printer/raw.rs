@@ -12,6 +12,7 @@ use crate::transport::Transport;
 use crate::types::Density;
 use std::num::NonZeroU32;
 use std::time::Duration;
+use tokio::time::{Instant, timeout_at};
 use tracing::debug;
 
 impl<T: Transport> PrinterClient<T> {
@@ -84,15 +85,33 @@ impl<T: Transport> PrinterClient<T> {
                 self.send_pkt(&request).await?;
             }
 
-            for p in self.recv_pkts(wait).await? {
-                if p.cmd == response_cmd {
-                    return Ok(p);
+            // A transport read can contain only part of a frame, or unrelated
+            // notifications. Neither consumes a retry. Only the absolute
+            // response deadline permits another request to go out.
+            let deadline = Instant::now() + wait;
+            loop {
+                let now = Instant::now();
+                if now >= deadline {
+                    break;
                 }
-                debug!(
-                    cmd = format_args!("{:#04x}", p.cmd),
-                    expected = format_args!("{response_cmd:#04x}"),
-                    "ignoring pkt while waiting for response"
-                );
+                let packets = match timeout_at(deadline, self.recv_pkts(deadline - now)).await {
+                    Ok(result) => result?,
+                    Err(_) => break,
+                };
+                for p in packets {
+                    if p.cmd == response_cmd {
+                        return Ok(p);
+                    }
+                    debug!(
+                        cmd = format_args!("{:#04x}", p.cmd),
+                        expected = format_args!("{response_cmd:#04x}"),
+                        "ignoring pkt while waiting for response"
+                    );
+                }
+                // Custom transports may return immediately, even without
+                // bytes. Cooperate with the runtime without extending the
+                // deadline or spinning through retries.
+                tokio::task::yield_now().await;
             }
         }
         Err(Error::Timeout {

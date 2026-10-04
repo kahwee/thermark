@@ -47,10 +47,25 @@ fn warn_if_battery_low(power_level: Option<u8>) {
 }
 
 impl<T: Transport> PrinterClient<T> {
+    /// Construct with the model's default task.
+    ///
+    /// # Panics
+    /// Panics if the model has no default task. Prefer [`Self::try_new`] for
+    /// caller-selected models, or [`Self::new_with_task`] for explicit tasks.
     pub fn new(transport: T, model: Model) -> Self {
-        let task = PrintTask::for_model(model)
-            .expect("model has no default print task; construct with new_with_task");
-        Self::new_with_task(transport, model, task)
+        Self::try_new(transport, model)
+            .expect("model has no default print task; construct with new_with_task")
+    }
+
+    /// Construct with the default task, returning an error for models such as
+    /// B18 whose wire task is unresolved. Explicit tasks use [`Self::new_with_task`].
+    pub fn try_new(transport: T, model: Model) -> Result<Self> {
+        let task = PrintTask::for_model(model).ok_or_else(|| {
+            Error::msg(format!(
+                "model '{model}' has no default print task; construct with new_with_task"
+            ))
+        })?;
+        Ok(Self::new_with_task(transport, model, task))
     }
 
     pub fn new_with_task(transport: T, model: Model, task: PrintTask) -> Self {

@@ -11,7 +11,7 @@ release matrix; the downloads below target macOS and Linux.
 | --- | --- | --- |
 | Homebrew tap | macOS, Apple Silicon or Intel | BLE |
 | Release archive | macOS or Linux, matching CPU architecture | `ble` or `full` |
-| Cargo | Rust 1.98+, native build prerequisites | BLE + serial by default |
+| Cargo | Rust 1.99+, native build prerequisites | BLE + serial by default |
 
 ### Homebrew on macOS
 
@@ -66,12 +66,12 @@ Download an archive and its matching `.sha256` file from
 Use `uname -m` to check your CPU: `arm64`/`aarch64` maps to `ARM64`, and
 `x86_64` maps to `X64`. Select `macOS` or `Linux`, then `ble` or `full`.
 
-Example for macOS Apple Silicon, version 0.33.0:
+Example for macOS Apple Silicon, version 0.34.0:
 
 ```sh
-shasum -a 256 --check thermark-0.33.0-macOS-ARM64-ble.tar.gz.sha256
-tar -xzf thermark-0.33.0-macOS-ARM64-ble.tar.gz
-cd thermark-0.33.0-macOS-ARM64-ble
+shasum -a 256 --check thermark-0.34.0-macOS-ARM64-ble.tar.gz.sha256
+tar -xzf thermark-0.34.0-macOS-ARM64-ble.tar.gz
+cd thermark-0.34.0-macOS-ARM64-ble
 ./thermark --version
 mkdir -p "$HOME/.local/bin"
 install -m 755 thermark "$HOME/.local/bin/thermark"
@@ -118,7 +118,7 @@ an executable does not promise removal of your saved printer configuration.
 | --- | --- |
 | `thermark: command not found` | Confirm `~/.cargo/bin` or your archive install directory is on `PATH`; open a new shell after changing its startup file. |
 | Unexpected version or missing USB transport | Run `command -v thermark` and `thermark doctor --json`; the Homebrew binary includes BLE only. |
-| Cargo reports an unsupported Rust version | Run `rustc --version`; thermark requires 1.98 or newer. A directory-level rustup override can select an older compiler. |
+| Cargo reports an unsupported Rust version | Run `rustc --version`; thermark requires 1.99 or newer. A directory-level rustup override can select an older compiler. |
 | Linux build cannot find D-Bus through pkg-config | Install `pkg-config` and `libdbus-1-dev` (or distribution equivalents), then retry Cargo. |
 | Linux archive fails with a GLIBC version error | Use a compatible distribution or build from source on the target machine. |
 | Preview cannot find a font | Run `thermark fonts`, install DejaVu Sans on Linux, or pass `--font /path/to/font.ttf`. |

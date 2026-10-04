@@ -4,6 +4,10 @@ Requires Rust 1.99+; rustup follows `rust-toolchain.toml`. See
 [installation prerequisites](installation.md) for native transport libraries.
 No printer is required for offline tests.
 
+Maintainers: follow the [release checklist](releasing.md) before tagging or
+updating the Homebrew tap. GitHub binaries, Homebrew, and crates.io are separate
+distribution steps.
+
 ## Build a checkout
 
 ```sh

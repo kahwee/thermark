@@ -10,7 +10,25 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-04
+
+### Added
+
+- `PrinterClient::try_new(transport, model) -> Result<Self>` for models selected
+  by callers. Models without a default print task return an error; existing
+  `new` and explicit `new_with_task` callers remain compatible.
+- A release checklist covering tested source, GitHub binary assets, Homebrew
+  alignment, and separate crates.io publication.
+
 ### Fixed
+
+- Wait for complete protocol replies until each attempt's absolute deadline.
+  Fragmented reads and unrelated notifications no longer consume retries or
+  trigger early resends; state-advancing commands remain wait-only.
+- Bound native transport writes and disconnects to five seconds, including
+  serial flush and BLE Drop cleanup. BLE connect and service discovery have
+  fifteen-second limits; subscription and notification setup have five-second
+  limits. Write failures abort without replaying potentially partial commands.
 
 - Reject non-finite and non-positive font sizes in CLI and library label
   rendering. Reject overflowing text before drawing or saving a partial label,
@@ -1217,7 +1235,9 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/kahwee/thermark/compare/v0.33.0...v0.34.0
+[0.33.0]: https://github.com/kahwee/thermark/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.32.0
 [0.29.0]: https://github.com/kahwee/thermark/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/kahwee/thermark/compare/v0.27.0...v0.28.0

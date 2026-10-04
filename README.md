@@ -25,7 +25,7 @@ For Linux, or macOS without Homebrew, use the
 Choose `ble` for Bluetooth or `full` for experimental USB serial support.
 No Rust compiler is needed for a prebuilt download.
 
-With Rust 1.98 or newer, install from crates.io:
+With Rust 1.99 or newer, install from crates.io:
 
 ```sh
 cargo install thermark --locked
@@ -84,6 +84,7 @@ Multi-colour printheads and colour raster protocols are out of scope.
 - [Installation, upgrades, and prerequisites](docs/installation.md)
 - [Printing, previews, calibration, and troubleshooting](docs/usage.md)
 - [Builds, tests, benchmarks, and security checks](docs/development.md)
+- [Release checklist and distribution updates](docs/releasing.md)
 - [Contributing and hardware reports](CONTRIBUTING.md)
 - [Hardware notes](docs/hardware-notes.md)
 - [Library API](https://docs.rs/thermark) and [release history](CHANGELOG.md)

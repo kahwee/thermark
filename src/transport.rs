@@ -10,12 +10,67 @@ use std::fmt;
 use std::time::Duration;
 use tracing::debug;
 
+/// Bound one write (including flush) or teardown, not the entire print job.
+#[cfg(any(feature = "ble", feature = "serial"))]
+pub(crate) const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A write timeout is a transport failure, not a missing response: bytes may
+/// already have reached the printer, so callers must not resend the operation.
+#[cfg(any(feature = "ble", feature = "serial"))]
+pub(crate) async fn with_timeout<T>(
+    operation: &'static str,
+    budget: Duration,
+    future: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    tokio::time::timeout(budget, future)
+        .await
+        .map_err(|_| Error::transport(format!("{operation} timed out after {budget:?}")))?
+}
+
+#[cfg(all(test, any(feature = "ble", feature = "serial")))]
+mod timeout_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn pending_operation_is_bounded_and_reports_transport_failure() {
+        let start = tokio::time::Instant::now();
+        let error = with_timeout::<()>("test disconnect", IO_TIMEOUT, std::future::pending())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Transport(message) if message.contains("test disconnect timed out"))
+        );
+        assert_eq!(tokio::time::Instant::now() - start, IO_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn operation_results_are_preserved() {
+        assert_eq!(
+            with_timeout("write", IO_TIMEOUT, async { Ok(42) })
+                .await
+                .unwrap(),
+            42
+        );
+        let error = with_timeout::<()>("write", IO_TIMEOUT, async {
+            Err(Error::transport("link down"))
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(error, Error::Transport(message) if message == "link down"));
+    }
+}
+
 /// Common packet transport used by [`crate::printer::PrinterClient`].
 ///
 /// Native `async fn` in traits (no `async-trait`); not object-safe by design.
 pub trait Transport: Send {
+    /// Send all bytes or return a transport error. Native transports bound
+    /// writes to five seconds. On timeout, some bytes may already be on the
+    /// wire; close the session rather than replaying the failed write.
     fn send_raw(&mut self, data: &[u8]) -> impl std::future::Future<Output = Result<()>> + Send;
 
+    /// Return available bytes, waiting up to `wait` when none are available.
+    /// Fragments are valid; an empty result means no bytes arrived.
     fn recv_raw(
         &mut self,
         wait: Duration,

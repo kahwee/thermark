@@ -1,6 +1,6 @@
 //! Asynchronous USB serial transport.
 
-use super::Transport;
+use super::{IO_TIMEOUT, Transport, with_timeout};
 use crate::errors::{Error, Result};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -41,15 +41,18 @@ impl SerialTransport {
 
 impl Transport for SerialTransport {
     async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
-        self.port
-            .write_all(data)
-            .await
-            .map_err(|error| Error::transport(format!("serial write: {error}")))?;
-        self.port
-            .flush()
-            .await
-            .map_err(|error| Error::transport(format!("serial flush: {error}")))?;
-        Ok(())
+        with_timeout("serial write/flush", IO_TIMEOUT, async {
+            self.port
+                .write_all(data)
+                .await
+                .map_err(|error| Error::transport(format!("serial write: {error}")))?;
+            self.port
+                .flush()
+                .await
+                .map_err(|error| Error::transport(format!("serial flush: {error}")))?;
+            Ok(())
+        })
+        .await
     }
 
     async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
@@ -77,6 +80,67 @@ impl Transport for SerialTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_flush_shares_the_write_deadline() {
+        struct SlowWriteStalledFlush {
+            ready: std::pin::Pin<Box<tokio::time::Sleep>>,
+        }
+        impl tokio::io::AsyncRead for SlowWriteStalledFlush {
+            fn poll_read(
+                self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+                _buf: &mut tokio::io::ReadBuf<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                std::task::Poll::Pending
+            }
+        }
+        impl tokio::io::AsyncWrite for SlowWriteStalledFlush {
+            fn poll_write(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+                buf: &[u8],
+            ) -> std::task::Poll<std::io::Result<usize>> {
+                use std::future::Future;
+                std::task::ready!(self.ready.as_mut().poll(cx));
+                std::task::Poll::Ready(Ok(buf.len()))
+            }
+            fn poll_flush(
+                self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                std::task::Poll::Pending
+            }
+            fn poll_shutdown(
+                self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+        let mut transport = SerialTransport::from_stream(SlowWriteStalledFlush {
+            ready: Box::pin(tokio::time::sleep(Duration::from_secs(2))),
+        });
+        let start = tokio::time::Instant::now();
+        let error = transport.send_raw(&[1]).await.unwrap_err();
+        assert!(
+            matches!(error, Error::Transport(message) if message.contains("write/flush timed out"))
+        );
+        assert_eq!(tokio::time::Instant::now() - start, IO_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_partial_write_is_a_transport_error() {
+        let (client, mut peer) = tokio::io::duplex(1);
+        let mut transport = SerialTransport::from_stream(client);
+        let start = tokio::time::Instant::now();
+        let error = transport.send_raw(&[1, 2]).await.unwrap_err();
+        assert!(matches!(error, Error::Transport(message) if message.contains("timed out")));
+        assert_eq!(tokio::time::Instant::now() - start, IO_TIMEOUT);
+        let mut byte = [0];
+        peer.read_exact(&mut byte).await.unwrap();
+        assert_eq!(byte, [1], "a failed write may already have sent bytes");
+    }
 
     #[tokio::test]
     async fn reads_partial_data_without_blocking_the_runtime() {
