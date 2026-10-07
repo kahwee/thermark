@@ -93,3 +93,7 @@ Multi-colour printheads and colour raster protocols are out of scope.
 ## License
 
 MIT
+
+## CI maintenance
+
+[GitHub Actions maintenance](.github/ACTIONS.md) covers workflows, parallel checks, action versions, and weekly updates.
