@@ -563,3 +563,32 @@ fn print_preview_rejects_dimensions_the_encoder_cannot_send() {
 
     assert!(!preview.exists());
 }
+
+#[test]
+fn sticker_save_errors_are_reported_without_success_or_config_changes() {
+    let fixture = CliFixture::new();
+    let output = fixture.dir.path().join("occupied.png");
+    std::fs::create_dir(&output).unwrap();
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts/DejaVuSans.ttf");
+    for args in [
+        vec!["text", "--text", "HELLO"],
+        vec!["qr", "--url", "https://example.com", "--text", "HELLO"],
+        vec!["wifi", "--ssid", "Demo-Guest", "--security", "nopass"],
+    ] {
+        fixture
+            .command()
+            .args(args)
+            .args(["--no-print", "--font"])
+            .arg(&font)
+            .arg("--save")
+            .arg(&output)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("save "))
+            .stderr(predicate::str::contains("occupied.png"))
+            .stdout(predicate::str::contains("saved ").not())
+            .stdout(predicate::str::contains("OK").not());
+        assert!(output.is_dir());
+        assert!(!fixture.config().exists());
+    }
+}

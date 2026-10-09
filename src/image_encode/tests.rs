@@ -821,3 +821,53 @@ fn white_source_pixels_become_empty_rows() {
     let rows = raster.rows();
     assert!(rows.iter().all(|p| p.cmd == Cmd::PrintEmptyRow as u8));
 }
+
+// Decode the wire representation independently of the threshold/dither traversal.
+// This catches row ordering, padding-bit, and repeat-count errors hidden by a
+// preview that shares its monochrome conversion with the encoder.
+proptest::proptest! {
+    #[test]
+    fn wire_rows_reconstruct_the_preview(
+        width in 1u32..=65,
+        height in 1u32..=300,
+        pixels in proptest::prop_oneof![
+            proptest::strategy::Just(vec![0u8]),
+            proptest::strategy::Just(vec![255u8]),
+            proptest::collection::vec(proptest::prelude::any::<u8>(), 1..=256),
+        ],
+        threshold in proptest::prelude::any::<u8>(),
+        dither in proptest::prelude::any::<bool>(),
+    ) {
+        let gray = GrayImage::from_fn(width, height, |x, y| {
+            Luma([pixels[(y as usize * width as usize + x as usize) % pixels.len()]])
+        });
+        let raster = encode_gray(&gray, 384, threshold, dither).unwrap();
+        let preview = render_print_preview(&gray, 384, threshold, dither).unwrap();
+        let mut reconstructed = GrayImage::from_pixel(width, height, Luma([255]));
+        let mut next_row = 0u32;
+        for row in raster.rows() {
+            let packet = Packet::decode(&row.encode().unwrap()).unwrap();
+            let start = u32::from(u16::from_be_bytes([packet.data[0], packet.data[1]]));
+            proptest::prop_assert_eq!(start, next_row);
+            let (repeats, bitmap) = match packet.cmd {
+                cmd if cmd == Cmd::PrintEmptyRow as u8 => (packet.data[2], None),
+                cmd if cmd == Cmd::PrintBitmapRow as u8 => (packet.data[5], Some(&packet.data[6..])),
+                cmd => return Err(proptest::test_runner::TestCaseError::fail(format!("unexpected row command {cmd}"))),
+            };
+            proptest::prop_assert!(repeats > 0);
+            next_row += u32::from(repeats);
+            proptest::prop_assert!(next_row <= height);
+            if let Some(bits) = bitmap {
+                for y in start..next_row {
+                    for x in 0..width {
+                        if bits[(x / 8) as usize] & (0x80 >> (x % 8)) != 0 {
+                            reconstructed.put_pixel(x, y, Luma([0]));
+                        }
+                    }
+                }
+            }
+        }
+        proptest::prop_assert_eq!(next_row, height);
+        proptest::prop_assert_eq!(reconstructed, preview);
+    }
+}
