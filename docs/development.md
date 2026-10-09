@@ -31,10 +31,10 @@ script rejects inherited `UPDATE_GOLDEN`; inspect `target/golden-actual/` before
 accepting any baseline. See [CONTRIBUTING.md](../CONTRIBUTING.md) for useful
 behavior tests and safe CLI test environments. Tests do not establish hardware support.
 
-The build/check scripts reset generated `target/` artifacts on the first run
-after 14 days. Initial use adopts an existing cache; later runs reuse it until
-the next reset. Source, printer settings, and `local/` are retained. Direct
-`cargo build` and CI have their own cache handling.
+Build and check commands reuse existing artifacts. To reclaim space explicitly,
+run `scripts/prune-build-cache.sh` from any directory. It removes this checkout's
+`target/` artifacts; the next build recompiles them. Custom `CARGO_TARGET_DIR`
+locations and CI caches have their own maintenance.
 
 ## Benchmarks and packet properties
 

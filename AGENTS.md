@@ -55,3 +55,8 @@ mutation in parallel tests. Keep `Cargo.toml`'s `rust-version`,
 `rust-toolchain.toml`, CI, and `Cargo.lock` compatible; verify with `--locked`.
 For release behavior, read `.github/workflows/release.yml` and the hardware
 notes. A routine push or dependency update does not authorize a release.
+
+## Completion report
+
+State the behavior changed, the checks actually run and their outcomes, and any
+remaining uncertainty. Distinguish offline verification from hardware evidence.

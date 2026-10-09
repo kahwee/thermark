@@ -435,7 +435,9 @@ fn ensure_print_path_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use image::{GrayImage, Luma};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use thermark::geometry::{LabelMm, SafeArea};
@@ -454,9 +456,14 @@ mod tests {
     struct ObservedTransport {
         inner: thermark::MockTransport,
         events: Events,
+        close_failure: AtomicBool,
     }
 
     impl ObservedTransport {
+        fn fail_close(&self) {
+            self.close_failure.store(true, Ordering::Relaxed);
+        }
+
         fn with_model_id(model_id: u16) -> (Self, Events) {
             let mut inner = thermark::MockTransport::new();
             inner.set_model_id(model_id);
@@ -469,6 +476,7 @@ mod tests {
                 Self {
                     inner,
                     events: Arc::clone(&events),
+                    close_failure: AtomicBool::new(false),
                 },
                 events,
             )
@@ -491,6 +499,9 @@ mod tests {
 
         async fn close(&mut self) -> thermark::Result<()> {
             self.events.lock().unwrap().push(Event::Close);
+            if self.close_failure.load(Ordering::Relaxed) {
+                return Err(thermark::Error::msg("synthetic disconnect failure"));
+            }
             self.inner.close().await
         }
     }
@@ -784,6 +795,112 @@ mod tests {
         let events = events.lock().unwrap();
         assert!(!events.iter().any(|event| matches!(event, Event::Render)));
         assert!(!events.iter().any(is_print_mutation));
+        assert_eq!(events.last(), Some(&Event::Close));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn successful_print_reports_disconnect_failure() {
+        let (session, events) = detected_session(4096, true, false).await;
+        session.client.transport().fail_close();
+        let error = run_rendered_session(session, thermark::Density::NORMAL, |_profile| {
+            Ok((GrayImage::from_pixel(8, 1, Luma([0])), ()))
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("synthetic disconnect failure"));
+
+        let events = events.lock().unwrap();
+        let end_print = event_position(
+            &events,
+            |event| matches!(event, Event::Send { cmd, .. } if *cmd == Cmd::PrintEnd as u8),
+        );
+        let close = event_position(&events, |event| matches!(event, Event::Close));
+        assert!(end_print < close);
+        assert_eq!(
+            events.iter().filter(|e| matches!(e, Event::Close)).count(),
+            1
+        );
+        assert_eq!(events.last(), Some(&Event::Close));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn print_failure_survives_disconnect_failure() {
+        let mut mock = thermark::MockTransport::new();
+        mock.fail_cmd(
+            Cmd::PrintStart as u8,
+            thermark::PrinterFault::NO_PAPER.code(),
+        );
+        let (transport, events) = ObservedTransport::new(mock);
+        transport.fail_close();
+        let client = PrinterClient::new(transport, Model::B1).with_pacing(Pacing::INSTANT);
+        let session = Session::<ObservedTransport>::finish_connect(
+            client,
+            ConnPref::Ble,
+            PrintTarget {
+                model: Model::B1,
+                task: TaskSelection::Auto {
+                    default: PrintTask::B1,
+                },
+                allow_experimental: false,
+            },
+            IdentityDetail::Profile,
+        )
+        .await
+        .unwrap();
+        let error = run_rendered_session(session, thermark::Density::NORMAL, |_profile| {
+            Ok((GrayImage::from_pixel(8, 1, Luma([0])), ()))
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<thermark::Error>(),
+                Some(thermark::Error::Printer(thermark::PrinterFault::NO_PAPER))
+            ),
+            "{error:?}"
+        );
+
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(event, Event::Send { cmd, .. } if *cmd == Cmd::PrintStart as u8)
+        }));
+        assert!(!events.iter().any(|event| {
+            matches!(event, Event::Send { cmd, .. } if *cmd == Cmd::PrintBitmapRow as u8)
+        }));
+        assert_eq!(
+            events.iter().filter(|e| matches!(e, Event::Close)).count(),
+            1
+        );
+        assert_eq!(events.last(), Some(&Event::Close));
+    }
+
+    #[tokio::test]
+    async fn png_save_failure_closes_before_starting_a_print() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("occupied.png");
+        // An existing directory fails deterministically, even with writable permissions.
+        std::fs::create_dir(&save_path).unwrap();
+        let (session, events) = detected_session(4096, true, false).await;
+        let render_events = Arc::clone(&events);
+        let error = run_rendered_session(session, thermark::Density::NORMAL, |_profile| {
+            render_events.lock().unwrap().push(Event::Render);
+            let gray = GrayImage::from_pixel(8, 1, Luma([0]));
+            gray.save(&save_path)
+                .with_context(|| format!("save {}", save_path.display()))?;
+            Ok((gray, ()))
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("occupied.png"));
+        assert!(save_path.is_dir());
+
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|e| matches!(e, Event::Render)));
+        assert!(!events.iter().any(is_print_mutation));
+        assert_eq!(
+            events.iter().filter(|e| matches!(e, Event::Close)).count(),
+            1
+        );
         assert_eq!(events.last(), Some(&Event::Close));
     }
 

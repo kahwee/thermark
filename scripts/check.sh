@@ -7,7 +7,7 @@ usage() {
 Usage: scripts/check.sh [rust|features|render|all]
 
   rust      Formatting, Clippy, and the default-feature tests and docs (default)
-  features  Clippy, unit/CLI tests, and docs for each transport feature set
+  features  Clippy, unit/CLI/protocol tests, and docs for each transport feature set
   render    Golden renders, public fixtures, and label placement
   all       rust + features; matches CI without rerunning rendering tests
 
@@ -36,11 +36,6 @@ if [[ ${UPDATE_GOLDEN+x} ]]; then
 fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-
-# CI manages its own cache lifetime. Keep local build artifacts bounded.
-if [[ ${CI:-} != true && ${GITHUB_ACTIONS:-} != true && -z ${CARGO_TARGET_DIR:-} ]]; then
-    bash scripts/prune-build-cache.sh
-fi
 
 run() {
     if [[ ${GITHUB_ACTIONS:-} == true ]]; then
@@ -74,7 +69,7 @@ if [[ $mode == features || $mode == all ]]; then
             feature_args+=(--features "$feature")
         fi
         run cargo clippy --locked --all-targets "${feature_args[@]}" -- -D warnings
-        run cargo test --locked --lib --bins --test cli --test packet_stream "${feature_args[@]}"
+        run cargo test --locked --lib --bins --test cli --test packet_stream --test protocol_integration "${feature_args[@]}"
         run cargo doc --locked --no-deps "${feature_args[@]}"
     done
 fi
