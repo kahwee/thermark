@@ -64,7 +64,7 @@ there is no patched version. A font-engine replacement needs rendering checks.
 ## Code ownership and API changes
 
 `profile.rs` owns identity/geometry/support evidence; `transport/` owns BLE/USB;
-`printer/` owns job validation; `label.rs` and `image_encode.rs` own rendering.
+`printer/` owns job validation; `label.rs` and `image_encode/` own rendering.
 [AGENTS.md](../AGENTS.md) gives exact boundaries and verification rules.
 
 See [hardware notes](hardware-notes.md), [maintenance history](maintenance-notes.md),

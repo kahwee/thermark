@@ -20,10 +20,31 @@ use thermark::transport::Transport;
 use super::args::{ConnArgs, ResolvedConn, TaskArgs};
 
 #[derive(Debug, Clone, Copy)]
+pub enum TaskSelection {
+    /// Use this provisional default until printer identification selects its task.
+    Auto {
+        default: PrintTask,
+    },
+    Explicit(PrintTask),
+}
+
+impl TaskSelection {
+    fn initial_task(self) -> PrintTask {
+        match self {
+            Self::Auto { default } => default,
+            Self::Explicit(task) => task,
+        }
+    }
+
+    fn uses_detected_default(self) -> bool {
+        matches!(self, Self::Auto { .. })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct PrintTarget {
     pub model: Model,
-    pub task: PrintTask,
-    pub task_explicit: bool,
+    pub task: TaskSelection,
     pub allow_experimental: bool,
 }
 
@@ -32,8 +53,10 @@ pub fn resolve_target(cfg: &Config, model: Option<Model>, args: &TaskArgs) -> Re
     let task = resolve_task(model, args)?;
     Ok(PrintTarget {
         model,
-        task,
-        task_explicit: args.task.is_some(),
+        task: match args.task {
+            Some(task) => TaskSelection::Explicit(task),
+            None => TaskSelection::Auto { default: task },
+        },
         allow_experimental: args.allow_experimental,
     })
 }
@@ -126,44 +149,16 @@ fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
 }
 
 impl Session<AnyTransport> {
-    pub async fn connect(
-        conn: &ResolvedConn,
-        model: Model,
-        task: PrintTask,
-        auto_task: bool,
-        allow_experimental: bool,
-    ) -> Result<Self> {
-        Self::connect_with_identity(
-            conn,
-            model,
-            task,
-            auto_task,
-            allow_experimental,
-            IdentityDetail::Profile,
-        )
-        .await
+    pub async fn connect(conn: &ResolvedConn, target: PrintTarget) -> Result<Self> {
+        Self::connect_with_identity(conn, target, IdentityDetail::Profile).await
     }
 
     /// Open a session and retain the full identity report for presentation.
     ///
     /// Normal printing only needs [`Self::connect`]; this variant keeps the
     /// firmware and hardware metadata queries used by the `identify` command.
-    pub async fn connect_detailed(
-        conn: &ResolvedConn,
-        model: Model,
-        task: PrintTask,
-        auto_task: bool,
-        allow_experimental: bool,
-    ) -> Result<Self> {
-        Self::connect_with_identity(
-            conn,
-            model,
-            task,
-            auto_task,
-            allow_experimental,
-            IdentityDetail::Full,
-        )
-        .await
+    pub async fn connect_detailed(conn: &ResolvedConn, target: PrintTarget) -> Result<Self> {
+        Self::connect_with_identity(conn, target, IdentityDetail::Full).await
     }
 
     #[allow(unused_variables)]
@@ -173,10 +168,7 @@ impl Session<AnyTransport> {
     )]
     async fn connect_with_identity(
         conn: &ResolvedConn,
-        model: Model,
-        task: PrintTask,
-        auto_task: bool,
-        allow_experimental: bool,
+        target: PrintTarget,
         identity_detail: IdentityDetail,
     ) -> Result<Self> {
         match conn.conn {
@@ -192,16 +184,13 @@ impl Session<AnyTransport> {
                     )
                     .await
                     .context("BLE connect")?;
-                    let client = PrinterClient::new_with_task(AnyTransport::Ble(ble), model, task)
-                        .with_pacing(pacing_from_env());
-                    Self::finish_connect(
-                        client,
-                        ConnPref::Ble,
-                        auto_task,
-                        allow_experimental,
-                        identity_detail,
+                    let client = PrinterClient::new_with_task(
+                        AnyTransport::Ble(ble),
+                        target.model,
+                        target.task.initial_task(),
                     )
-                    .await
+                    .with_pacing(pacing_from_env());
+                    Self::finish_connect(client, ConnPref::Ble, target, identity_detail).await
                 }
             }
             ConnPref::Usb => {
@@ -211,16 +200,13 @@ impl Session<AnyTransport> {
                 {
                     let ser = SerialTransport::open(&conn.addr)
                         .with_context(|| format!("open serial {}", conn.addr))?;
-                    let client = PrinterClient::new_with_task(AnyTransport::Usb(ser), model, task)
-                        .with_pacing(pacing_from_env());
-                    Self::finish_connect(
-                        client,
-                        ConnPref::Usb,
-                        auto_task,
-                        allow_experimental,
-                        identity_detail,
+                    let client = PrinterClient::new_with_task(
+                        AnyTransport::Usb(ser),
+                        target.model,
+                        target.task.initial_task(),
                     )
-                    .await
+                    .with_pacing(pacing_from_env());
+                    Self::finish_connect(client, ConnPref::Usb, target, identity_detail).await
                 }
             }
         }
@@ -232,8 +218,7 @@ impl<T: Transport> Session<T> {
     async fn finish_connect(
         mut client: PrinterClient<T>,
         connection: ConnPref,
-        auto_task: bool,
-        allow_experimental: bool,
+        target: PrintTarget,
         identity_detail: IdentityDetail,
     ) -> Result<Self> {
         let identity_result = match identity_detail {
@@ -248,7 +233,9 @@ impl<T: Transport> Session<T> {
             }
         };
         if let Some(identity) = &identity {
-            if let Some(profile) = client.apply_identity(identity, auto_task) {
+            if let Some(profile) =
+                client.apply_identity(identity, target.task.uses_detected_default())
+            {
                 tracing::info!(model = %profile.model, model_id = identity.model_id, dpi = profile.dpi, task = ?profile.default_task, "identified printer");
             } else {
                 tracing::warn!(
@@ -260,7 +247,7 @@ impl<T: Transport> Session<T> {
         Ok(Self {
             client,
             connection,
-            allow_experimental,
+            allow_experimental: target.allow_experimental,
         })
     }
 
@@ -383,14 +370,7 @@ pub async fn print_file_resolved(
 ) -> Result<()> {
     ensure_target_print_allowed(target, cfg.resolve_connection(conn.conn))?;
     let conn = conn.resolve(cfg)?;
-    let session = Session::connect(
-        &conn,
-        target.model,
-        target.task,
-        !target.task_explicit,
-        target.allow_experimental,
-    )
-    .await?;
+    let session = Session::connect(&conn, target).await?;
     run_file_session(session, cfg, path, opts, full_bleed).await
 }
 
@@ -403,14 +383,7 @@ pub async fn render_and_print_gray_resolved<R>(
 ) -> Result<R> {
     ensure_target_print_allowed(target, cfg.resolve_connection(conn.conn))?;
     let resolved_conn = conn.resolve(cfg)?;
-    let session = Session::connect(
-        &resolved_conn,
-        target.model,
-        target.task,
-        !target.task_explicit,
-        target.allow_experimental,
-    )
-    .await?;
+    let session = Session::connect(&resolved_conn, target).await?;
     run_rendered_session(session, density, render).await
 }
 
@@ -433,7 +406,7 @@ pub fn resolve_task(model: Model, args: &TaskArgs) -> Result<PrintTask> {
 fn ensure_target_print_allowed(target: PrintTarget, connection: ConnPref) -> Result<()> {
     ensure_print_path_allowed(
         target.model,
-        target.task,
+        target.task.initial_task(),
         connection,
         target.allow_experimental,
     )
@@ -542,8 +515,17 @@ mod tests {
         let session = Session::<ObservedTransport>::finish_connect(
             client,
             connection,
-            auto_task,
-            allow_experimental,
+            PrintTarget {
+                model: Model::B1,
+                task: if auto_task {
+                    TaskSelection::Auto {
+                        default: PrintTask::B1,
+                    }
+                } else {
+                    TaskSelection::Explicit(PrintTask::B1)
+                },
+                allow_experimental,
+            },
             IdentityDetail::Profile,
         )
         .await
@@ -862,8 +844,13 @@ mod tests {
         let session = Session::<ObservedTransport>::finish_connect(
             client,
             ConnPref::Ble,
-            true,
-            true,
+            PrintTarget {
+                model: Model::B1,
+                task: TaskSelection::Auto {
+                    default: PrintTask::B1,
+                },
+                allow_experimental: true,
+            },
             IdentityDetail::Profile,
         )
         .await

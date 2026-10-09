@@ -35,7 +35,7 @@ cover connection, protocol, rendering, and physical measurements. The
 | Protocol and errors | `src/packet.rs`, `src/protocol.rs`, `src/errors.rs` |
 | Connections and diagnosis | `src/transport.rs`, `src/transport/`, `src/doctor.rs` |
 | Jobs and queries | `src/printer/` |
-| Rendering | `src/geometry.rs`, `src/image_encode.rs`, `src/font.rs`, `src/label.rs` |
+| Rendering | `src/geometry.rs`, `src/image_encode.rs`, `src/image_encode/`, `src/font.rs`, `src/label.rs` |
 | CLI and config | `src/cli/`, `src/config.rs`, `src/main.rs` |
 | Offline integration tests | `src/mock.rs`, `tests/protocol_integration.rs` |
 

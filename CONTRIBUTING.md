@@ -66,7 +66,7 @@ the public API stable unless an intentional release documents the change.
 | New model verification | Actual repeated physical prints; tests alone are insufficient |
 
 The `installation_preview_is_scannable_without_creating_config` test in
-`tests/cli.rs` covers the documented offline preview with a vendored font. It
+`tests/cli/rendering.rs` covers the documented offline preview with a vendored font. It
 runs with default, BLE-only, serial-only, and no transport features through
 `scripts/check.sh all`. It does not install a package or access hardware.
 

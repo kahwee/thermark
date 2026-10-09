@@ -16,7 +16,7 @@ use thermark::transport::{BleDeviceInfo, BleTransport};
 use tracing::info;
 
 use crate::cli::args::ConnArgs;
-use crate::cli::session::Session;
+use crate::cli::session::{PrintTarget, Session, TaskSelection};
 
 #[derive(serde::Serialize)]
 struct DensityReport {
@@ -192,10 +192,13 @@ pub async fn info(cfg: &Config, conn: &ConnArgs) -> Result<()> {
     let conn = conn.resolve(cfg)?;
     let mut session = Session::connect(
         &conn,
-        thermark::Model::B1,
-        thermark::PrintTask::B1,
-        true,
-        true,
+        PrintTarget {
+            model: thermark::Model::B1,
+            task: TaskSelection::Auto {
+                default: thermark::PrintTask::B1,
+            },
+            allow_experimental: true,
+        },
     )
     .await?;
     let result = session.fetch_summary().await;
@@ -210,10 +213,13 @@ pub async fn identify(cfg: &Config, conn: &ConnArgs, json: bool) -> Result<()> {
     let conn = conn.resolve(cfg)?;
     let session = Session::connect_detailed(
         &conn,
-        thermark::Model::B1,
-        thermark::PrintTask::B1,
-        true,
-        true,
+        PrintTarget {
+            model: thermark::Model::B1,
+            task: TaskSelection::Auto {
+                default: thermark::PrintTask::B1,
+            },
+            allow_experimental: true,
+        },
     )
     .await?;
     let result = (|| -> Result<()> {
