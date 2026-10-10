@@ -10,6 +10,20 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Added
+
+- `thermark setup` guides printer/media selection and readiness checks, saves
+  detected defaults after successful diagnosis, and optionally prints one test
+  label with `--test-print`. Changed printers reset saved registration insets.
+- `thermark batch` renders UTF-8 CSV text/QR labels to a fresh preview directory,
+  with reusable JSON layouts and optional explicit `--print`. Every row is
+  rendered and every monochrome preview saved before the first print. Print
+  runs keep a synced append-only confirmed/uncertain journal, stop on faults,
+  and support explicit `--start-at` after inspecting physical output.
+- Public inventory/badge CSV examples, batch/resume documentation, and a
+  first-print/batch trial for independent B1 owners. Hardware support claims
+  remain unchanged; new workflows have offline/mock verification only.
+
 ## [0.34.0] - 2026-10-04
 
 ### Added

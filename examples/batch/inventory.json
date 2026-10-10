@@ -1,0 +1,8 @@
+{
+  "kind": "qr",
+  "label": "50x30",
+  "text_side": "right",
+  "font_size": 18,
+  "border": false,
+  "density": 4
+}

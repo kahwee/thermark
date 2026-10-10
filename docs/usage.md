@@ -3,6 +3,26 @@
 See the [label recipe gallery](recipes.md) for eight offline examples and a
 script that renders them all.
 
+## Guided setup
+
+```sh
+thermark setup --label 50x30
+```
+
+Setup reuses a saved printer or scans and selects one. It identifies hardware,
+runs readiness diagnostics, and saves printer/model/media defaults only after
+those checks succeed. When changing printers, saved registration measurements
+are reset. Pass `--addr` to choose a different printer. Setup uses exact selectors;
+`--fuzzy` is rejected because saved defaults need an unambiguous selector.
+
+If `--label` is omitted, setup prompts for the physical media size. For
+noninteractive use, provide `--addr '<exact name or id>' --label WxH`.
+`--test-print` explicitly prints one example.com URL label after successful
+checks. Experimental hardware retains the normal print gate.
+
+See [CSV batches and reusable layouts](batch.md) for printing many different
+labels and [the hardware trial](hardware-trial.md) for a short verification run.
+
 ## Print stickers
 
 Always pass the physical label size. After `scan --save`, the printer address is

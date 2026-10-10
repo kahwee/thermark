@@ -49,6 +49,7 @@ harness = false
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+csv = "1"
 directories = "6"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }

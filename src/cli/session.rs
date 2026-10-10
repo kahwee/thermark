@@ -136,7 +136,7 @@ enum IdentityDetail {
     Full,
 }
 
-fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
+pub(crate) fn combine_job_and_close<T>(job: Result<T>, close: Result<()>) -> Result<T> {
     match (job, close) {
         (Err(job), Err(close)) => {
             tracing::warn!(error = %close, "printer shutdown failed after operation error");
@@ -214,6 +214,27 @@ impl Session<AnyTransport> {
 }
 
 impl<T: Transport> Session<T> {
+    #[cfg(test)]
+    pub(crate) async fn with_test_transport(
+        transport: T,
+        allow_experimental: bool,
+    ) -> Result<Self> {
+        let client = PrinterClient::new(transport, Model::B1)
+            .with_pacing(thermark::printer::Pacing::INSTANT);
+        Self::finish_connect(
+            client,
+            ConnPref::Ble,
+            PrintTarget {
+                model: Model::B1,
+                task: TaskSelection::Auto {
+                    default: PrintTask::B1,
+                },
+                allow_experimental,
+            },
+            IdentityDetail::Profile,
+        )
+        .await
+    }
     #[cfg_attr(not(any(feature = "ble", feature = "serial")), allow(dead_code))]
     async fn finish_connect(
         mut client: PrinterClient<T>,
@@ -287,7 +308,7 @@ impl<T: Transport> Session<T> {
         Ok(rendered)
     }
 
-    fn ensure_print_allowed(&self) -> Result<()> {
+    pub(crate) fn ensure_print_allowed(&self) -> Result<()> {
         let identity = self.client.identity().ok_or_else(|| {
             anyhow::anyhow!(
                 "printer identification failed; refusing to print with provisional geometry"
@@ -315,6 +336,15 @@ impl<T: Transport> Session<T> {
     /// Release the link. [`BleTransport`]'s `Drop` is only a backstop.
     pub async fn finish(self) -> Result<()> {
         self.client.close().await.map_err(anyhow::Error::from)
+    }
+
+    pub(crate) async fn print_gray(
+        &mut self,
+        gray: &image::GrayImage,
+        density: thermark::Density,
+    ) -> Result<()> {
+        self.ensure_print_allowed()?;
+        Ok(self.client.print_gray_image(gray, density).await?)
     }
 }
 
@@ -403,7 +433,7 @@ pub fn resolve_task(model: Model, args: &TaskArgs) -> Result<PrintTask> {
 /// Reject an unverified configured task before opening a hardware connection.
 /// The session checks again after identification because auto-detection may
 /// replace the configured task with a different protocol sequence.
-fn ensure_target_print_allowed(target: PrintTarget, connection: ConnPref) -> Result<()> {
+pub(crate) fn ensure_target_print_allowed(target: PrintTarget, connection: ConnPref) -> Result<()> {
     ensure_print_path_allowed(
         target.model,
         target.task.initial_task(),

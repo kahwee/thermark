@@ -352,6 +352,10 @@ pub struct DoctorCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Guide printer selection, media size, and readiness; optionally print one test label
+    Setup(SetupCommand),
+    /// Render a CSV batch to a fresh directory; add --print to print after validation
+    Batch(BatchCommand),
     /// Scan for thermal label printers over Bluetooth LE
     Scan {
         /// How long to scan (seconds)
@@ -413,6 +417,52 @@ pub enum Commands {
         #[arg(default_value = "")]
         data: String,
     },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SetupCommand {
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    /// Physical media size in mm (prompted when omitted)
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Print one URL test label after successful diagnostics
+    #[arg(long, default_value_t = false)]
+    pub test_print: bool,
+    #[command(flatten)]
+    pub font: FontArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BatchCommand {
+    /// UTF-8 CSV with a text column and an optional url column
+    #[arg(long)]
+    pub csv: PathBuf,
+    /// Reusable JSON text/QR layout (see docs/batch.md)
+    #[arg(long)]
+    pub template: Option<PathBuf>,
+    /// New directory for monochrome previews, manifest, and print journal
+    #[arg(long)]
+    pub preview_dir: PathBuf,
+    /// Print after every row has rendered and all previews have been saved
+    #[arg(long, default_value_t = false)]
+    pub print: bool,
+    /// First data row to print (1-based); inspect earlier output before resuming
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    pub start_at: u32,
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    #[command(flatten)]
+    pub font: FontArgs,
+    #[arg(short, long, value_enum)]
+    pub model: Option<Model>,
+    /// Media size; overrides template and saved defaults
+    #[arg(long)]
+    pub label: Option<String>,
+    #[arg(short, long, value_parser = parse_density)]
+    pub density: Option<Density>,
 }
 
 #[derive(Subcommand, Debug)]

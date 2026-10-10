@@ -34,6 +34,8 @@ impl CliFixture {
     }
 }
 
+#[path = "cli/batch.rs"]
+mod batch;
 #[path = "cli/commands.rs"]
 mod commands;
 #[path = "cli/config.rs"]

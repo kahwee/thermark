@@ -46,6 +46,29 @@ If several printers appear, follow the scan selection hint. On macOS, allow
 Bluetooth access for your terminal when requested. See
 [connection troubleshooting](docs/usage.md#macos-bluetooth-ownership) if discovery fails.
 
+For guided printer selection, media setup, and readiness checks, run:
+
+```sh
+thermark setup --label 50x30
+```
+
+Add `--test-print` to print one URL test label after checks pass. These new
+commands are currently on main; build from source until the next release.
+
+### Print a CSV batch
+
+Render inventory labels with a reusable layout before printing:
+
+```sh
+thermark batch --csv examples/batch/inventory.csv \
+  --template examples/batch/inventory.json \
+  --preview-dir local/prints/inventory-preview
+```
+
+Inspect the PNGs, then repeat with `--print` and a fresh preview directory to
+print three labels. [CSV batches and templates](docs/batch.md) explains the
+format, confirmed/uncertain print journal, and manual resume.
+
 ### Try it without a printer
 
 ```sh
@@ -85,6 +108,8 @@ Multi-colour printheads and colour raster protocols are out of scope.
 - [Printing, previews, calibration, and troubleshooting](docs/usage.md)
 - [Builds, tests, benchmarks, and security checks](docs/development.md)
 - [Release checklist and distribution updates](docs/releasing.md)
+- [CSV batches and reusable layouts](docs/batch.md)
+- [First-print and batch hardware trial](docs/hardware-trial.md)
 - [Contributing and hardware reports](CONTRIBUTING.md)
 - [Hardware notes](docs/hardware-notes.md)
 - [Library API](https://docs.rs/thermark) and [release history](CHANGELOG.md)

@@ -47,6 +47,11 @@ pub async fn run(cli: Cli) -> Result<i32> {
     }
 
     match cli.command {
+        Commands::Setup(args) => return commands::setup::run(args).await,
+        Commands::Batch(args) => {
+            let cfg = Config::load()?;
+            commands::batch::run(&cfg, args).await?;
+        }
         Commands::Scan {
             seconds,
             save,
