@@ -18,7 +18,7 @@ move it to `.github/workflows/publish-crate.yml`, grant its publish job
 
 Use [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) and
 the [official temporary authentication action](https://github.com/rust-lang/crates-io-auth-action).
-It checks the published stable release's tag and locked metadata, requires exact
+It checks the human-pushed stable version tag and locked metadata, requires exact
 source CI, verifies packaging, then authenticates and publishes. GitHub publication
 and registry publication remain separate. No long-lived Cargo credential is added.
 Existing versions cannot be overwritten: an already published version requires
@@ -51,3 +51,9 @@ of timestamps: keep the original published artifact and investigate rather than
 replacing it. New GitHub releases retain the repository's release notes behavior.
 Run `python3 scripts/test_release_assets.py` for isolated recovery regressions.
 Existing workflow permissions are unchanged.
+
+Crate publication is triggered directly by human-pushed `v*` tags; no `release: published` cascade from `GITHUB_TOKEN` is assumed. It runs independently of GitHub source/binary publication. Existing immutable historical tags without these new guard files need a separately reviewed recovery procedure; this proposal does not move or republish them.
+
+CI runs the actual metadata CLI against the checked-out manifest/lock and rejects a mismatched tag. The publisher proposal remains unexecuted: packaging dry-run, registry exchange and publication are not proven by guard tests.
+
+Normal PR CI now runs mocked CLI recovery tests for matching assets, missing assets, differing bytes, registry/API 403 errors and a missing (404) release. No real GitHub release write is performed by these fixtures.

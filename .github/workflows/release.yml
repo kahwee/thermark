@@ -39,7 +39,7 @@ jobs:
           python-version: '3.12'
 
       - name: Test immutable release asset recovery
-        run: python3 scripts/test_release_assets.py
+        run: python3 scripts/test_release_assets.py -v
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
