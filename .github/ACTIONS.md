@@ -14,7 +14,7 @@ This guide describes the checked-in workflows. Follow each linked YAML file for 
 
 Independent checks use GitHub Actions [native parallel steps](https://github.blog/changelog/2026-06-25-actions-steps-can-now-be-run-in-parallel/). The following groups run concurrently within a job:
 
-- [rust.yml](workflows/rust.yml), job `build`: `dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d`; `Install system dependencies`.
+- [rust.yml](workflows/rust.yml), job `build`: `dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249`; `Install system dependencies`.
 
 Steps after a group wait for it to finish. Keep prerequisites before the group and dependent build, package, or deployment work afterward. Do not run commands that overwrite the same build directory or coverage output together. Parallel steps share the job workspace; they do not provide separate machines.
 
@@ -26,9 +26,10 @@ Versions below match the current workflow and composite-action references. SHA-p
 | --- | --- |
 | [Swatinem/rust-cache](https://github.com/Swatinem/rust-cache) | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
 | [actions/checkout](https://github.com/actions/checkout) | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
-| [actions/download-artifact](https://github.com/actions/download-artifact) | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` |
-| [actions/upload-artifact](https://github.com/actions/upload-artifact) | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
-| [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | `89b12181fb390509a0842a86cc55eeb8eb928c1d` |
+| [actions/download-artifact](https://github.com/actions/download-artifact) | `9000827ccba6bdab643e8b6fd33ac0654aef8333` |
+| [actions/setup-python](https://github.com/actions/setup-python) | `5fda3b95a4ea91299a34e894583c3862153e4b97` |
+| [actions/upload-artifact](https://github.com/actions/upload-artifact) | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
+| [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | `686976e191b89faba57d3206551f0f330d8cb249` |
 
 ## Greenkeeping
 

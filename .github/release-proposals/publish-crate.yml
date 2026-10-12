@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Validate manifest, lock and tag
@@ -41,7 +41,7 @@ jobs:
           git merge-base --is-ancestor "$source_sha" "origin/main"
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rust.yml/runs?head_sha=$source_sha&per_page=100" > "$RUNNER_TEMP/ci.json"
           jq -e --arg sha "$source_sha" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length > 0' "$RUNNER_TEMP/ci.json"
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
