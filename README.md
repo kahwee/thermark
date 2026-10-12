@@ -52,8 +52,8 @@ For guided printer selection, media setup, and readiness checks, run:
 thermark setup --label 50x30
 ```
 
-Add `--test-print` to print one URL test label after checks pass. These new
-commands are currently on main; build from source until the next release.
+Add `--test-print` to print one URL test label after checks pass. These commands
+are available in v0.35.0 and newer.
 
 ### Print a CSV batch
 
@@ -65,8 +65,14 @@ thermark batch --csv examples/batch/inventory.csv \
   --preview-dir local/prints/inventory-preview
 ```
 
-Inspect the PNGs, then repeat with `--print` and a fresh preview directory to
-print three labels. [CSV batches and templates](docs/batch.md) explains the
+Inspect the PNGs, then print the exact prepared pages:
+
+```sh
+thermark job print --job local/prints/inventory-preview --label 50x30
+```
+
+Use `thermark job status` to inspect outcomes and `job resume` after a stopped
+run. [CSV batches and templates](docs/batch.md) explains the
 format, confirmed/uncertain print journal, and manual resume.
 
 ### Try it without a printer
@@ -112,6 +118,7 @@ Multi-colour printheads and colour raster protocols are out of scope.
 - [First-print and batch hardware trial](docs/hardware-trial.md)
 - [Contributing and hardware reports](CONTRIBUTING.md)
 - [Hardware notes](docs/hardware-notes.md)
+- [Architecture and prepared jobs](docs/architecture.md)
 - [Library API](https://docs.rs/thermark) and [release history](CHANGELOG.md)
 - [Agent guidance](AGENTS.md)
 

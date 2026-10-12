@@ -39,7 +39,7 @@ python3 .agents/skills/release/scripts/verify_release.py \
 Set the intended version and tag the tested commit:
 
 ```sh
-release_version=0.34.0
+release_version=0.35.0
 git tag -a "v$release_version" -m "thermark $release_version"
 git push origin "v$release_version"
 ```
@@ -52,7 +52,7 @@ builds artifacts but does not publish a release.
 1. Wait for the tag's Release binaries workflow to pass, including its publish
    job. Expect eight `.tar.gz` archives and eight matching `.sha256` files.
 2. Download the published assets and verify every checksum. Inspect archive
-   contents: each contains `thermark`, `README.md`, and `LICENSE`.
+   contents: each contains `thermark`, `README.md`, `LICENSE`, and `LICENSE-FONTS`.
 3. Extract the host's archive and run its installed binary's `--version`,
    `--help`, and `tasks`. Render the first-label QR offline with a temporary
    `THERMARK_CONFIG`, `THERMARK_ADDR` unset, and a public demo URL. Confirm a

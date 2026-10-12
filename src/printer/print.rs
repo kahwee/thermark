@@ -16,9 +16,30 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+/// Observable stages; a completed stage is protocol evidence, not physical quality evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrintStage {
+    Validated,
+    Configuring,
+    Transmitting,
+    AwaitingCompletion,
+    Ending,
+}
+
 impl<T: Transport> PrinterClient<T> {
     /// Print a validated raster using the complete task sequence.
     pub async fn print_raster(&mut self, raster: Raster, density: Density) -> Result<()> {
+        self.print_raster_with_progress(raster, density, |_| Ok(()))
+            .await
+    }
+
+    pub async fn print_raster_with_progress(
+        &mut self,
+        raster: Raster,
+        density: Density,
+        mut progress: impl FnMut(PrintStage) -> Result<()>,
+    ) -> Result<()> {
         let (width, height) = (raster.width(), raster.height());
         let task = self.print_task();
         let profile = self.profile();
@@ -53,6 +74,8 @@ impl<T: Transport> PrinterClient<T> {
             )));
         }
 
+        progress(PrintStage::Validated)?;
+        progress(PrintStage::Configuring)?;
         Self::require_ack(
             self.set_density(density).await?,
             "set_density",
@@ -114,6 +137,7 @@ impl<T: Transport> PrinterClient<T> {
             )?;
         }
 
+        progress(PrintStage::Transmitting)?;
         let mut unpaced_bytes = 0usize;
         for packet in packets {
             unpaced_bytes += FRAME_OVERHEAD + packet.data.len();
@@ -127,7 +151,9 @@ impl<T: Transport> PrinterClient<T> {
         Self::require_ack(self.end_page().await?, "end_page", Cmd::PageEnd as u8)?;
         self.maybe_sleep(self.pacing.after_page_end()).await;
 
+        progress(PrintStage::AwaitingCompletion)?;
         self.wait_for_completion(task.completion()).await?;
+        progress(PrintStage::Ending)?;
 
         let attempts = self.pacing.end_print_tries().get();
         for _ in 0..attempts {

@@ -215,7 +215,7 @@ fn setup_requires_media_or_terminal_and_invalid_media_preserves_config() {
 }
 
 #[test]
-fn batch_limits_rows_and_render_memory_before_writing() {
+fn batch_limits_rows_but_spools_pages_above_the_old_memory_limit() {
     let fixture = CliFixture::new();
     let csv = fixture.dir.path().join("labels.csv");
     let out = fixture.dir.path().join("preview");
@@ -229,18 +229,20 @@ fn batch_limits_rows_and_render_memory_before_writing() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("exceeds 1000 labels"));
-    fs::write(&csv, format!("text\n{}", "LABEL\n".repeat(100))).unwrap();
+    fs::write(&csv, format!("text\n{}", "LABEL\n".repeat(750))).unwrap();
     fixture
         .command()
         .args(["batch", "--csv"])
         .arg(&csv)
         .arg("--preview-dir")
         .arg(&out)
-        .args(["--label", "50x1000"])
+        .args(["--label", "50x30"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("exceeds 64 MiB"));
-    assert!(!out.exists());
+        .success();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["total"], 750);
+    assert!(out.join("label-00750.png").exists());
 }
 
 #[test]
@@ -278,4 +280,49 @@ fn shipped_inventory_example_renders_and_all_three_qrs_decode() {
             vec![format!("https://example.com/bins/A{row}").into_bytes()]
         );
     }
+}
+
+#[test]
+fn prepared_job_verify_and_status_work_without_configuration_or_printer() {
+    let fixture = CliFixture::new();
+    let csv = fixture.dir.path().join("labels.csv");
+    let out = fixture.dir.path().join("job");
+    fs::write(&csv, "text,url\nBIN A,https://example.com/a\n").unwrap();
+    fixture
+        .command()
+        .args(["batch", "--csv"])
+        .arg(csv)
+        .arg("--preview-dir")
+        .arg(&out)
+        .assert()
+        .success();
+    // Offline job inspection must ignore a malformed saved printer configuration.
+    fs::write(fixture.config(), "malformed").unwrap();
+    fixture
+        .command()
+        .args(["job", "verify", "--job"])
+        .arg(&out)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verified 1 pages"));
+    let output = fixture
+        .command()
+        .args(["job", "status", "--job"])
+        .arg(&out)
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(report["rows"][0]["outcome"].is_null());
+    fs::write(out.join("label-00001.png"), b"changed").unwrap();
+    fixture
+        .command()
+        .args(["job", "verify", "--job"])
+        .arg(&out)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hash mismatch"));
 }

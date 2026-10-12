@@ -7,7 +7,6 @@ use thermark::config::{Config, ConnPref, MAX_SCAN_SECS};
 use thermark::label::{TextAlign, TextSide};
 use thermark::print_task::PrintTask;
 use thermark::protocol::Model;
-#[cfg(feature = "ble")]
 use thermark::transport::BleMatchMode;
 use thermark::types::{Density, Rotation, Threshold};
 use thermark::wifi::WifiSecurity;
@@ -72,26 +71,19 @@ pub struct FontArgs {
     pub font_size: Option<f32>,
 }
 
-/// Connection settings after applying config / env defaults.
-#[cfg_attr(not(any(feature = "ble", feature = "serial")), allow(dead_code))]
-pub struct ResolvedConn {
-    pub conn: ConnPref,
-    pub addr: String,
-    #[cfg(feature = "ble")]
-    pub scan_secs: u64,
-    #[cfg(feature = "ble")]
-    pub match_mode: BleMatchMode,
-}
+pub type ResolvedConn = thermark::session::ConnectionOptions;
 
 impl ConnArgs {
     pub fn resolve(&self, cfg: &Config) -> Result<ResolvedConn> {
         Ok(ResolvedConn {
             conn: cfg.resolve_connection(self.conn),
             addr: cfg.resolve_addr(self.addr.as_deref())?,
-            #[cfg(feature = "ble")]
             scan_secs: cfg.resolve_scan_secs(self.scan_secs),
-            #[cfg(feature = "ble")]
             match_mode: BleMatchMode::from_fuzzy(self.fuzzy),
+            pacing: match std::env::var("THERMARK_SLOW") {
+                Ok(v) if !v.trim().is_empty() && v != "0" => thermark::Pacing::CAREFUL,
+                _ => thermark::Pacing::REAL,
+            },
         })
     }
 }
@@ -356,6 +348,11 @@ pub enum Commands {
     Setup(SetupCommand),
     /// Render a CSV batch to a fresh directory; add --print to print after validation
     Batch(BatchCommand),
+    /// Verify, print, inspect, or resume saved monochrome jobs
+    Job {
+        #[command(subcommand)]
+        action: JobCmd,
+    },
     /// Scan for thermal label printers over Bluetooth LE
     Scan {
         /// How long to scan (seconds)
@@ -519,4 +516,41 @@ pub enum ConfigCmd {
     },
     /// Remove the config file
     Clear,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JobCmd {
+    /// Validate manifest, page hashes, monochrome pixels and profile geometry
+    Verify {
+        #[arg(long)]
+        job: PathBuf,
+    },
+    /// Explain confirmed, uncertain and unsent rows without connecting
+    Status {
+        #[arg(long)]
+        job: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the saved pages of a job with no prior outcomes
+    Print(JobPrintCommand),
+    /// Skip confirmed rows; uncertain output requires explicit physical review
+    Resume(JobPrintCommand),
+}
+#[derive(Debug, clap::Args)]
+pub struct JobPrintCommand {
+    #[arg(long)]
+    pub job: PathBuf,
+    #[command(flatten)]
+    pub conn: ConnArgs,
+    #[command(flatten)]
+    pub task: TaskArgs,
+    /// Actual loaded media; defaults to saved media or 50x30
+    #[arg(long)]
+    pub label: Option<String>,
+    #[arg(long, value_parser=clap::value_parser!(u32).range(1..))]
+    pub start_at: Option<u32>,
+    /// Confirm you inspected physical output and chose which uncertain rows to retry
+    #[arg(long)]
+    pub acknowledge_uncertain: bool,
 }

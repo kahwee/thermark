@@ -8,3 +8,5 @@ pub mod doctor;
 pub mod print;
 pub mod setup;
 pub mod sticker;
+
+pub mod job;

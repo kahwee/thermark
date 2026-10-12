@@ -10,6 +10,38 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-12
+
+### Added
+
+- Reusable library sessions, batch preparation/execution, content-addressed
+  monochrome prepared jobs, and `job verify`, `job print`, `job status`, and
+  `job resume`. Printing verifies saved pages, profile, DPI, task and settings.
+- Typed, synced print-stage/outcome journals, cross-process execution locking,
+  and resume that skips confirmed rows and requires physical review for
+  uncertain output. No automatic replay of uncertain jobs.
+- Embedded redistributable DejaVu Sans, missing-glyph errors, HarfRust bidi/OpenType
+  shaping for complex text, grapheme-safe wrapping and bounded shared layouts.
+- Protocol replay/fault tools, regressions across print-stage failures, and
+  public hardware-trial preparation/measurement tooling. No new hardware
+  verification or expanded support claims.
+
+### Changed
+
+- Split label composition, session connections/policy, batch inputs/journals,
+  and diagnostic reports/probes into focused modules; existing facade paths
+  remain available. See `docs/architecture.md` and `examples/prepared_job.rs`.
+- Batch pages are spooled to disk individually with one font per job. Replace
+  the aggregate 64 MiB render limit with a per-page limit; retain input/row limits.
+- Auto-fit retries measured glyph bounds before rejecting otherwise usable
+  text; explicitly oversized text still fails before drawing.
+- Default font no longer depends on the host. Explicit font selectors and
+  simple Latin placement remain supported. Binary archives include LICENSE-FONTS.
+- New artifacts use schema 2; prepare older previews again for verified job
+  execution. Journals include job IDs and stage events; use typed reports or
+  `job status --json` instead of relying on fixed journal line counts.
+- Refresh locked dependencies and pinned GitHub Actions to current releases.
+
 ### Added
 
 - `thermark setup` guides printer/media selection and readiness checks, saves
@@ -1249,7 +1281,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/kahwee/thermark/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/kahwee/thermark/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/kahwee/thermark/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/kahwee/thermark/compare/v0.24.0...v0.32.0

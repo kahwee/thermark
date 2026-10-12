@@ -2,7 +2,7 @@
 
 This trial collects evidence from independent B1 owners. It does not establish
 support for other models or USB. Use a build containing `setup` and `batch`;
-these commands are currently on main and are not in the v0.34.0 release.
+these commands are available in v0.35.0 and newer.
 
 ## Prepare
 
@@ -89,3 +89,34 @@ Omit printer IDs, serial numbers, private CSV content, and real Wi-Fi credential
 Optional photos should show the public demo labels laid flat. Failed installs
 and failed prints are useful evidence. After a week, note whether you used
 thermark again, what you printed, and what made repeat use awkward.
+
+## Repeatable physical measurements
+
+The trial script prepares public sparse, QR, dense-QR and repeated-batch jobs
+without opening a printer connection:
+
+```sh
+python3 scripts/hardware-trial.py --output local/trial-1 prepare --label 50x30
+thermark job verify --job local/trial-1/qr
+thermark job print --job local/trial-1/qr --label 50x30
+```
+
+Inspect each preview, charge the printer and load matching media before printing.
+Repeat on macOS and Linux where available. Keep charged and low-battery results
+separate; record interruption/reconnection as separate conditions. Never assume
+an interrupted label was not printed. Follow `job status` and physical inspection
+before choosing a resume row. Count completed physical labels and scan every QR:
+
+```sh
+python3 scripts/hardware-trial.py --output local/trial-1 record \
+  --case qr --printed 3 --scanned 3 --seconds 12.5 --battery charged
+python3 scripts/hardware-trial.py --output local/trial-1 report
+```
+
+The example duration is illustrative, not a benchmark result. Supply your actual
+measurements. Record a fresh output directory for each build/media/environment.
+The report separates offline preparation from operator-reported physical trials,
+includes host/build metadata, and leaves unmeasured durations empty. Sparse text
+has no QR; use `--scanned 0`. No printer IDs, serial numbers or private label
+content are collected. No new physical trials were performed for this release;
+the support registry remains B1 + b1 + BLE only for hardware-tested printing.

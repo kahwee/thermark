@@ -1,4 +1,4 @@
-//! Text rendering for labels using system TrueType fonts.
+//! Deterministic default fonts and script-aware text layout.
 
 use crate::errors::{Error, Result};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
@@ -89,8 +89,13 @@ pub fn list_available_fonts() -> Vec<PathBuf> {
 }
 
 /// Loaded font ready to draw.
+type GlyphLayout = (Vec<ab_glyph::Glyph>, f32);
+type LayoutCache = std::collections::HashMap<(String, u32), GlyphLayout>;
+
 pub struct LabelFont {
-    data: Vec<u8>,
+    data: std::sync::Arc<[u8]>,
+    shaping_font: harfrust::Font,
+    cache: std::sync::Mutex<LayoutCache>,
     path: PathBuf,
     /// Face index inside a .ttc collection (0 for single-font files).
     index: u32,
@@ -111,8 +116,16 @@ impl LabelFont {
                 path.display()
             ))
         })?;
+        let data: std::sync::Arc<[u8]> = data.into();
+        let shaping_font = harfrust::Font::new(
+            harfrust::font::Blob::Shared(std::sync::Arc::new(data.clone())),
+            index,
+        )
+        .ok_or_else(|| Error::font("font cannot be shaped as OpenType"))?;
         Ok(Self {
             data,
+            shaping_font,
+            cache: Default::default(),
             path: path.to_path_buf(),
             index,
         })
@@ -183,16 +196,137 @@ impl LabelFont {
         bail_no_font(name)
     }
 
+    /// Embedded, redistributable DejaVu Sans; independent of host font installation.
     pub fn load_default() -> Result<Self> {
-        Self::load_named("arial bold").or_else(|_| {
-            let path = find_system_font(None).ok_or_else(|| {
-                Error::font(
-                    "no system font found — pass --font /path/to.ttf or --font-name helvetica",
-                )
-            })?;
-            info!(path = %path.display(), "using font");
-            Self::load(&path)
+        let data: std::sync::Arc<[u8]> = include_bytes!("../assets/fonts/DejaVuSans.ttf")
+            .as_slice()
+            .into();
+        Ok(Self {
+            shaping_font: harfrust::Font::new(
+                include_bytes!("../assets/fonts/DejaVuSans.ttf").as_slice(),
+                0,
+            )
+            .expect("valid embedded font"),
+            data,
+            cache: Default::default(),
+            path: "<embedded DejaVu Sans>".into(),
+            index: 0,
         })
+    }
+
+    pub fn fingerprint(&self) -> String {
+        crate::prepared::digest(&self.data)
+    }
+
+    /// Reject missing characters before any pixels are drawn.
+    pub fn validate_text(&self, text: &str) -> Result<()> {
+        let font = self.font();
+        for ch in text.chars().filter(|c| !c.is_whitespace() && !matches!(*c,'\u{200c}'|'\u{200d}'|'\u{200e}'|'\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}')) {
+            if font.glyph_id(ch).0==0 { return Err(Error::font(format!("font has no glyph for U+{:04X}; choose --font with coverage for this text",ch as u32))); }
+        }
+        Ok(())
+    }
+
+    /// ASCII keeps historical placement; Unicode uses bidi runs and OpenType shaping.
+    fn layout(&self, text: &str, px_height: f32) -> (Vec<ab_glyph::Glyph>, f32) {
+        let key = (text.to_owned(), px_height.to_bits());
+        if let Some(hit) = self.cache.lock().expect("font cache").get(&key) {
+            return hit.clone();
+        }
+        let font = self.font();
+        let scale = PxScale::from(px_height);
+        let mut glyphs = Vec::new();
+        let mut caret = 0.0f32;
+        use unicode_script::UnicodeScript;
+        let simple_latin=text.chars().all(|ch|matches!(ch.script(),unicode_script::Script::Latin|unicode_script::Script::Common) && !matches!(ch,'\u{200c}'..='\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}'));
+        if simple_latin {
+            let sf = font.as_scaled(scale);
+            for ch in text.chars() {
+                let id = font.glyph_id(ch);
+                glyphs.push(id.with_scale_and_position(scale, ab_glyph::point(caret, 0.0)));
+                caret += sf.h_advance(id);
+            }
+        } else {
+            let face = harfrust::ShaperFont::new(&self.shaping_font);
+            let factor = px_height / (font.ascent_unscaled() - font.descent_unscaled());
+            let bidi = unicode_bidi::BidiInfo::new(text, None);
+            for para in &bidi.paragraphs {
+                let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+                for run in runs {
+                    let rtl = levels[run.start].is_rtl();
+                    let mut segments = Vec::new();
+                    let mut begin = run.start;
+                    let mut script = unicode_script::Script::Common;
+                    for (offset, ch) in text[run.clone()].char_indices() {
+                        let next = ch.script();
+                        if !matches!(
+                            next,
+                            unicode_script::Script::Common
+                                | unicode_script::Script::Inherited
+                                | unicode_script::Script::Unknown
+                        ) {
+                            if script != unicode_script::Script::Common && script != next {
+                                segments.push(begin..run.start + offset);
+                                begin = run.start + offset;
+                            }
+                            script = next;
+                        }
+                    }
+                    segments.push(begin..run.end);
+                    if rtl {
+                        segments.reverse();
+                    }
+                    for segment in segments {
+                        let mut buffer = harfrust::Buffer::new();
+                        buffer.push_str(&text[segment]);
+                        buffer.guess_segment_properties();
+                        buffer.set_direction(if rtl {
+                            harfrust::Direction::RightToLeft
+                        } else {
+                            harfrust::Direction::LeftToRight
+                        });
+                        harfrust::shape(&face, &mut buffer, harfrust::ShapeOptions::default())
+                            .expect("new buffer with explicit direction");
+                        for (info, pos) in buffer.glyph_infos().iter().zip(buffer.glyph_positions())
+                        {
+                            glyphs.push(
+                                ab_glyph::GlyphId(info.glyph_id as u16).with_scale_and_position(
+                                    scale,
+                                    ab_glyph::point(
+                                        caret + pos.x_offset as f32 * factor,
+                                        -pos.y_offset as f32 * factor,
+                                    ),
+                                ),
+                            );
+                            caret += pos.x_advance as f32 * factor;
+                        }
+                    }
+                }
+            }
+        }
+        let result = (glyphs, caret);
+        let mut cache = self.cache.lock().expect("font cache");
+        if result.0.len() > 4096 || text.len() > 16384 {
+            return result;
+        }
+        if cache.len() >= 256
+            || cache.values().map(|v| v.0.len()).sum::<usize>() + result.0.len() > 16384
+        {
+            cache.clear();
+        }
+        cache.insert(key, result.clone());
+        result
+    }
+    fn positioned(&self, text: &str, px_height: f32, x: f32, y: f32) -> Vec<ab_glyph::Glyph> {
+        self.layout(text, px_height)
+            .0
+            .into_iter()
+            .map(|mut glyph| {
+                glyph.position.x += x;
+                glyph.position.y += y;
+                glyph
+            })
+            .collect()
     }
 
     pub fn path(&self) -> &Path {
@@ -209,15 +343,7 @@ impl LabelFont {
 
     /// Pixel width of `text` at `px_height` (approx em size).
     pub fn text_width(&self, text: &str, px_height: f32) -> u32 {
-        let font = self.font();
-        let scale = PxScale::from(px_height);
-        let sf = font.as_scaled(scale);
-        let mut w = 0.0f32;
-        for ch in text.chars() {
-            let id = font.glyph_id(ch);
-            w += sf.h_advance(id);
-        }
-        w.ceil().max(0.0) as u32
+        self.layout(text, px_height).1.ceil().max(0.0) as u32
     }
 
     /// Distance from the top of a line to its baseline.
@@ -249,14 +375,9 @@ impl LabelFont {
         px_height: f32,
     ) {
         let font = self.font();
-        let scale = PxScale::from(px_height);
-        let sf = font.as_scaled(scale);
         let (w, h) = img.dimensions();
 
-        let mut caret = x;
-        for ch in text.chars() {
-            let gid = font.glyph_id(ch);
-            let glyph = gid.with_scale_and_position(scale, ab_glyph::point(caret, baseline_y));
+        for glyph in self.positioned(text, px_height, x, baseline_y) {
             if let Some(outlined) = font.outline_glyph(glyph) {
                 let bounds = outlined.px_bounds();
                 outlined.draw(|gx, gy, cover| {
@@ -271,7 +392,6 @@ impl LabelFont {
                     }
                 });
             }
-            caret += sf.h_advance(gid);
         }
     }
 
@@ -286,12 +406,7 @@ impl LabelFont {
         bounds: crate::geometry::Rect,
     ) -> bool {
         let font = self.font();
-        let scale = PxScale::from(px_height);
-        let sf = font.as_scaled(scale);
-        let mut caret = x;
-        for ch in text.chars() {
-            let gid = font.glyph_id(ch);
-            let glyph = gid.with_scale_and_position(scale, ab_glyph::point(caret, baseline_y));
+        for glyph in self.positioned(text, px_height, x, baseline_y) {
             if let Some(outlined) = font.outline_glyph(glyph) {
                 let ink = outlined.px_bounds();
                 if ink.min.x < bounds.x as f32
@@ -302,7 +417,6 @@ impl LabelFont {
                     return false;
                 }
             }
-            caret += sf.h_advance(gid);
         }
         true
     }
@@ -325,23 +439,17 @@ impl LabelFont {
         line_h: f32,
     ) -> Option<(f32, f32)> {
         let font = self.font();
-        let scale = PxScale::from(px_height);
-        let sf = font.as_scaled(scale);
         let mut min_y = f32::INFINITY;
         let mut max_y = f32::NEG_INFINITY;
 
         for (i, line) in lines.iter().enumerate() {
             let baseline = i as f32 * line_h;
-            let mut caret = 0.0f32;
-            for ch in line.chars() {
-                let gid = font.glyph_id(ch);
-                let glyph = gid.with_scale_and_position(scale, ab_glyph::point(caret, baseline));
+            for glyph in self.positioned(line, px_height, 0.0, baseline) {
                 if let Some(outlined) = font.outline_glyph(glyph) {
                     let b = outlined.px_bounds();
                     min_y = min_y.min(b.min.y);
                     max_y = max_y.max(b.max.y);
                 }
-                caret += sf.h_advance(gid);
             }
         }
         (min_y.is_finite() && max_y.is_finite()).then_some((min_y, max_y))
@@ -373,7 +481,7 @@ impl LabelFont {
                     } else {
                         // hard-break very long tokens
                         let mut buf = String::new();
-                        for ch in word.chars() {
+                        for ch in unicode_segmentation::UnicodeSegmentation::graphemes(word, true) {
                             let t = format!("{buf}{ch}");
                             if self.text_width(&t, px_height) <= max_width_px {
                                 buf = t;
@@ -541,5 +649,94 @@ mod tests {
             left > 5 && right > 5,
             "A and C regions should both have ink"
         );
+    }
+}
+
+#[cfg(test)]
+mod shaping_tests {
+    use super::*;
+    #[test]
+    fn default_is_embedded_and_has_stable_identity() {
+        let font = LabelFont::load_default().unwrap();
+        assert_eq!(
+            font.fingerprint(),
+            crate::prepared::digest(include_bytes!("../assets/fonts/DejaVuSans.ttf"))
+        );
+        assert_eq!(font.index(), 0);
+    }
+    #[test]
+    fn arabic_lam_alef_is_shaped_as_a_ligature() {
+        let font = LabelFont::load_default().unwrap();
+        font.validate_text("لا").unwrap();
+        let (glyphs, width) = font.layout("لا", 32.0);
+        assert_eq!(glyphs.len(), 1);
+        assert!(width > 0.0);
+        assert_ne!(glyphs[0].id.0, 0);
+    }
+    #[test]
+    fn mixed_bidi_and_combining_text_renders_within_validated_bounds() {
+        let font = LabelFont::load_default().unwrap();
+        for text in ["مرحبا ABC 123", "שלום 42", "café e\u{301}"] {
+            let mut image = GrayImage::from_pixel(384, 240, Luma([255]));
+            crate::label::draw_text_block(
+                &mut image,
+                &font,
+                text,
+                crate::geometry::Rect {
+                    x: 8,
+                    y: 8,
+                    w: 368,
+                    h: 224,
+                },
+                crate::TextAlign::Center,
+                None,
+            )
+            .unwrap();
+            assert!(image.as_raw().contains(&0));
+        }
+    }
+    #[test]
+    fn missing_glyph_error_preserves_the_canvas() {
+        let font = LabelFont::load_default().unwrap();
+        let mut image = GrayImage::from_pixel(100, 100, Luma([255]));
+        let before = image.clone();
+        let error = crate::label::draw_text_block(
+            &mut image,
+            &font,
+            "\u{10ffff}",
+            crate::geometry::Rect {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 100,
+            },
+            crate::TextAlign::Center,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("no glyph"));
+        assert_eq!(image, before);
+    }
+}
+
+#[cfg(test)]
+mod autofit_tests {
+    #[test]
+    fn trial_qr_side_text_fits_by_measured_ink() {
+        let label = crate::geometry::LabelMm::parse("50x30")
+            .unwrap()
+            .to_pixels(384, 8.0);
+        crate::label::make_qr_label_opts(&crate::label::QrLabelOptions {
+            url: "https://example.com/trial/1".into(),
+            side_text: "TRIAL 1".into(),
+            label,
+            safe: crate::geometry::SafeArea::B1,
+            text_side: crate::label::TextSide::Right,
+            border: false,
+            font_path: None,
+            font_name: None,
+            font_size: None,
+        })
+        .unwrap();
     }
 }

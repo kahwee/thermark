@@ -246,6 +246,9 @@ pub async fn identify(cfg: &Config, conn: &ConnArgs, json: bool) -> Result<()> {
 }
 
 pub fn fonts() {
+    println!(
+        "Default: embedded DejaVu Sans (redistribution terms: LICENSE-FONTS). Named fonts below are host-dependent."
+    );
     let fonts = font::list_available_fonts();
     if fonts.is_empty() {
         println!("No candidate fonts found.");

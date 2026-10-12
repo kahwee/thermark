@@ -16,3 +16,5 @@ pub use info::{
 pub use job::{PrintOptions, compose_for_label};
 pub use pacing::Pacing;
 pub use raw::{OnTimeout, RawPrinter};
+
+pub use print::PrintStage;

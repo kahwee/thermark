@@ -56,8 +56,8 @@ commands. Text must be nonempty; QR rows also need a nonempty URL/payload.
 Keep private CSVs and previews in your own private directory or under ignored
 `local/`; previews contain the label content. The journal omits that content.
 
-Inputs are limited to 8 MiB each, 1,000 rows, and 64 MiB of rendered grayscale
-pages per batch. Split larger jobs. A row that cannot fit or render stops the
+Inputs are limited to 8 MiB each, 1,000 rows, and 64 MiB per rendered grayscale
+page. Split larger jobs. A row that cannot fit or render stops the
 whole batch before any label is sent. A preview save failure also sends no
 labels, although it may leave an incomplete output directory.
 
@@ -129,3 +129,40 @@ again, but only the selected row and those after it are sent. Each run keeps
 its own journal. `manifest.json` describes geometry and counts; it does not
 claim that labels printed. A confirmed protocol result still needs physical
 inspection to establish print quality and QR scanability.
+
+## Print approved pages and inspect recovery
+
+New batches produce schema 2 prepared jobs. After inspecting previews, print
+those exact pages without reopening the CSV or reloading a font:
+
+```sh
+thermark job verify --job local/prints/inventory-preview
+thermark job print --job local/prints/inventory-preview --label 50x30
+thermark job status --job local/prints/inventory-preview
+thermark job status --job local/prints/inventory-preview --json
+```
+
+The connected profile, DPI, print task and declared media must match the job.
+Changed pages/settings fail verification. `job verify` and `job status` do not
+connect or read printer configuration. A previously executed job requires the
+resume command; copying an approved artifact to a fresh directory is an explicit
+new print run with independent receipts.
+
+After inspecting physical output, resume from your chosen row:
+
+```sh
+thermark job resume --job local/prints/inventory-preview --label 50x30 \
+  --start-at 3 --acknowledge-uncertain
+```
+
+Confirmed rows are skipped. Uncertain rows at or after `--start-at` are retried
+only with the acknowledgement; earlier rows remain skipped by your explicit
+selection. Without uncertain outcomes or incomplete journal tails, the flag is
+unnecessary. Each attempt adds a new numbered journal; `job status` combines them.
+Keep all journals with the original job. Concurrent execution of the same job
+directory is rejected, and process locks release automatically after crashes.
+
+The schema, font changes and library entry points are described in
+[Architecture and prepared jobs](architecture.md). Older schema 1 directories
+must be prepared again. Batches now spool pages individually, so the aggregate
+64 MiB render restriction is replaced by a per-page 64 MiB limit.

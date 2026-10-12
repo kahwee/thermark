@@ -1,6 +1,6 @@
 [package]
 name = "thermark"
-version = "0.34.0"
+version = "0.35.0"
 edition = "2024"
 # Minimum supported Rust, not a request for a particular toolchain. Set to the
 # current stable so new language features can be used freely; the cost is that
@@ -17,8 +17,8 @@ repository = "https://github.com/kahwee/thermark"
 # Personal output and runner infrastructure must never enter a registry package.
 # Keep local/README.md: the Wi-Fi save guard points at it; ignore real prints.
 include = [
-    "/src/**", "/benches/**", "/examples/**", "/tests/**", "/fixtures/**",
-    "/docs/*.md", "/scripts/**", "/Cargo.toml", "/Cargo.lock",
+    "/assets/**", "/LICENSE-FONTS", "/src/**", "/benches/**", "/examples/**", "/tests/**", "/fixtures/**",
+    "/docs/*.md", "/scripts/*.py", "/scripts/*.sh", "/Cargo.toml", "/Cargo.lock",
     "/README.md", "/CHANGELOG.md", "/CONTRIBUTING.md", "/AGENTS.md", "/LICENSE",
     "/rust-toolchain.toml", "/local/README.md",
 ]
@@ -62,6 +62,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tempfile = "3"
+sha2 = "0.11.1"
+unicode-bidi = "0.3.18"
+unicode-segmentation = "1.13.3"
+unicode-script = "0.5.8"
+harfrust = "0.14.0"
 
 # Optional transports (enable via features)
 btleplug = { version = "0.13.5", optional = true }

@@ -9,3 +9,6 @@
 # Personal stickers, real Wi‑Fi labels, one-off art (never commit secrets)
 /local/**
 !/local/README.md
+
+# Python test/import caches
+__pycache__/

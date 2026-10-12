@@ -64,8 +64,43 @@ there is no patched version. A font-engine replacement needs rendering checks.
 ## Code ownership and API changes
 
 `profile.rs` owns identity/geometry/support evidence; `transport/` owns BLE/USB;
-`printer/` owns job validation; `label.rs` and `image_encode/` own rendering.
+`printer/` owns job validation; `label/` and `image_encode/` own rendering.
 [AGENTS.md](../AGENTS.md) gives exact boundaries and verification rules.
 
 See [hardware notes](hardware-notes.md), [maintenance history](maintenance-notes.md),
 and [0.32 API removals](../CHANGELOG.md#removed) for the relevant context.
+
+
+## Prepared jobs, fonts and fault replay
+
+See [Architecture and prepared jobs](architecture.md) for module boundaries,
+artifact/journal schemas and API migration notes. The image benchmark includes
+fresh versus shared font/layout rendering and Arabic shaping. Measure batch
+RSS with separate processes on the same host; disk-backed preparation retains
+one rendered page and a bounded glyph cache, not every page in the batch.
+
+```sh
+cargo run --locked --no-default-features --example prepared_job
+cargo test --locked --test protocol_replay
+python3 scripts/test_hardware_trial.py -v
+```
+
+Replay fixtures are synthetic and contain demo data. Physical success rates,
+QR scanability and comparative throughput require measured hardware trials;
+see [the trial guide](hardware-trial.md).
+
+
+### Local measurements for 0.35.0
+
+On the Linux x86_64 workspace with Rust 1.99, separate release-binary processes
+prepared 1 and 750 identical 50x30 text labels in 0.006 and 0.346 seconds.
+`resource.getrusage(RUSAGE_CHILDREN).ru_maxrss` reported 9,856 KiB for both;
+this process measurement includes the launcher before exec. The 750 pages
+represent roughly 69 MB of grayscale pixels when retained together. These
+measurements describe offline preparation on this host, not printer throughput.
+
+The image benchmark measured median text rendering at 0.075 ms with fresh
+font/layout loading and 0.048 ms with a shared font/cache; Arabic text with the
+shared font measured 0.028 ms. Re-run these medians on your host;
+results depend on font, text, CPU and concurrent load. No competitor or physical
+printer throughput benchmark was performed.

@@ -99,66 +99,6 @@ pub fn qr_layout(label: LabelPx, safe: SafeArea) -> Option<QrLayout> {
     })
 }
 
-/// Build a label: **square** QR + readable side text using a system TTF font.
-pub fn make_qr_label_opts(opts: &QrLabelOptions) -> Result<GrayImage> {
-    if opts.url.is_empty() {
-        return Err(Error::qr("url must not be empty"));
-    }
-    let w = opts.label.width_px;
-    let h = opts.label.height_px;
-    let layout = qr_layout(opts.label, opts.safe).ok_or_else(|| {
-        Error::qr(format!(
-            "label {w}x{h}px is too small for a QR beside text \
-             (need at least {QR_SIDE_MIN}px of QR after margins). \
-             Use a wider label, or a model with a wider printhead."
-        ))
-    })?;
-
-    let font = load_font(opts.font_path.as_deref(), opts.font_name.as_deref())?;
-
-    let mut img = GrayImage::from_pixel(w, h, Luma([255]));
-
-    let QrLayout {
-        area,
-        gap,
-        text_col_w,
-        qr_side,
-    } = layout;
-
-    let (qr_x, text_x) = match opts.text_side {
-        TextSide::Right => (area.x, area.x + qr_side + gap),
-        TextSide::Left => (area.x + text_col_w + gap, area.x),
-    };
-    // Centre within the printable band, not the raw canvas — otherwise the QR
-    // drifts into the clipped bottom edge.
-    let qr_y = area.y + (area.h.saturating_sub(qr_side)) / 2;
-
-    // --- Square QR ---
-    let qr_img = render_qr_square(&opts.url, qr_side)?;
-    overlay_gray(&mut img, &qr_img, qr_x, qr_y);
-
-    // --- Text (system font, left-to-right, top-to-bottom) ---
-    draw_text_block(
-        &mut img,
-        &font,
-        &opts.side_text,
-        Rect {
-            x: text_x,
-            y: area.y,
-            w: text_col_w.saturating_sub(4),
-            h: area.h,
-        },
-        TextAlign::Center,
-        opts.font_size,
-    )?;
-
-    if opts.border {
-        draw_border(&mut img);
-    }
-
-    Ok(img)
-}
-
 /// Horizontal alignment of a text block within its box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 #[value(rename_all = "lower")]
@@ -170,80 +110,6 @@ pub enum TextAlign {
     Center,
     #[value(alias = "r")]
     Right,
-}
-
-/// Wrap, size, and draw `text` inside `bx`. Shared by every label type.
-///
-/// `font_size` of `None` auto-fits the largest size that keeps words whole.
-/// Returns an error without changing the image if the size is invalid or
-/// any text ink would fall outside `bx`.
-pub fn draw_text_block(
-    img: &mut GrayImage,
-    font: &LabelFont,
-    text: &str,
-    bx: Rect,
-    align: TextAlign,
-    font_size: Option<f32>,
-) -> Result<()> {
-    if bx.w == 0
-        || bx.h == 0
-        || bx
-            .x
-            .checked_add(bx.w)
-            .is_none_or(|right| right > img.width())
-        || bx
-            .y
-            .checked_add(bx.h)
-            .is_none_or(|bottom| bottom > img.height())
-    {
-        return Err(Error::msg("text box must fit inside the label canvas"));
-    }
-    let px = match font_size {
-        Some(s) => crate::font::validate_font_size(s)?.clamp(6.0, 96.0),
-        None => font.fit_size(text, bx.w, bx.h),
-    };
-    let lines = font.wrap(text, bx.w, px);
-    let line_h = font.text_height(px) as f32 + 2.0;
-    let top_align = font_size.is_some() && px <= 16.0;
-
-    // Place by measured ink, not by font metrics — see `block_ink_bounds`.
-    let mut baseline = match font.block_ink_bounds(&lines, px, line_h) {
-        Some((ink_top, ink_bottom)) => {
-            let ink_h = ink_bottom - ink_top;
-            let offset = if top_align {
-                0.0
-            } else {
-                ((bx.h as f32 - ink_h) / 2.0).max(0.0)
-            };
-            bx.y as f32 + offset - ink_top
-        }
-        // Nothing to measure (blank text): fall back to metrics.
-        None => bx.y as f32 + font.ascent(px) as f32,
-    };
-
-    let mut positions = Vec::with_capacity(lines.len());
-    for line in &lines {
-        let tw = font.text_width(line, px);
-        let free = bx.w.saturating_sub(tw) as f32;
-        let tx = bx.x as f32
-            + match align {
-                TextAlign::Left => 0.0,
-                TextAlign::Center => free / 2.0,
-                TextAlign::Right => free,
-            };
-        if !font.text_ink_fits(line, px, tx, baseline, bx) {
-            return Err(Error::msg(
-                "text does not fit inside the label text area; shorten the text, use a larger label, \
-                 or reduce/omit --font-size",
-            ));
-        }
-        positions.push((tx, baseline));
-        baseline += line_h;
-    }
-    for (line, (tx, baseline)) in lines.iter().zip(positions) {
-        font.draw_text(img, tx, baseline, line, px);
-    }
-    Ok(())
 }
 
 fn draw_border(img: &mut GrayImage) {
@@ -258,130 +124,12 @@ fn draw_border(img: &mut GrayImage) {
     }
 }
 
-/// Calibration pattern with printed millimetre numbers down the feed ruler.
-///
-/// The geometry comes from [`crate::image_encode::calibration_pattern`];
-/// this adds the numerals, which need font access. Numbers make the photo
-/// self-describing: read the last one that printed rather than counting ticks
-/// from an edge that may itself be cut off.
-pub fn make_calibration_label(
-    label: LabelPx,
-    safe: SafeArea,
-    pixels_per_mm: f64,
-    font_path: Option<&std::path::Path>,
-) -> Result<GrayImage> {
-    let mut img = crate::image_encode::calibration_pattern(label, Some(safe), pixels_per_mm);
-    let Ok(font) = load_font(font_path, None) else {
-        // No system font: the geometric pattern is still perfectly usable.
-        return Ok(img);
-    };
-
-    let scale = pixels_per_mm / crate::geometry::PX_PER_MM;
-    let size = (13.0 * scale) as f32;
-    // Clear of the ruler ticks, derived from their length rather than a second
-    // constant that has to be kept in agreement by hand.
-    let inset =
-        ((crate::image_encode::CALIBRATION_RULER_MAJOR_PX + 4) as f64 * scale).round() as u32;
-
-    let height_mm = (f64::from(label.height_px) / pixels_per_mm).floor() as u32;
-    let mut number = core::fmt::NumBuffer::new();
-    for mm in (0..=height_mm).step_by(5) {
-        let y = (f64::from(mm) * pixels_per_mm).round() as u32;
-        if y >= label.height_px {
-            break;
-        }
-        let text = mm.format_into(&mut number);
-        let w = font.text_width(text, size);
-        if inset + w >= label.width_px - inset {
-            break; // too narrow to letter without colliding
-        }
-        // Baseline sits just ABOVE its tick. Below the tick, the last numeral
-        // falls past the printable band — and that is the reading that matters
-        // most, so it is exactly the one you must not lose.
-        let baseline = y.max(size as u32) as f32 - 1.0;
-        font.draw_text(&mut img, inset as f32, baseline, text, size);
-        font.draw_text(
-            &mut img,
-            (label.width_px - inset - w) as f32,
-            baseline,
-            text,
-            size,
-        );
-    }
-    Ok(img)
-}
-
 /// How many millimetres the boundary probe covers, ending at the label's edge.
 ///
 /// Thirteen bars leaves each numeral room on the narrowest supported probe;
 /// the window is placed at the *end* of the label because that is the edge in
 /// question.
 pub const BOUNDARY_SPAN_MM: u32 = 13;
-
-/// Millimetre range the boundary probe marks on `label`: the last
-/// [`BOUNDARY_SPAN_MM`] millimetres, ending at the final drawable one.
-///
-/// Derived from the label rather than fixed. A hardcoded 17..29 drew three
-/// bars on 40x20 media and probed the middle of a 50x80 label — nowhere near
-/// the edge it exists to measure.
-pub fn boundary_range(label: LabelPx, pixels_per_mm: f64) -> std::ops::RangeInclusive<u32> {
-    let last = (f64::from(label.height_px) / pixels_per_mm)
-        .floor()
-        .max(1.0) as u32
-        - 1;
-    let first = last.saturating_sub(BOUNDARY_SPAN_MM - 1);
-    first..=last
-}
-
-/// A staircase of numbered bars, one per millimetre, for finding exactly where
-/// the printer stops.
-///
-/// The feed ruler on [`make_calibration_label`] puts its ticks 1 mm (8 px)
-/// apart, which is too crowded to letter every one — so readings there are
-/// "somewhere past 20", and estimating the rest from a photo is what produced
-/// two contradictory measurements. Here each millimetre gets its own bar at its
-/// own horizontal position, so the numbers never crowd: **the last bar you can
-/// see is the answer**, with no counting and no scale estimation.
-pub fn make_boundary_label(
-    label: LabelPx,
-    pixels_per_mm: f64,
-    font_path: Option<&std::path::Path>,
-) -> Result<GrayImage> {
-    let (w, h) = (label.width_px, label.height_px);
-    let mut img = GrayImage::from_pixel(w, h, Luma([255]));
-    let font = load_font(font_path, None)?;
-
-    let range = boundary_range(label, pixels_per_mm);
-    let steps = range.end() - range.start() + 1;
-    let slot = w / steps.max(1);
-    let bar_w = slot.saturating_sub(4).max(1);
-    let size = 12.0f32;
-
-    for (i, mm) in range.enumerate() {
-        let i = i as u32;
-        let y = (f64::from(mm) * pixels_per_mm).round() as u32;
-        let next_y = (f64::from(mm + 1) * pixels_per_mm).round() as u32;
-        if next_y > h {
-            break;
-        }
-        let x0 = i * slot;
-
-        // Bar: 1 mm tall, so its own thickness cannot be mistaken for a
-        // neighbour's.
-        for yy in y..next_y.min(h) {
-            for xx in x0..(x0 + bar_w).min(w) {
-                img.put_pixel(xx, yy, Luma([0]));
-            }
-        }
-        // Number sits above its bar. Horizontal separation is what keeps these
-        // legible where a shared ruler column could not.
-        let baseline = y as f32 - 2.0;
-        if baseline > size {
-            font.draw_text(&mut img, x0 as f32, baseline, &mm.to_string(), size);
-        }
-    }
-    Ok(img)
-}
 
 /// Options for a text-only sticker.
 #[derive(Debug, Clone)]
@@ -394,36 +142,6 @@ pub struct TextLabelOptions {
     pub font_path: Option<std::path::PathBuf>,
     pub font_name: Option<String>,
     pub font_size: Option<f32>,
-}
-
-/// Render a text-only sticker: no QR, text auto-fitted to fill the label.
-pub fn make_text_label(opts: &TextLabelOptions) -> Result<GrayImage> {
-    if opts.text.trim().is_empty() {
-        return Err(Error::qr("text must not be empty"));
-    }
-    let (w, h) = (opts.label.width_px, opts.label.height_px);
-    let area = content_box(opts.label, opts.safe)
-        .filter(|a| a.w >= MIN_TEXT_BOX_PX && a.h >= MIN_TEXT_BOX_PX)
-        .ok_or_else(|| {
-            Error::qr(format!(
-                "label {w}x{h}px leaves no printable room for text after insets"
-            ))
-        })?;
-
-    let font = load_font(opts.font_path.as_deref(), opts.font_name.as_deref())?;
-    let mut img = GrayImage::from_pixel(w, h, Luma([255]));
-    draw_text_block(
-        &mut img,
-        &font,
-        &opts.text,
-        area,
-        opts.align,
-        opts.font_size,
-    )?;
-    if opts.border {
-        draw_border(&mut img);
-    }
-    Ok(img)
 }
 
 /// Load an explicit path, then a named font, then the system default.
@@ -443,52 +161,6 @@ fn load_font(path: Option<&std::path::Path>, name: Option<&str>) -> Result<Label
 pub const QR_MIN_MODULE_PX: usize = 2;
 /// Below this it scans, but marginally; worth saying so.
 pub const QR_COMFORTABLE_MODULE_PX: usize = 3;
-
-pub fn render_qr_square(url: &str, side: u32) -> Result<GrayImage> {
-    let code = QrCode::new(url.as_bytes()).map_err(|e| Error::qr(format!("QR encode: {e}")))?;
-    let colors = code.to_colors();
-    let modules = code.width();
-    let quiet = 2usize;
-    let total = modules + quiet * 2;
-    let mpx = side as usize / total;
-
-    if mpx < QR_MIN_MODULE_PX {
-        return Err(Error::qr(format!(
-            "content needs {modules} QR modules, which is {mpx}px per module in {side}px — \
-             too fine to scan once printed (need {QR_MIN_MODULE_PX}px). \
-             Shorten the content, or use a larger label."
-        )));
-    }
-    if mpx < QR_COMFORTABLE_MODULE_PX {
-        tracing::warn!(
-            module_px = mpx,
-            modules,
-            "QR modules are small; it should scan but shorten the content if it does not"
-        );
-    }
-    let drawn = (total * mpx) as u32;
-    let ox = (side.saturating_sub(drawn)) / 2;
-    let oy = ox;
-
-    let mut img = GrayImage::from_pixel(side, side, Luma([255]));
-    for y in 0..modules {
-        for x in 0..modules {
-            if colors[y * modules + x] != qrcode::Color::Dark {
-                continue;
-            }
-            let px = ox + ((x + quiet) * mpx) as u32;
-            let py = oy + ((y + quiet) * mpx) as u32;
-            for dy in 0..mpx as u32 {
-                for dx in 0..mpx as u32 {
-                    if px + dx < side && py + dy < side {
-                        img.put_pixel(px + dx, py + dy, Luma([0]));
-                    }
-                }
-            }
-        }
-    }
-    Ok(img)
-}
 
 fn overlay_gray(dst: &mut GrayImage, src: &GrayImage, x0: u32, y0: u32) {
     let (dw, dh) = dst.dimensions();
@@ -777,3 +449,15 @@ mod tests {
         assert_eq!(img.get_pixel(383, 239)[0], 255);
     }
 }
+
+mod qr;
+pub use qr::{make_qr_label_opts, render_qr_square};
+
+mod text;
+pub use text::{draw_text_block, make_text_label};
+
+mod calibration;
+pub use calibration::{boundary_range, make_boundary_label, make_calibration_label};
+
+pub use qr::make_qr_label_with_font;
+pub use text::make_text_label_with_font;

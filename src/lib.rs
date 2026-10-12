@@ -17,6 +17,7 @@
 //!
 //! Protocol: see `protocol.rs` for command IDs and `packet.rs` for framing.
 
+pub mod batch;
 pub mod config;
 pub mod doctor;
 pub mod errors;
@@ -26,10 +27,13 @@ pub mod image_encode;
 pub mod label;
 pub mod mock;
 pub mod packet;
+pub mod prepared;
 pub mod print_task;
 pub mod printer;
 pub mod profile;
 pub mod protocol;
+pub mod session;
+pub mod testing;
 pub mod transport;
 pub mod types;
 pub mod wifi;

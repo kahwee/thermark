@@ -31,6 +31,9 @@ def verify(args):
         raise ValueError('--smoke requires an existing --font file')
 
     version = args.tag[1:]
+    archive_files = ['thermark', 'README.md', 'LICENSE']
+    if tuple(map(int, version.split('-')[0].split('.'))) >= (0, 35, 0):
+        archive_files.append('LICENSE-FONTS')
     release = github(args.repo, f'releases/tags/{args.tag}')
     if release['draft'] or release['tag_name'] != args.tag:
         raise ValueError('release is not published for the requested tag')
@@ -87,16 +90,12 @@ def verify(args):
         with tarfile.open(root / name) as archive:
             stem = name.removesuffix('.tar.gz')
             members = archive.getmembers()
-            expected_members = {stem, *(stem + '/' + file for file in [
-                'thermark', 'README.md', 'LICENSE'
-            ])}
-            if len(members) != 4 or {member.name for member in members} != expected_members:
+            expected_members = {stem, *(stem + '/' + file for file in archive_files)}
+            if len(members) != len(archive_files) + 1 or {member.name for member in members} != expected_members:
                 raise ValueError(f'archive member inventory mismatch: {name}')
             if not archive.getmember(stem).isdir():
                 raise ValueError(f'archive root is not a directory: {name}')
-            if not all(archive.getmember(stem + '/' + file).isfile() for file in [
-                'thermark', 'README.md', 'LICENSE'
-            ]):
+            if not all(archive.getmember(stem + '/' + file).isfile() for file in archive_files):
                 raise ValueError(f'archive contains non-regular files: {name}')
             if not archive.getmember(stem + '/thermark').mode & 0o111:
                 raise ValueError(f'archive binary is not executable: {name}')

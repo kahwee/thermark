@@ -31,6 +31,10 @@ Versions below match the current workflow and composite-action references. SHA-p
 | [actions/upload-artifact](https://github.com/actions/upload-artifact) | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
 | [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | `686976e191b89faba57d3206551f0f330d8cb249` |
 
+The Rust workflow also runs the release guards and hardware-trial recorder
+tests before the Rust feature matrix. Release archives include the bundled
+font redistribution terms (`LICENSE-FONTS`).
+
 ## Greenkeeping
 
 [Dependabot configuration](dependabot.yml) checks GitHub Actions weekly and groups their updates. Review the upstream release notes, runtime requirements, permissions, and changes to inputs or artifact behavior before merging. Update SHA pins to the release commit, retaining the version comment where present.

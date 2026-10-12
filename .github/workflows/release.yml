@@ -86,12 +86,12 @@ jobs:
 
           cargo build --locked --release
           install -m 755 target/release/thermark "$full_dir/thermark"
-          cp README.md LICENSE "$full_dir/"
+          cp README.md LICENSE LICENSE-FONTS "$full_dir/"
           tar -czf "dist/${stem}-full.tar.gz" -C package "${stem}-full"
 
           cargo build --locked --release --no-default-features --features ble
           install -m 755 target/release/thermark "$ble_dir/thermark"
-          cp README.md LICENSE "$ble_dir/"
+          cp README.md LICENSE LICENSE-FONTS "$ble_dir/"
           tar -czf "dist/${stem}-ble.tar.gz" -C package "${stem}-ble"
 
           for archive in dist/*.tar.gz; do

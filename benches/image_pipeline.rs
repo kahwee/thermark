@@ -36,6 +36,33 @@ fn report<T>(name: &str, iterations: usize, operation: impl FnMut() -> T) {
 }
 
 fn main() {
+    let font = thermark::font::LabelFont::load_default().unwrap();
+    let opts = thermark::label::TextLabelOptions {
+        text: "INVENTORY 42".into(),
+        label: LabelPx {
+            width_px: 384,
+            height_px: 240,
+        },
+        safe: SafeArea::B1,
+        align: thermark::TextAlign::Center,
+        border: false,
+        font_path: None,
+        font_name: None,
+        font_size: None,
+    };
+    report("text fresh font/layout", 100, || {
+        thermark::make_text_label(&opts).unwrap()
+    });
+    report("text shared font/layout", 100, || {
+        thermark::label::make_text_label_with_font(&opts, &font).unwrap()
+    });
+    let unicode_opts = thermark::label::TextLabelOptions {
+        text: "مرحبا 42".into(),
+        ..opts
+    };
+    report("Arabic shared font/layout", 100, || {
+        thermark::label::make_text_label_with_font(&unicode_opts, &font).unwrap()
+    });
     let page = patterned(384, 640);
     report("encode owned+clone hard", 100, || {
         black_box(encode(

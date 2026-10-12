@@ -33,9 +33,10 @@ cover connection, protocol, rendering, and physical measurements. The
 | --- | --- |
 | Profiles and tasks | `src/profile.rs`, `src/print_task.rs` |
 | Protocol and errors | `src/packet.rs`, `src/protocol.rs`, `src/errors.rs` |
-| Connections and diagnosis | `src/transport.rs`, `src/transport/`, `src/doctor.rs` |
+| Connections and diagnosis | `src/transport.rs`, `src/transport/`, `src/doctor/`, `src/session/` |
 | Jobs and queries | `src/printer/` |
-| Rendering | `src/geometry.rs`, `src/image_encode.rs`, `src/image_encode/`, `src/font.rs`, `src/label.rs` |
+| Rendering | `src/geometry.rs`, `src/image_encode.rs`, `src/image_encode/`, `src/font.rs`, `src/label/` |
+| Batch preparation and recovery | `src/batch/`, `src/prepared.rs` |
 | CLI and config | `src/cli/`, `src/config.rs`, `src/main.rs` |
 | Offline integration tests | `src/mock.rs`, `tests/protocol_integration.rs` |
 
