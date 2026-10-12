@@ -38,6 +38,9 @@ Run `scripts/check.sh all` for dependency, transport, or shared API changes;
 must be visually reviewed before acceptance. Tests and mock transports do not
 establish hardware verification.
 
+For documentation images and website screenshots, use the
+[refresh workflow](docs/development.md#documentation-images-and-screenshots).
+
 Small fixes, clearer setup instructions, reproducible bugs, and reports of
 accessibility or installation problems are welcome. Keep personal data in
 ignored `local/`. Mention the OS, thermark version, and a minimal example.

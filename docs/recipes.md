@@ -25,7 +25,9 @@ sh examples/render-recipes.sh local/prints/recipes
 
 This renders all eight previews without connecting to hardware. It requires an
 installed `thermark`; set `THERMARK_BIN` to use a locally built binary.
-Use `THERMARK_FONT` to select a `.ttf` or `.ttc` font. Appearance varies by font.
+The default is embedded DejaVu Sans. `THERMARK_FONT` selects a custom `.ttf` or
+`.ttc` font. To refresh committed previews from current code, follow the
+[documentation image workflow](development.md#documentation-images-and-screenshots).
 
 ## Guest Wi-Fi
 

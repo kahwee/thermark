@@ -12,6 +12,12 @@ such change is listed under **Changed** with the old and new spelling.
 
 ### Changed
 
+- Refresh documentation images from the locked offline CLI with isolated config,
+  embedded fonts, a hash manifest and CI freshness checks. Share generated demos
+  across README, recipes and landing page; consolidate maintainer reference docs.
+- Add desktop/mobile documentation screenshot capture with fixed viewports,
+  image-load/overflow checks and browser/content metadata under ignored local
+  output. Fix installation cards overflowing the mobile landing page.
 - Remove `Config::apply_set`; use `apply_update(Some(addr), Some(connection),
   model, scan_secs, None)`. Scan saving now uses the same validated update path.
 - Consolidate batch recovery and hardware-trial docs, remove stale maintenance

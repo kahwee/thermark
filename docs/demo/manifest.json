@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "build": "thermark 0.35.0",
+  "model": "b1",
+  "label_mm": "50x30",
+  "font": "embedded DejaVu Sans",
+  "font_sha256": "7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954",
+  "images": {
+    "hello-label.png": "f9f61c4c6df2d563613094cf7b5b74c84875a8074d81f939c3ee20a78c1842c4",
+    "recipes/guest-wifi.png": "124b2621a404dfc49387256e2c9ed4dd30ccbb53147176bd4e4849f4cc7b1d38",
+    "recipes/inventory.png": "b7e317cce9fccd86e7ce70550db31a5527b9d9504c822122dac424713265204d",
+    "recipes/equipment.png": "3711f95296544999455f04eeef99c9c35087d2d9584c05d8a3015d7df772499d",
+    "recipes/return.png": "0e69ab98536f824491ad185d58267ed4274e1af501bc5899eddcea7a0cc80a19",
+    "recipes/badge.png": "6c514cdb7fb4d06e1d8f3442b2c3b9a931f3d6af65cf653a340e49abfee56414",
+    "recipes/storage.png": "0841161a28dad64c2da23893dd4c17337d65dca04f715b598fcb3db07c1204ce",
+    "recipes/packing.png": "009060eebd11bc93a93663b55a858bdab5771b23320d5f4147aeb77c3c489304",
+    "recipes/batch.png": "b5f2807352350c6b6180424fffe5b46bbfaaad4796e1f4906b3683614d5bfeda"
+  }
+}

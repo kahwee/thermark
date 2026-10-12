@@ -68,6 +68,9 @@ jobs:
     - name: Validate Rust and feature matrix
       run: scripts/check-ci.sh
 
+    - name: Verify documentation images
+      run: python3 scripts/render-docs.py --check
+
     - name: Upload failed render images
       if: failure()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

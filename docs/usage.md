@@ -1,191 +1,97 @@
-# Printing, previews, and troubleshooting
+# Printing and troubleshooting
 
-See the [label recipe gallery](recipes.md) for eight offline examples and a
-script that renders them all.
+See [recipes](recipes.md) for public demo labels and [batches](batch.md) for
+preparation, saved-page printing and recovery.
 
-## Guided setup
+## Setup and print
 
 ```sh
 thermark setup --label 50x30
+# Explicitly print one test label after readiness checks:
+thermark setup --label 50x30 --test-print
 ```
 
-Setup reuses a saved printer or scans and selects one. It identifies hardware,
-runs readiness diagnostics, and saves printer/model/media defaults only after
-those checks succeed. When changing printers, saved registration measurements
-are reset. Pass `--addr` to choose a different printer. Setup uses exact selectors;
-`--fuzzy` is rejected because saved defaults need an unambiguous selector.
+Setup selects and identifies a printer, checks readiness, then saves defaults.
+It resets registration measurements when changing printers. Pass `--addr` for
+an exact name/id; setup rejects `--fuzzy`. Without `--label`, setup prompts for
+media size. Noninteractive setup needs both `--addr` and `--label`.
 
-If `--label` is omitted, setup prompts for the physical media size. For
-noninteractive use, provide `--addr '<exact name or id>' --label WxH`.
-`--test-print` explicitly prints one example.com URL label after successful
-checks. Experimental hardware retains the normal print gate.
+Use your actual media size. Once configured:
 
-See [CSV batches and reusable layouts](batch.md) for printing many different
-labels and [the hardware trial](hardware-trial.md) for a short verification run.
-
-## Print stickers
-
-Always pass the physical label size. After `scan --save`, the printer address is
-read from config.
-
-Guest Wi-Fi:
-
-```bash
-THERMARK_WIFI_PASSWORD='your-password' \
-  thermark wifi \
-  --ssid "YourNetwork" \
-  --label 50x30
+```sh
+thermark qr --url https://example.com/o/1042 --text 'ORDER #1042\nPriority' --label 50x30
+thermark text --text 'FRAGILE\nThis way up' --label 50x30
+THERMARK_WIFI_PASSWORD='your-password' thermark wifi --ssid YourNetwork --label 50x30
+thermark wifi --ssid Cafe-Guest --security nopass --label 50x30
+thermark print -i local/prints/art.png --label 50x30 --no-fill --margin 0 -d 4
 ```
 
-Open networks do not need a password:
+The default font is embedded DejaVu Sans. Use `--font` or `--font-name` to change
+it. Text auto-fits; explicit `--font-size` is finite and positive, rendered at
+6–96 px. Missing glyphs or text that cannot fit fail before saving or printing.
+Shorten text, enlarge media or omit the fixed font size.
 
-```bash
-thermark wifi \
-  --ssid "Cafe-Guest" \
-  --security nopass \
-  --label 50x30
+B1 + b1 task + BLE is the hardware-tested path. Other print paths require
+`--allow-experimental`. Keep private artwork and Wi-Fi labels under ignored `local/`.
+
+## Preview and profile selection
+
+```sh
+thermark qr --url https://example.com --text 'Hello, label!' \
+  --model b1 --label 50x30 --save local/hello.png --no-print
+thermark print -i local/prints/art.png --model b1 --label 50x30 --preview local/preview.png
 ```
 
-URL with readable text:
+Both commands work offline. The profile comes from `--model`, saved config, or
+B1. `print --preview` saves the final thresholded/dithered monochrome page;
+sticker `--save` output can retain antialiasing. Prepared batch pages are final
+monochrome PNGs and `job print` verifies them without rerendering.
 
-```bash
-thermark qr \
-  --url "https://example.com/o/1042" \
-  --text $'ORDER #1042\nPriority' \
-  --font-name helvetica \
-  --label 50x30
-```
+Online printing identifies hardware first and uses its DPI and printhead width.
+Unknown or failed identification stops printing. Online sticker `--save` uses
+the same detected-profile render as the print; an offline preview can differ if
+its chosen profile differs from hardware. Raw-image printing also uses detected
+geometry, with a default 1 mm registration margin unless overridden.
 
-Plain text:
+## Label size and RFID
 
-```bash
-thermark text \
-  --text $'FRAGILE\nthis way up' \
-  --label 50x30
-```
-
-Text auto-fits by default. `--font-size` accepts a finite, positive number
-(rendered at 6–96 px). If text still cannot fit, rendering fails before saving
-or printing the label; shorten the text, use larger media, or reduce/omit the
-fixed font size. Text never spills into the registration margin or adjacent QR.
-
-Existing artwork:
-
-```bash
-thermark print \
-  -i local/prints/art.png \
-  --label 50x30 \
-  --no-fill \
-  --margin 0 \
-  -d 4
-```
-
-Personal artwork and real credentials belong under `local/`, which is ignored
-by git. Committed files under [`fixtures/`](../fixtures/) contain public demo data
-only.
-
-### Which printer profile controls rendering
-
-For an online `text`, `qr`, `wifi`, or `calibrate` command, thermark connects
-and identifies the printer before converting the physical label size to pixels.
-The detected profile's DPI and printhead width therefore determine the rendered
-canvas. If a generated-label command also uses `--save`, the PNG is written
-from that same detected-profile render before it is printed.
-
-Hardware printing fails closed if the identity probe fails or reports an
-unrecognized model. thermark will not render or send a job using provisional
-profile geometry in that case.
-
-`--no-print` remains connection-free. In that mode, generated labels use the
-profile selected by `--model`, then the saved configuration, then the B1
-default. Combine `--save <path> --no-print` when you want a wholly offline
-render.
-
-Online raw-image printing also lays out the image against the detected profile.
-Its default 1 mm registration margin is converted at the detected DPI; an
-explicitly saved pixel inset and `--full-bleed` remain exact.
-
-## Preview and calibrate
-
-Preview the exact bitmap for the selected profile without printing:
-
-```bash
-thermark print \
-  -i local/prints/art.png \
-  --label 50x30 \
-  --preview local/preview.png
-```
-
-`print --preview` applies the selected threshold and dithering and writes the
-final monochrome page for the configured or `--model` profile. If that profile
-does not match hardware later detected by an online print, its geometry can
-differ. Generated sticker commands use
-`--save <path> --no-print` to inspect their composed artwork; those saved PNGs
-can retain antialiasing that the printer later thresholds. Without
-`--no-print`, `--save` waits until printer identification so the saved bitmap
-and printed page share the same profile-sized render.
-
-Check label placement on hardware:
-
-```bash
-thermark calibrate --label 50x30
-thermark calibrate --boundary --label 50x30
-```
-
-### Label size and RFID
-
-The printer's RFID response can describe the consumable type and remaining
-label count, but it does not report dimensions in millimetres. Vendor software
-may resolve an RFID barcode through its own catalogue; thermark has no cloud
-catalogue. Pass `--label WxH` when media changes, or save the size with
-`thermark config set --label WxH`.
+RFID describes consumable type/count, not dimensions in millimetres. Pass
+`--label WxH` when media changes or save it with `thermark config set --label WxH`.
+Thermark has no vendor cloud catalogue to resolve a roll's size.
 
 ## If a print looks wrong
 
-1. Run `thermark info` and charge the printer if the battery is low.
-2. Preview the bitmap to separate rendering problems from hardware problems.
-3. Print the same bitmap twice. Inconsistent truncation points indicate power,
-   not geometry.
-4. Use `calibrate --boundary` only after the printer is charged.
+1. Check `thermark info` and charge the printer.
+2. Inspect the preview, then print the same bitmap twice.
+3. Compare truncation positions before changing geometry; persistent variation
+   can also be a transport or firmware fault.
+4. On a charged printer, use `thermark calibrate --boundary --label 50x30`.
 
-A charged B1 reaches the full feed canvas. Its default 1 mm top/bottom inset is
-registration margin, not a known unprintable band.
-
-For connection failures on macOS, follow the
-[Bluetooth ownership checks](#macos-bluetooth-ownership) above.
-
+The owned charged B1 reaches the full feed canvas. Its 1 mm top/bottom inset is
+a registration margin. See [hardware evidence](hardware-notes.md).
 
 ## macOS Bluetooth ownership
 
-macOS can show a printer as **Connected** while thermark reports that it is not
-discoverable. One likely cause is that another Bluetooth client—often a vendor
-app or a system-managed session—still owns this printer's BLE GATT connection.
-The same symptom can also mean the printer is asleep, out of range, or not
-advertising, so treat ownership as a diagnosis to verify rather than a fact.
+A printer shown as Connected but absent from scanning may have a competing
+GATT session, be asleep, out of range or not advertising. Disconnect it in
+Bluetooth settings, quit vendor apps, wake/power-cycle it, then retry:
 
-Before retrying, disconnect the printer in macOS Bluetooth settings, quit any
-vendor label app, wake or power-cycle the printer, and then run:
-
-```bash
+```sh
 thermark scan
 thermark doctor --use-config
 ```
 
-If `doctor` reports a matching `/dev/cu.…` endpoint, that supports the ownership
-diagnosis, but proves neither ownership nor serial-protocol compatibility. Use
-the endpoint with `--conn usb` only when the printer responds to the serial
-protocol; otherwise release any competing Bluetooth session and use BLE
-normally.
-
+A matching `/dev/cu.…` endpoint supports the competing-session diagnosis but
+proves neither ownership nor serial compatibility. Use `--conn usb` only if the
+printer accepts the serial protocol. Select the full advertising name or id;
+`--fuzzy` deliberately allows substring matching. macOS device ids are UUIDs.
 
 ## Diagnostic reports
 
 ```sh
-thermark doctor --use-config --json > thermark-report.json
+thermark doctor --use-config --json > local/thermark-report.json
 ```
 
-The report excludes printer identities, RFID values, credentials, and local
-paths. For private hardware investigation, `thermark identify --json` records
-model/firmware/geometry/task; save that output under ignored `local/` and review
-it before sharing. Use the exact advertising name from `scan`; `--fuzzy`
-permits substring matching. macOS device addresses are UUIDs.
+Doctor reports omit identities, RFID values, credentials and local paths.
+`thermark identify --json` contains model/firmware/geometry/task details for
+private investigation; review it before sharing. Create `local/` if needed.

@@ -38,22 +38,13 @@ archive installation, upgrades, and troubleshooting.
 Turn on your B1, load 50×30 mm labels, and quit the vendor app. Then:
 
 ```sh
-thermark scan --save
-thermark doctor --use-config
-thermark qr --url "https://example.com" --text "Hello, label!" --label 50x30
+thermark setup --label 50x30 --test-print
 ```
 
-If several printers appear, follow the scan selection hint. On macOS, allow
-Bluetooth access for your terminal when requested. See
-[connection troubleshooting](docs/usage.md#macos-bluetooth-ownership) if discovery fails.
-
-For guided printer selection, media setup, and readiness checks, run:
-
-```sh
-thermark setup --label 50x30
-```
-
-Add `--test-print` to print one URL test label after checks pass.
+Setup selects the printer, checks readiness, saves defaults, then prints one
+example.com QR label. Omit `--test-print` to configure without printing. Allow
+your terminal Bluetooth access when prompted; see [connection troubleshooting](docs/usage.md#macos-bluetooth-ownership)
+if discovery fails.
 
 ### Print a CSV batch
 
@@ -87,7 +78,7 @@ inspect the layout before spending a label.
 
 | Guest Wi-Fi | Inventory | URL + text |
 | --- | --- | --- |
-| ![Demo Wi-Fi label with fake credentials](fixtures/sticker_wifi.png) | ![Demo inventory label](fixtures/sticker_inventory.png) | ![Demo URL label](fixtures/sticker_link.png) |
+| ![Demo Wi-Fi label with fake credentials](docs/demo/recipes/guest-wifi.png) | ![Demo inventory label](docs/demo/recipes/inventory.png) | ![Demo URL label](docs/demo/hello-label.png) |
 
 These are rendered previews using public demo data, not photographs of prints.
 

@@ -1,6 +1,11 @@
 #!/bin/sh
 # Render public demo labels only; never connects to a printer.
 set -eu
+# Saved media insets and printer selection must not affect public previews.
+preview_config_dir=$(mktemp -d)
+trap 'rm -rf "$preview_config_dir"' EXIT HUP INT TERM
+export THERMARK_CONFIG="$preview_config_dir/config.json"
+unset THERMARK_ADDR
 output_dir=${1:-local/prints/recipes}
 thermark_bin=${THERMARK_BIN:-thermark}
 mkdir -p "$output_dir"
