@@ -254,7 +254,9 @@ pub async fn prepare_and_print<T: Transport>(
 ) -> Result<()> {
     let result = async {
         session.ensure_print_allowed()?;
-        let job = prepare(cfg, args, session.profile())?;
+        let mut resolved = args.clone();
+        resolved.task = Some(session.print_task());
+        let job = prepare(cfg, &resolved, session.profile())?;
         execute(&mut session, &job, args.start_at, false, false, |_| {}).await
     }
     .await;

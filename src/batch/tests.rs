@@ -417,3 +417,93 @@ async fn command_failures_keep_uncertainty_and_never_send_the_next_label() {
         connected.finish().await.unwrap();
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn connected_preparation_freezes_the_detected_firmware_task() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("job");
+    let csv = tmp.path().join("labels.csv");
+    fs::write(&csv, "text\nONE\n").unwrap();
+    let args = BatchOptions {
+        csv,
+        preview_dir: dir.clone(),
+        density: Some(Density::NORMAL),
+        ..Default::default()
+    };
+    let mut transport = MockTransport::new();
+    transport.set_model_id(512).set_protocol_version(1);
+    let target = crate::session::PrintTarget {
+        model: crate::protocol::Model::B1,
+        task: crate::session::TaskSelection::Auto {
+            default: crate::PrintTask::B1,
+        },
+        allow_experimental: true,
+    };
+    let session = Session::from_transport(
+        transport,
+        crate::config::ConnPref::Ble,
+        target,
+        crate::Pacing::INSTANT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.print_task(), crate::PrintTask::D110);
+    assert_eq!(
+        session.profile().default_task,
+        Some(crate::PrintTask::D11V1)
+    );
+    prepare_and_print(session, &Config::default(), &args)
+        .await
+        .unwrap();
+    let job = PreparedJob::open(&dir).unwrap();
+    assert_eq!(job.manifest().print_task.as_deref(), Some("d110"));
+    assert_eq!(
+        JobReport::read(&job).unwrap().rows[0].outcome,
+        Some(Outcome::Confirmed)
+    );
+}
+#[tokio::test(start_paused = true)]
+async fn offline_preparation_rejects_a_different_firmware_task_before_sending() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("job");
+    let csv = tmp.path().join("labels.csv");
+    fs::write(&csv, "text\nONE\n").unwrap();
+    let args = BatchOptions {
+        csv,
+        preview_dir: dir.clone(),
+        density: Some(Density::NORMAL),
+        ..Default::default()
+    };
+    let job = prepare(
+        &Config::default(),
+        &args,
+        crate::profile_for_model(crate::protocol::Model::D11),
+    )
+    .unwrap();
+    let mut transport = MockTransport::new();
+    transport.set_model_id(512).set_protocol_version(1);
+    let target = crate::session::PrintTarget {
+        model: crate::protocol::Model::D11,
+        task: crate::session::TaskSelection::Auto {
+            default: crate::PrintTask::D11V1,
+        },
+        allow_experimental: true,
+    };
+    let mut session = Session::from_transport(
+        transport,
+        crate::config::ConnPref::Ble,
+        target,
+        crate::Pacing::INSTANT,
+    )
+    .await
+    .unwrap();
+    assert!(
+        execute(&mut session, &job, 1, false, false, |_| {})
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("print task differs")
+    );
+    assert!(!dir.join("journal.jsonl").exists());
+    session.finish().await.unwrap();
+}

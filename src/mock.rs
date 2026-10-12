@@ -37,6 +37,7 @@ pub struct MockTransport {
     recv_error_after_cmd: Option<(u8, String)>,
     page_index_pending: bool,
     model_id: u16,
+    protocol_version: u8,
 }
 
 impl Default for MockTransport {
@@ -62,6 +63,7 @@ impl MockTransport {
             recv_error_after_cmd: None,
             page_index_pending: false,
             model_id: 4096,
+            protocol_version: 3,
         }
     }
 
@@ -78,6 +80,12 @@ impl MockTransport {
 
     pub fn set_model_id(&mut self, model_id: u16) -> &mut Self {
         self.model_id = model_id;
+        self
+    }
+
+    /// Set the connection's reported protocol generation (e.g. early D11 uses 1).
+    pub fn set_protocol_version(&mut self, version: u8) -> &mut Self {
+        self.protocol_version = version;
         self
     }
 
@@ -175,7 +183,7 @@ impl MockTransport {
     fn synthesize_reply(&self, cmd: u8, data: &[u8]) -> Option<Packet> {
         match cmd {
             0x83..=0x85 => None,
-            0xc1 => Some(Packet::new(0xc2, vec![0x03])),
+            0xc1 => Some(Packet::new(0xc2, vec![self.protocol_version])),
             0x21 => Some(Packet::new(0x31, vec![0x01])),
             0x23 => Some(Packet::new(0x33, vec![0x01])),
             0x01 => Some(Packet::new(0x02, vec![0x01])),

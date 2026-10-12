@@ -63,6 +63,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tempfile = "3"
 # Content hashes and script-aware shaping for reproducible prepared labels.
+# Transport protocol generations are frozen separately in job manifests.
 sha2 = "0.11.1"
 unicode-bidi = "0.3.18"
 unicode-segmentation = "1.13.3"

@@ -42,7 +42,10 @@ Input/row limits remain 8 MiB and 1,000 labels; a page has a 64 MiB memory limit
 The old aggregate 64 MiB page limit is removed. Execution verifies the complete
 job before the first print, verifies connected geometry and task, and verifies
 each page again before consuming it. Rendering settings are never reapplied.
-Physical media must match the dimensions declared by the operator.
+A connected `batch --print` freezes the detected firmware-sensitive task.
+An offline job uses the model default or your explicit task selection; printing
+retains automatic firmware detection unless `--task` is explicitly supplied.
+A differing detected task is rejected before printing. Physical media must match the dimensions declared by the operator.
 
 An OS file lock excludes concurrent execution of the same directory. Each
 attempt gets a new append-only, synced journal. `uncertain` is durable before

@@ -68,14 +68,7 @@ async fn print(args: JobPrintCommand, resume: bool) -> Result<()> {
         (media.width_px, media.height_px) == (job.manifest().width_px, job.manifest().height_px),
         "declared media differs from prepared job; load matching media and pass --label WxH"
     );
-    let mut task = args.task;
-    if task.task.is_none() {
-        task.task = job
-            .manifest()
-            .print_task
-            .as_deref()
-            .and_then(thermark::PrintTask::parse);
-    }
+    let task = args.task;
     let target = resolve_target(&cfg, Some(model), &task)?;
     ensure_target_print_allowed(target, cfg.resolve_connection(args.conn.conn))?;
     let mut session = Session::connect(&args.conn.resolve(&cfg)?, target).await?;
