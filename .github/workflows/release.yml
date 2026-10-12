@@ -34,6 +34,13 @@ jobs:
         with:
           toolchain: 1.99.0
 
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Test immutable release asset recovery
+        run: python3 scripts/test_release_assets.py -v
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -60,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = "v$THERMARK_VERSION"
+          python3 scripts/check-release.py "$GITHUB_REF_NAME"
 
       - name: Test full feature set
         run: cargo test --locked
@@ -149,8 +156,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
-          fi
+          python3 scripts/release-assets.py "$GITHUB_REF_NAME" dist

@@ -35,6 +35,14 @@ jobs:
     # Install the validated stable release explicitly. The runner image can lag
     # behind `rust-version` in Cargo.toml and fail before testing the change.
     # Install the toolchain and Linux libraries concurrently before restoring Cargo cache.
+    - uses: actions/setup-python@v7.0.0
+      with:
+        python-version: "3.12"
+    - name: Test release metadata guard
+      run: python3 scripts/test_check_release.py -v
+    - name: Test immutable release asset recovery
+      run: python3 scripts/test_release_assets.py -v
+
     - parallel:
         - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
           with:
