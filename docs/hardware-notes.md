@@ -72,7 +72,7 @@ Protocol notes: see the command table in `src/protocol.rs`.
   1 mm top/bottom as registration margin only. A low battery truncates dense
   pages and looks exactly like a printable-area limit; charge before measuring
 - Always use `--label` for full-size media
-- Prefer system fonts (`--font-name helvetica|times|arial`) over bitmap fallback
+- The default font is embedded DejaVu Sans; select another with `--font` or `--font-name`
 - Default no decorative border; QR is square beside text column
 - `--font-size N` for fixed small/large type; omit for auto-fit
 

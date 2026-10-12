@@ -1,41 +1,58 @@
-# CSV batches and reusable layouts
+# CSV batches and prepared jobs
 
-`thermark batch` makes one label per CSV data row. It renders offline by
-default. Adding `--print` explicitly sends the batch to a printer after every
-row has rendered and every preview has been saved. No shell loop is needed.
-
-## Preview an inventory batch
-
-From a source checkout:
+`thermark batch` renders one monochrome label per CSV row without connecting.
+From a source checkout, prepare and inspect the three inventory previews:
 
 ```sh
 thermark batch --csv examples/batch/inventory.csv \
   --template examples/batch/inventory.json \
   --preview-dir local/prints/inventory-preview
+thermark job verify --job local/prints/inventory-preview
 ```
 
-Open `label-00001.png` through `label-00003.png` and scan their QRs. The
-previews contain the final monochrome pixels. The offline profile comes from
-`--model`, saved configuration, or B1. If hardware later identifies as a
-different profile, print-run previews use that detected profile instead.
+Use a fresh output directory. Preparation publishes it only after every page
+renders and saves successfully. Keep private inputs and previews under ignored
+`local/` or another private directory.
 
-After setup, print **three labels**:
+## Print and recover
+
+After inspecting the PNGs and loading matching media, print the saved pages:
 
 ```sh
-thermark batch --csv examples/batch/inventory.csv \
-  --template examples/batch/inventory.json \
-  --preview-dir local/prints/inventory-run-1 --print
+thermark job print --job local/prints/inventory-preview --label 50x30
+thermark job status --job local/prints/inventory-preview
+# Machine-readable outcomes:
+thermark job status --job local/prints/inventory-preview --json
 ```
 
-Use a **fresh directory for every run**. Existing directories are rejected,
-so previews and receipts from earlier runs cannot be overwritten. Replace
-50x30 with your actual media size using `--label WxH`.
+The connected model, DPI, print task and declared media must match the job.
+Execution verifies every page before printing and each page again before use.
+`job verify` and `job status` work offline without reading printer configuration.
+For immediate preparation and printing, `batch --print` performs both steps.
 
-## CSV format
+Each attempt records synced journals: `uncertain` before hardware can act,
+`confirmed` after successful protocol completion, and intermediate print stages.
+Confirmation does not establish physical quality or QR scanability. Ctrl-C
+releases the connection but the active label may still finish.
 
-Use UTF-8 CSV with exactly one `text` column and, for QR labels, one `url`
-column. Column order is flexible. Other or duplicate columns are errors.
-Each row makes one label; row numbers start at 1 after the header.
+Inspect physical output before resuming. For example, if row 3 is missing:
+
+```sh
+thermark job resume --job local/prints/inventory-preview --label 50x30 \
+  --start-at 3 --acknowledge-uncertain
+```
+
+Confirmed rows are skipped. Uncertain rows at or after the selected row require
+`--acknowledge-uncertain`; an incomplete journal tail also requires it. Earlier
+rows remain skipped by your explicit selection. With no uncertainty, omit the
+flag. Resume adds a numbered journal and `job status` combines all attempts.
+Keep journals with the original job. Concurrent execution of that directory is
+rejected. Older schema 1 preview directories must be prepared again.
+
+## CSV format and limits
+
+Use UTF-8 CSV with exactly one `text` column and an optional `url` column.
+Rows with `url` produce QR labels; otherwise they produce text labels:
 
 ```csv
 text,url
@@ -43,126 +60,37 @@ text,url
 "BIN A2\nAdapters",https://example.com/bins/A2
 ```
 
-With only `text`, the batch makes text labels:
+Quoted commas, doubled quotes, multiline fields and literal `\n` line breaks
+are supported. Text and QR payloads must be nonempty. Unknown or duplicate
+columns fail. Inputs are limited to 8 MiB each, 1,000 rows, and 64 MiB per rendered
+grayscale page. Split larger jobs. Any invalid row stops preparation before printing.
 
-```sh
-thermark batch --csv examples/batch/badges.csv --label 50x30 \
-  --preview-dir local/prints/badges-preview
-```
+## JSON layouts
 
-Quoted commas, doubled quotes, and quoted multiline fields are supported.
-The literal sequence `\n` also makes a line break, matching the text and QR
-commands. Text must be nonempty; QR rows also need a nonempty URL/payload.
-Keep private CSVs and previews in your own private directory or under ignored
-`local/`; previews contain the label content. The journal omits that content.
-
-Inputs are limited to 8 MiB each, 1,000 rows, and 64 MiB per rendered grayscale
-page. Split larger jobs. A row that cannot fit or render stops the
-whole batch before any label is sent. A preview save failure also sends no
-labels, although it may leave an incomplete output directory.
-
-## Reusable JSON layouts
-
-A template stores layout settings, while CSV holds the changing content:
+Templates hold reusable settings; CSV holds content. For example:
 
 ```json
-{
-  "kind": "text",
-  "label": "50x30",
-  "align": "left",
-  "font_size": 24,
-  "border": false,
-  "density": 4
-}
+{"kind":"text","label":"50x30","align":"left","font_size":24,"density":4}
 ```
 
-All fields are optional. Supported fields:
+All fields are optional; unknown fields fail:
 
 | Field | Values / default |
 | --- | --- |
-| `kind` | `text` or `qr`; inferred from CSV headers if omitted |
-| `label` | Physical mm, such as `50x30`; saved/default size if omitted |
-| `align` | `left`, `center`, `right`; `center` for text labels |
-| `text_side` | `left`, `right`; `right` for QR labels |
-| `font` | `.ttf` / `.ttc` path, relative to the template directory |
-| `font_name` | Named system font, as in `thermark fonts` |
-| `font_size` | Finite positive pixel size; auto-fit when omitted |
+| `kind` | `text` or `qr`; inferred from headers |
+| `label` | Physical mm, such as `50x30`; saved/default size |
+| `align` | `left`, `center`, `right`; `center` for text |
+| `text_side` | `left`, `right`; `right` for QR |
+| `font` | `.ttf` / `.ttc` path, relative to the template |
+| `font_name` | Named system font from `thermark fonts` |
+| `font_size` | Finite positive pixels; auto-fit when omitted |
 | `border` | Boolean; `false` |
 | `density` | Integer 1–5; `4` |
 
-Unknown fields are errors. `--label`, `--density`, and font flags override
-matching template settings. An explicit `--font` or `--font-name` replaces
-the template's font selector. Fonts must be available on the rendering host.
-A `text` template rejects a CSV containing `url`, rather than discarding QR
-content; a `qr` template requires that column.
+CLI label, density and font flags override the template. The default font is
+embedded DejaVu Sans; custom fonts must be available when preparing. A text
+template rejects `url` columns; a QR template requires one. Offline geometry
+comes from `--model`, saved configuration, or B1; `batch --print` uses the
+detected printer profile.
 
-## Review and resume a stopped run
-
-Print runs write `journal.jsonl`. Before each label can act, thermark writes
-and syncs an `uncertain` entry; after printer completion is confirmed, it
-writes and syncs a `confirmed` entry. A fault stops subsequent labels and
-releases the connection. Ctrl-C releases the local connection; it does not
-send a printer-side cancellation command, so the active label may still finish.
-
-Read the **last complete entry for each row**:
-
-- `confirmed`: thermark received a successful completion for that row.
-- `uncertain`: it may have printed, partially printed, or not printed.
-- No row entry: thermark did not send that row in this run.
-
-If a crash leaves a partial final JSON line, ignore that line and treat any
-row without a complete confirmation as uncertain. Inspect physical labels
-before deciding where to resume. thermark never automatically replays a job.
-
-For example, if rows 1 and 2 are physically complete and row 3 is missing:
-
-```sh
-thermark batch --csv examples/batch/inventory.csv \
-  --template examples/batch/inventory.json --start-at 3 \
-  --preview-dir local/prints/inventory-run-2 --print
-```
-
-Keep the original CSV, layout, media, and relevant settings unchanged. `--start-at`
-is an explicit choice, not a receipt-based resume engine; thermark does not
-compare input files with earlier runs. All rows are validated and previewed
-again, but only the selected row and those after it are sent. Each run keeps
-its own journal. `manifest.json` describes geometry and counts; it does not
-claim that labels printed. A confirmed protocol result still needs physical
-inspection to establish print quality and QR scanability.
-
-## Print approved pages and inspect recovery
-
-New batches produce schema 2 prepared jobs. After inspecting previews, print
-those exact pages without reopening the CSV or reloading a font:
-
-```sh
-thermark job verify --job local/prints/inventory-preview
-thermark job print --job local/prints/inventory-preview --label 50x30
-thermark job status --job local/prints/inventory-preview
-thermark job status --job local/prints/inventory-preview --json
-```
-
-The connected profile, DPI, print task and declared media must match the job.
-Changed pages/settings fail verification. `job verify` and `job status` do not
-connect or read printer configuration. A previously executed job requires the
-resume command; copying an approved artifact to a fresh directory is an explicit
-new print run with independent receipts.
-
-After inspecting physical output, resume from your chosen row:
-
-```sh
-thermark job resume --job local/prints/inventory-preview --label 50x30 \
-  --start-at 3 --acknowledge-uncertain
-```
-
-Confirmed rows are skipped. Uncertain rows at or after `--start-at` are retried
-only with the acknowledgement; earlier rows remain skipped by your explicit
-selection. Without uncertain outcomes or incomplete journal tails, the flag is
-unnecessary. Each attempt adds a new numbered journal; `job status` combines them.
-Keep all journals with the original job. Concurrent execution of the same job
-directory is rejected, and process locks release automatically after crashes.
-
-The schema, font changes and library entry points are described in
-[Architecture and prepared jobs](architecture.md). Older schema 1 directories
-must be prepared again. Batches now spool pages individually, so the aggregate
-64 MiB render restriction is replaced by a per-page 64 MiB limit.
+See [architecture](architecture.md) for library entry points and artifact contracts.

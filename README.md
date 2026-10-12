@@ -31,6 +31,7 @@ With Rust 1.99 or newer, install from crates.io:
 cargo install thermark --locked
 ```
 
+Cargo installs the latest registry version, which may lag GitHub releases.
 See the [installation guide](docs/installation.md) for Linux prerequisites,
 archive installation, upgrades, and troubleshooting.
 
@@ -52,8 +53,7 @@ For guided printer selection, media setup, and readiness checks, run:
 thermark setup --label 50x30
 ```
 
-Add `--test-print` to print one URL test label after checks pass. These commands
-are available in v0.35.0 and newer.
+Add `--test-print` to print one URL test label after checks pass.
 
 ### Print a CSV batch
 
@@ -73,7 +73,7 @@ thermark job print --job local/prints/inventory-preview --label 50x30
 
 Use `thermark job status` to inspect outcomes and `job resume` after a stopped
 run. [CSV batches and templates](docs/batch.md) explains the
-format, confirmed/uncertain print journal, and manual resume.
+format, print journals, and recovery.
 
 ### Try it without a printer
 

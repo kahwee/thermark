@@ -1,4 +1,4 @@
-//! Compose printable labels: square QR + side text (system fonts).
+//! Compose printable labels: square QR + shaped text.
 
 use crate::errors::{Error, Result};
 use crate::font::LabelFont;

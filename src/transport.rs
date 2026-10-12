@@ -108,7 +108,7 @@ pub enum BleMatchMode {
     /// Case-insensitive exact advertising name **or** exact peripheral id.
     #[default]
     Exact,
-    /// Substring name / partial id (legacy). Can match the wrong device.
+    /// Substring name / partial id. Can match the wrong device.
     Fuzzy,
 }
 

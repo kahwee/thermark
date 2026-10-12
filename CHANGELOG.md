@@ -10,6 +10,13 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Changed
+
+- Remove `Config::apply_set`; use `apply_update(Some(addr), Some(connection),
+  model, scan_secs, None)`. Scan saving now uses the same validated update path.
+- Consolidate batch recovery and hardware-trial docs, remove stale maintenance
+  and adoption plans, and correct installation/font guidance.
+
 ## [0.35.0] - 2026-10-12
 
 ### Added

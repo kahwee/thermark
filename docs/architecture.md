@@ -1,8 +1,6 @@
 # Architecture and prepared jobs
 
-Thermark remains one crate. Responsibility boundaries allow another Rust caller
-or future interface to reuse the same preparation, identification, print policy,
-and execution rather than recreating CLI behavior.
+Thermark is one crate with shared library workflows and a thin CLI.
 
 | Owner | Responsibility |
 | --- | --- |
@@ -20,12 +18,11 @@ and execution rather than recreating CLI behavior.
 | `testing` | Synthetic transcript replay and deterministic transport faults |
 | `cli` | Arguments, environment/config resolution, output, command dispatch |
 
-Existing `label::*`, `doctor::*`, and printer APIs keep their module paths.
-Reusable sessions now live in `thermark::session`; batch preparation and
-execution live in `thermark::batch`. See `examples/prepared_job.rs` for an
-end-to-end mock-only library example. Callers supply connection/pacing options
-explicitly. Call `Session::finish` after success or failure; cancelling a future
-drops its transport, so custom transports must implement their own cleanup.
+Use `thermark::session` for connections and `thermark::batch` for preparation
+and execution. See `examples/prepared_job.rs` for a mock-only library example.
+Callers supply connection/pacing options explicitly. Call `Session::finish`
+after success or failure; cancelling a future drops its transport, so custom
+transports must implement their own cleanup.
 
 ## Prepared artifact contract
 
@@ -39,13 +36,14 @@ Hashes detect accidental edits; they do not authenticate who approved an artifac
 Preparation loads one font and renders one page at a time into a temporary
 sibling directory. It publishes the directory only after every page succeeds.
 Input/row limits remain 8 MiB and 1,000 labels; a page has a 64 MiB memory limit.
-The old aggregate 64 MiB page limit is removed. Execution verifies the complete
-job before the first print, verifies connected geometry and task, and verifies
-each page again before consuming it. Rendering settings are never reapplied.
+Execution verifies the complete job and connected geometry/task before the
+first print, then each page again before consuming it. Rendering settings are
+never reapplied.
 A connected `batch --print` freezes the detected firmware-sensitive task.
 An offline job uses the model default or your explicit task selection; printing
 retains automatic firmware detection unless `--task` is explicitly supplied.
-A differing detected task is rejected before printing. Physical media must match the dimensions declared by the operator.
+A differing detected task is rejected before printing. Physical media must
+match the dimensions declared by the operator.
 
 An OS file lock excludes concurrent execution of the same directory. Each
 attempt gets a new append-only, synced journal. `uncertain` is durable before
@@ -54,7 +52,7 @@ where execution reached. A partial final line is not a receipt. Resume skips
 confirmed rows and requires an explicit physical-review acknowledgement for
 uncertain output or a partial tail. It never claims exactly-once physical printing.
 
-## Fonts and compatibility
+## Fonts
 
 DejaVu Sans is embedded and redistributed under `LICENSE-FONTS`. This makes the
 default independent of host fonts. Explicit `--font` and `--font-name` selectors
@@ -66,11 +64,9 @@ font fallback. Simple Latin placement retains its previous metrics; combining
 text and other scripts use bidi runs, OpenType shaping and grapheme-safe wrapping.
 Layout-cache size is bounded; it is reused across batch rows.
 
-Schema 1 directories are previews, not verified jobs. Prepare a new schema 2
-job before using `job print` or `job resume`. Existing `batch --print` and manual
-`--start-at` remain available; the prepared workflow avoids rerendering inputs.
-New journals include job identifiers and stage records. Consumers should use
-the typed `JobReport` or `job status --json`, rather than assume fixed line counts.
+Prepare schema 1 previews again before using `job print` or `job resume`.
+Use typed `JobReport` or `job status --json` to consume outcomes; journal line
+counts vary with print stages and attempts.
 
 ## Validation boundaries
 

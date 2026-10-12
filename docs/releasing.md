@@ -39,7 +39,7 @@ python3 .agents/skills/release/scripts/verify_release.py \
 Set the intended version and tag the tested commit:
 
 ```sh
-release_version=0.35.0
+release_version='<new-version>'
 git tag -a "v$release_version" -m "thermark $release_version"
 git push origin "v$release_version"
 ```

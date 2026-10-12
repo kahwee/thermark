@@ -26,6 +26,9 @@ a `full` archive or the default Cargo installation.
 
 ### Cargo
 
+Cargo installs the latest crates.io version, which may lag GitHub/Homebrew.
+Use a release archive for the latest prepared-job commands if needed.
+
 ```sh
 cargo install thermark --locked
 # Or choose BLE only:
@@ -41,11 +44,11 @@ On Debian/Ubuntu, install build and Bluetooth dependencies before Cargo:
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential pkg-config libdbus-1-dev bluez fonts-dejavu-core
+sudo apt-get install build-essential pkg-config libdbus-1-dev bluez
 ```
 
 Other distributions need equivalent compiler, pkg-config, D-Bus development,
-BlueZ, and TrueType font packages. Running a BLE binary needs an available
+and BlueZ packages. Running a BLE binary needs an available
 Bluetooth adapter, D-Bus and the Bluetooth service; building in a container or
 CI does not prove access to a physical adapter. Follow your distribution's
 Bluetooth service and permission guidance rather than running thermark as root.
@@ -66,12 +69,12 @@ Download an archive and its matching `.sha256` file from
 Use `uname -m` to check your CPU: `arm64`/`aarch64` maps to `ARM64`, and
 `x86_64` maps to `X64`. Select `macOS` or `Linux`, then `ble` or `full`.
 
-Example for macOS Apple Silicon, version 0.34.0:
+Example for macOS Apple Silicon, version 0.35.0:
 
 ```sh
-shasum -a 256 --check thermark-0.34.0-macOS-ARM64-ble.tar.gz.sha256
-tar -xzf thermark-0.34.0-macOS-ARM64-ble.tar.gz
-cd thermark-0.34.0-macOS-ARM64-ble
+shasum -a 256 --check thermark-0.35.0-macOS-ARM64-ble.tar.gz.sha256
+tar -xzf thermark-0.35.0-macOS-ARM64-ble.tar.gz
+cd thermark-0.35.0-macOS-ARM64-ble
 ./thermark --version
 mkdir -p "$HOME/.local/bin"
 install -m 755 thermark "$HOME/.local/bin/thermark"
@@ -93,8 +96,8 @@ thermark qr --url https://example.com --text 'Hello, label!' \
   --model b1 --label 50x30 --save hello-label.png --no-print
 ```
 
-Open the PNG and scan its QR. If no font is found, install a supported system
-font or add `--font /path/to/font.ttf`. This check uses no printer or paper.
+Open the PNG and scan its QR. The default DejaVu Sans font is embedded; use
+`--font /path/to/font.ttf` for another font. This check uses no printer or paper.
 For the physical B1 setup, follow the
 [first-label guide](../README.md#install-and-print-your-first-label).
 
@@ -121,7 +124,7 @@ an executable does not promise removal of your saved printer configuration.
 | Cargo reports an unsupported Rust version | Run `rustc --version`; thermark requires 1.99 or newer. A directory-level rustup override can select an older compiler. |
 | Linux build cannot find D-Bus through pkg-config | Install `pkg-config` and `libdbus-1-dev` (or distribution equivalents), then retry Cargo. |
 | Linux archive fails with a GLIBC version error | Use a compatible distribution or build from source on the target machine. |
-| Preview cannot find a font | Run `thermark fonts`, install DejaVu Sans on Linux, or pass `--font /path/to/font.ttf`. |
+| Custom font fails to load or lacks characters | Run `thermark fonts` or pass `--font /path/to/font.ttf` with a font covering your text. |
 | Preview works but printer is absent | Check Bluetooth access, power, and competing vendor-app connections; see the README's connection troubleshooting. |
 
 Run `thermark doctor --use-config --json` for a privacy-safe report. Include the

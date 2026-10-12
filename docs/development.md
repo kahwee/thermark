@@ -67,9 +67,8 @@ there is no patched version. A font-engine replacement needs rendering checks.
 `printer/` owns job validation; `label/` and `image_encode/` own rendering.
 [AGENTS.md](../AGENTS.md) gives exact boundaries and verification rules.
 
-See [hardware notes](hardware-notes.md), [maintenance history](maintenance-notes.md),
-and [0.32 API removals](../CHANGELOG.md#removed) for the relevant context.
-
+See [architecture](architecture.md) for module contracts, [hardware notes](hardware-notes.md)
+for physical evidence, and the [changelog](../CHANGELOG.md) for API migrations.
 
 ## Prepared jobs, fonts and fault replay
 
@@ -88,7 +87,6 @@ python3 scripts/test_hardware_trial.py -v
 Replay fixtures are synthetic and contain demo data. Physical success rates,
 QR scanability and comparative throughput require measured hardware trials;
 see [the trial guide](hardware-trial.md).
-
 
 ### Local measurements for 0.35.0
 

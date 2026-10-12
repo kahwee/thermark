@@ -1,59 +1,47 @@
 # Actions publishing
 
-`python3 scripts/check-release.py v<version>` verifies the package version, tag
-and root Cargo.lock entry without building or publishing.
-`python3 scripts/test_check_release.py` covers version mismatch regressions.
-Keep the repository release skill and existing required CI as the authority.
+GitHub binaries, Homebrew and crates.io are separate distribution steps.
+Use the [release checklist](releasing.md) and [release skill](../.agents/skills/release/SKILL.md)
+for publication and recovery.
 
-## Approval proposal
+## Proposed crates.io automation
 
-[The complete crates.io workflow](../.github/release-proposals/publish-crate.yml)
-is outside `.github/workflows` and cannot run. Activation requires approval to
-move it to `.github/workflows/publish-crate.yml`, grant its publish job
-`contents: read`, `actions: read`, `id-token: write`, and bind crate `thermark` to:
+The [publisher proposal](../.github/release-proposals/publish-crate.yml) is outside
+`.github/workflows` and cannot run. Activation requires approval to move it to
+`.github/workflows/publish-crate.yml`, grant `contents: read`, `actions: read`
+and `id-token: write`, and configure a crates.io trusted publisher for:
 
-- owner `kahwee`, repository `thermark`
-- GitHub Actions workflow filename `publish-crate.yml`
-- environment blank
+- Owner/repository: `kahwee/thermark`
+- Workflow: `publish-crate.yml`
+- Environment: blank
 
-Use [crates.io trusted publishing](https://crates.io/docs/trusted-publishing) and
-the [official temporary authentication action](https://github.com/rust-lang/crates-io-auth-action).
-It checks the human-pushed stable version tag and locked metadata, requires exact
-source CI, verifies packaging, then authenticates and publishes. GitHub publication
-and registry publication remain separate. No long-lived Cargo credential is added.
-Existing versions cannot be overwritten: an already published version requires
-read-back source/checksum reconciliation rather than automatically declaring success.
+The proposal checks a human-pushed stable version tag, exact source CI and
+packaging before exchanging a temporary registry credential. It does not rely
+on a `release: published` cascade from `GITHUB_TOKEN`. Existing versions require
+source/checksum reconciliation; they cannot be overwritten. Historical tags
+without the guard files need a separate recovery review.
 
-No registry trust or workflow access was enabled by this change. Current local
-Cargo credential file existence does not validate publishing authentication.
-If the crate does not yet exist, first publication/name ownership is a separate
-approved owner action before a trusted-publisher binding can be established.
+No registry trust or publishing access is configured by the proposal. See
+[crates.io trusted publishing](https://crates.io/docs/trusted-publishing).
 
-## Homebrew distribution
+## Homebrew access
 
-The existing binary release is independent of crates.io and the Homebrew tap.
 The source workflow's `GITHUB_TOKEN` cannot write `kahwee/homebrew-thermark`.
-Automatic tap updates require a separately approved narrow GitHub App/token with
-write access to that tap; no such credential was created or installed here.
-Until that decision, follow [docs/releasing.md](releasing.md) to update the formula
-using verified macOS BLE assets. Do not copy registry tokens into GitHub secrets
-or grant a broad cross-repository token to eliminate this approval boundary.
+Update the formula manually using verified macOS BLE assets. Automation needs
+a separately approved GitHub App/token scoped to the tap; none is configured.
 
-## Immutable GitHub release assets
+## Immutable release assets
 
-The existing tag release workflow now uses `scripts/release-assets.py`. It verifies
-that the tag resolves to the checked-out source, compares all existing matching
-assets by SHA-256 (downloading older assets without server digests), and uploads
-only missing files. Differing published bytes stop recovery before any uploads;
-there is no `--clobber`. This preserves releases after partial uploads and handles
-an identical rerun without replacing assets. Rebuilt archives can differ because
-of timestamps: keep the original published artifact and investigate rather than
-replacing it. New GitHub releases retain the repository's release notes behavior.
-Run `python3 scripts/test_release_assets.py` for isolated recovery regressions.
-Existing workflow permissions are unchanged.
+`scripts/release-assets.py` verifies tag/source identity and compares existing
+assets by SHA-256 before uploading missing files. Differing bytes stop recovery;
+there is no `--clobber`. Retain published archives even if a rebuild differs
+because of timestamps.
 
-Crate publication is triggered directly by human-pushed `v*` tags; no `release: published` cascade from `GITHUB_TOKEN` is assumed. It runs independently of GitHub source/binary publication. Existing immutable historical tags without these new guard files need a separately reviewed recovery procedure; this proposal does not move or republish them.
+CI runs metadata and mocked recovery checks; these do not prove registry access
+or perform remote publication. Run the checks locally with:
 
-CI runs the actual metadata CLI against the checked-out manifest/lock and rejects a mismatched tag. The publisher proposal remains unexecuted: packaging dry-run, registry exchange and publication are not proven by guard tests.
-
-Normal PR CI now runs mocked CLI recovery tests for matching assets, missing assets, differing bytes, registry/API 403 errors and a missing (404) release. No real GitHub release write is performed by these fixtures.
+```sh
+python3 scripts/check-release.py v<version>
+python3 scripts/test_check_release.py
+python3 scripts/test_release_assets.py
+```

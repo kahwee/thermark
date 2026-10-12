@@ -14,7 +14,7 @@ pub fn make_calibration_label(
 ) -> Result<GrayImage> {
     let mut img = crate::image_encode::calibration_pattern(label, Some(safe), pixels_per_mm);
     let Ok(font) = load_font(font_path, None) else {
-        // No system font: the geometric pattern is still perfectly usable.
+        // Font loading failed; the geometric pattern remains usable.
         return Ok(img);
     };
 

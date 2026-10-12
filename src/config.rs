@@ -226,7 +226,7 @@ impl Config {
         }
     }
 
-    /// Update fields for `config set` (only overwrites provided values).
+    /// Apply validated partial updates, preserving unspecified fields.
     pub fn apply_update(
         &mut self,
         addr: Option<&str>,
@@ -282,21 +282,6 @@ impl Config {
         updated.validate()?;
         *self = updated;
         Ok(())
-    }
-
-    /// Set a printer address and connection, preserving optional fields.
-    ///
-    /// This compatibility helper is also used by `scan --save`; callers that
-    /// need a partial update should use [`Self::apply_update`].
-    pub fn apply_set(
-        &mut self,
-        addr: impl Into<String>,
-        connection: ConnPref,
-        model: Option<Model>,
-        scan_secs: Option<u64>,
-    ) -> Result<()> {
-        let addr = addr.into();
-        self.apply_update(Some(&addr), Some(connection), model, scan_secs, None)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -484,20 +469,23 @@ mod tests {
     }
 
     #[test]
-    fn apply_set_rejects_invalid_values_without_mutating() {
+    fn apply_update_rejects_invalid_address_and_scan_time() {
         let original = Config::default();
         let mut cfg = original.clone();
-        assert!(cfg.apply_set("  ", ConnPref::Ble, None, None).is_err());
+        assert!(
+            cfg.apply_update(Some("  "), Some(ConnPref::Ble), None, None, None)
+                .is_err()
+        );
         assert_eq!(cfg, original);
         assert!(
-            cfg.apply_set("B1-Test", ConnPref::Ble, None, Some(0))
+            cfg.apply_update(Some("B1-Test"), Some(ConnPref::Ble), None, Some(0), None)
                 .is_err()
         );
         assert_eq!(cfg, original);
     }
 
     #[test]
-    fn apply_set_merges_without_clobbering_unspecified() {
+    fn apply_update_replaces_connection_preserving_unspecified() {
         let mut cfg = Config {
             addr: Some("old".into()),
             connection: Some(ConnPref::Usb),
@@ -506,7 +494,8 @@ mod tests {
             safe_area: None,
             label: None,
         };
-        cfg.apply_set("B1-New", ConnPref::Ble, None, None).unwrap();
+        cfg.apply_update(Some("B1-New"), Some(ConnPref::Ble), None, None, None)
+            .unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-New"));
         assert_eq!(cfg.connection, Some(ConnPref::Ble));
         assert_eq!(cfg.model, Some(Model::B1Pro));
@@ -566,9 +555,9 @@ mod tests {
     }
 
     #[test]
-    fn apply_set_trims_addr() {
+    fn apply_update_trims_addr() {
         let mut cfg = Config::default();
-        cfg.apply_set("  B1-Spaced  ", ConnPref::Ble, None, None)
+        cfg.apply_update(Some("  B1-Spaced  "), Some(ConnPref::Ble), None, None, None)
             .unwrap();
         assert_eq!(cfg.addr.as_deref(), Some("B1-Spaced"));
     }

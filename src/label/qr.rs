@@ -42,7 +42,7 @@ pub fn make_qr_label_with_font(opts: &QrLabelOptions, font: &LabelFont) -> Resul
     let qr_img = render_qr_square(&opts.url, qr_side)?;
     overlay_gray(&mut img, &qr_img, qr_x, qr_y);
 
-    // --- Text (system font, left-to-right, top-to-bottom) ---
+    // --- Text ---
     draw_text_block(
         &mut img,
         font,
