@@ -97,6 +97,7 @@ pub struct LabelFont {
     shaping_font: harfrust::Font,
     cache: std::sync::Mutex<LayoutCache>,
     path: PathBuf,
+    embedded: bool,
     /// Face index inside a .ttc collection (0 for single-font files).
     index: u32,
 }
@@ -127,6 +128,7 @@ impl LabelFont {
             shaping_font,
             cache: Default::default(),
             path: path.to_path_buf(),
+            embedded: false,
             index,
         })
     }
@@ -210,6 +212,7 @@ impl LabelFont {
             data,
             cache: Default::default(),
             path: "<embedded DejaVu Sans>".into(),
+            embedded: true,
             index: 0,
         })
     }
@@ -329,8 +332,15 @@ impl LabelFont {
             .collect()
     }
 
+    /// Filesystem path, or a display-only source name for the embedded font.
+    /// Use [`Self::source_path`] before attempting filesystem operations.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Actual source path; embedded fonts have no filesystem dependency.
+    pub fn source_path(&self) -> Option<&Path> {
+        (!self.embedded).then_some(self.path.as_path())
     }
 
     pub fn index(&self) -> u32 {
@@ -564,7 +574,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn system_font_loads_on_macos() {
-        let f = LabelFont::load_default().expect("macOS should have a supported system font");
+        let f =
+            LabelFont::load_named("arial bold").expect("macOS should have a supported system font");
         assert!(f.path().exists());
         assert!(f.text_width("ABC", 24.0) > 10);
     }
@@ -663,6 +674,7 @@ mod shaping_tests {
             crate::prepared::digest(include_bytes!("../assets/fonts/DejaVuSans.ttf"))
         );
         assert_eq!(font.index(), 0);
+        assert!(font.source_path().is_none());
     }
     #[test]
     fn arabic_lam_alef_is_shaped_as_a_ligature() {

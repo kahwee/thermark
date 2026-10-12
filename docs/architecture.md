@@ -55,7 +55,9 @@ uncertain output or a partial tail. It never claims exactly-once physical printi
 
 DejaVu Sans is embedded and redistributed under `LICENSE-FONTS`. This makes the
 default independent of host fonts. Explicit `--font` and `--font-name` selectors
-continue to work. Missing characters fail before label pixels are drawn; use a
+continue to work. `LabelFont::source_path()` returns `None` for the embedded
+font; the existing `path()` returns a display-only source name in that case.
+Missing characters fail before label pixels are drawn; use a
 font covering the requested script. This is a single-font renderer, not automatic
 font fallback. Simple Latin placement retains its previous metrics; combining
 text and other scripts use bidi runs, OpenType shaping and grapheme-safe wrapping.
