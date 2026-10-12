@@ -66,7 +66,7 @@ jobs:
       run: rustc --version && cargo --version
 
     - name: Validate Rust and feature matrix
-      run: scripts/check.sh all
+      run: scripts/check-ci.sh
 
     - name: Upload failed render images
       if: failure()

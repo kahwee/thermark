@@ -33,7 +33,9 @@ Versions below match the current workflow and composite-action references. SHA-p
 
 The Rust workflow also runs the release guards and hardware-trial recorder
 tests before the Rust feature matrix. Release archives include the bundled
-font redistribution terms (`LICENSE-FONTS`).
+font redistribution terms (`LICENSE-FONTS`). `scripts/check-ci.sh` streams
+the same checks and publishes the failure tail as a check annotation when log
+storage is unavailable.
 
 ## Greenkeeping
 
