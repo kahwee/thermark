@@ -19,15 +19,15 @@ pub const MAX_DIMENSION_MM: f64 = 1000.0;
 
 /// Convert millimetres to pixels (rounded, clamped to a sane range).
 ///
-/// Non-finite input yields 1 px; validate with [`LabelMm::parse`] to get an
-/// error instead.
+/// Non-finite input or a non-positive resolution yields 1 px; validate with
+/// [`LabelMm::parse`] to get an error for invalid label dimensions instead.
 pub fn mm_to_px(mm: f64, pixels_per_mm: f64) -> u32 {
-    if !mm.is_finite() {
+    if !mm.is_finite() || !pixels_per_mm.is_finite() || pixels_per_mm <= 0.0 {
         return 1;
     }
     (mm * pixels_per_mm)
         .round()
-        .clamp(1.0, MAX_DIMENSION_MM * pixels_per_mm) as u32
+        .clamp(1.0, (MAX_DIMENSION_MM * pixels_per_mm).max(1.0)) as u32
 }
 
 /// Convert pixels to millimetres.
@@ -239,6 +239,13 @@ pub const DEFAULT_B1_LABEL: LabelMm = LabelMm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_resolution_does_not_panic_or_produce_zero_pixels() {
+        for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, 0.0001] {
+            assert_eq!(mm_to_px(30.0, scale), 1, "scale: {scale}");
+        }
+    }
 
     #[test]
     fn fifty_by_thirty() {
