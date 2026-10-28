@@ -69,12 +69,12 @@ Download an archive and its matching `.sha256` file from
 Use `uname -m` to check your CPU: `arm64`/`aarch64` maps to `ARM64`, and
 `x86_64` maps to `X64`. Select `macOS` or `Linux`, then `ble` or `full`.
 
-Example for macOS Apple Silicon, version 0.35.0:
+Example for macOS Apple Silicon, version 0.36.0:
 
 ```sh
-shasum -a 256 --check thermark-0.35.0-macOS-ARM64-ble.tar.gz.sha256
-tar -xzf thermark-0.35.0-macOS-ARM64-ble.tar.gz
-cd thermark-0.35.0-macOS-ARM64-ble
+shasum -a 256 --check thermark-0.36.0-macOS-ARM64-ble.tar.gz.sha256
+tar -xzf thermark-0.36.0-macOS-ARM64-ble.tar.gz
+cd thermark-0.36.0-macOS-ARM64-ble
 ./thermark --version
 mkdir -p "$HOME/.local/bin"
 install -m 755 thermark "$HOME/.local/bin/thermark"

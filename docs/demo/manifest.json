@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "build": "thermark 0.35.0",
+  "build": "thermark 0.36.0",
   "model": "b1",
   "label_mm": "50x30",
   "font": "embedded DejaVu Sans",

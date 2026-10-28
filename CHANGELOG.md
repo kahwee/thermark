@@ -10,7 +10,15 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-28
+
+### Fixed
+
+- Reject invalid resolution values without panicking.
+
 ### Changed
+
+- Upgrade HarfRust to 0.15 and refresh compatible locked dependencies.
 
 - Refresh documentation images from the locked offline CLI with isolated config,
   embedded fonts, a hash manifest and CI freshness checks. Share generated demos
@@ -1294,7 +1302,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/kahwee/thermark/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/kahwee/thermark/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/kahwee/thermark/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/kahwee/thermark/compare/v0.32.0...v0.33.0
