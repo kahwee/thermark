@@ -99,11 +99,16 @@ status of each. A package dry run is not registry publication.
   publish the tap change, then read it back. Run install/upgrade and
   `brew test thermark` on macOS when available. Distinguish a formula update
   from a macOS installation test.
-- **crates.io:** with authorized registry access, run `cargo publish --locked`
-  once and verify the version is visible. Check docs.rs builds the version;
-  verify a clean Cargo install when practical. If access is missing, complete
-  the independent authorized steps and mark registry publication as pending.
-  Do not ask for a token in chat or silently claim all destinations are done.
+- **crates.io:** a new stable version tag also starts `.github/workflows/publish-crate.yml`.
+  Confirm the separate trusted-publisher binding matches owner `kahwee`, repository
+  `thermark`, workflow `publish-crate.yml`, and a blank environment before tagging.
+  The workflow validates metadata, exact-source main CI, package inventory/dry run,
+  and dependencies before requesting a short-lived OIDC credential. Monitor that
+  tag's run, then verify the version and docs.rs build; verify a clean Cargo install
+  when practical. Do not duplicate its upload with a manual publish. If access is
+  missing, complete independent authorized steps and report registry publication
+  as pending. Existing tags are not backfilled by workflow activation. Never ask
+  for a token in chat or silently claim all destinations are done.
 - Reconcile the state before retrying any write. Source fixes after a published
   release need a new version. For an unpublished tag, diagnose before choosing
   a recovery; do not automatically rewrite tags or clobber published assets.

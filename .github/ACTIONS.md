@@ -6,6 +6,7 @@ This guide describes the checked-in workflows. Follow each linked YAML file for 
 
 | Workflow | Events | Jobs |
 | --- | --- | --- |
+| [publish-crate.yml](workflows/publish-crate.yml) | `push` to `v*` tags from user accounts | `publish` |
 | [release.yml](workflows/release.yml) | `workflow_dispatch`, `push` | `build`, `publish` |
 | [rust.yml](workflows/rust.yml) | `workflow_dispatch`, `push`, `pull_request` | `build` |
 | [security.yml](workflows/security.yml) | `workflow_dispatch`, `push`, `pull_request`, `schedule` | `audit` |
@@ -35,17 +36,18 @@ as of that date. Its explicit `toolchain` input still selects Rust 1.99.0.
 | [actions/setup-python](https://github.com/actions/setup-python) | [v7.1.0](https://github.com/actions/setup-python/releases/tag/v7.1.0) | `6d4fd22b20465ccc0f7354476588e8df7c9ca0e0` |
 | [actions/upload-artifact](https://github.com/actions/upload-artifact) | [v7.0.2](https://github.com/actions/upload-artifact/releases/tag/v7.0.2) | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
 | [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | [stable](https://github.com/dtolnay/rust-toolchain/commit/b725eda525362e7cf34af9a7243cac1e3f01a7ec) | `b725eda525362e7cf34af9a7243cac1e3f01a7ec` |
-
-### Inactive release proposals
-
-The YAML files in `release-proposals/` are outside `.github/workflows` and do not
-run. Their shared action references match the table above. The additional action is:
-
-| Action | Version | Commit |
-| --- | --- | --- |
 | [rust-lang/crates-io-auth-action](https://github.com/rust-lang/crates-io-auth-action) | [v1.0.6](https://github.com/rust-lang/crates-io-auth-action/releases/tag/v1.0.6) | `3268eb413133e2960fa4ae0e963ca76380c54cd9` |
 
-Updating these pins does not activate a proposal or configure registry trust.
+### Registry authentication
+
+`publish-crate.yml` runs only on new `v*` tag pushes from user accounts. The job
+has `contents: read`, `actions: read`, and `id-token: write`, with no GitHub
+environment. Metadata, exact-source main CI, package verification and a current
+dependency audit must pass before the official action requests a temporary
+crates.io credential. Its token is passed only to the publish step. The crates.io
+trusted-publisher binding is configured separately for owner `kahwee`, repository
+`thermark`, workflow `publish-crate.yml`, with a blank environment.
+
 The active JavaScript actions use Node.js 24; keep runners compatible with each
 upstream action's runner requirements. The checked-in jobs use GitHub-hosted
 runners.
@@ -71,4 +73,5 @@ Use workflow concurrency to cancel superseded check runs where appropriate. Depl
 Linux CI also checks the Cargo package inventory and runs a locked publish dry run.
 This catches missing bundled files and packaged-source compilation failures before
 release tagging. It uses the existing read-only permissions, without registry
-credentials. The crate publisher remains an inactive proposal outside workflows.
+credentials. Registry publishing runs separately in the tag-only workflow after
+its pre-authentication checks; ordinary CI never invokes it.

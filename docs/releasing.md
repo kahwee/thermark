@@ -40,7 +40,12 @@ python3 .agents/skills/release/scripts/verify_release.py \
    to pass on Linux and macOS, and for the dependency audit to pass. Resolve
    failures before tagging.
 
-## Publish GitHub binaries
+## Start a future release
+
+After the exact-source checks above pass, push one new version tag. That starts
+the independent GitHub binary and crates.io workflows; Homebrew remains a
+separate update after binary verification. Registry publishing requires the
+matching crates.io trusted-publisher binding described below.
 
 Set the intended version and tag the tested commit:
 
@@ -49,6 +54,13 @@ release_version='<new-version>'
 git tag -a "v$release_version" -m "thermark $release_version"
 git push origin "v$release_version"
 ```
+
+Never reuse or move an existing tag. Tags pushed before `publish-crate.yml` was
+activated do not acquire a publisher run retroactively. Reconcile the current
+manifest, lockfile, tags and distribution status before choosing a future
+version; activation does not backfill older versions.
+
+## Verify GitHub binaries
 
 `.github/workflows/release.yml` checks that the tag matches the package version,
 tests full and BLE-only builds, and packages both variants for Linux and macOS,
@@ -80,20 +92,29 @@ On macOS, run `brew update`, `brew upgrade kahwee/thermark/thermark` (or install
 it), and `brew test thermark`. Verify `thermark --version`. Updating the formula
 alone is not a local macOS installation test.
 
-## Publish crates.io
+## Verify crates.io publication
 
-Use an authorized Cargo registry credential; never put it in source or logs.
-`cargo publish` needs separate access from GitHub and Homebrew.
+The active [Publish crate workflow](../.github/workflows/publish-crate.yml) runs
+only on future `v*` tag pushes from user accounts. It rejects unstable versions or
+a tag/manifest/root-lock mismatch, requires the exact source to be on main with
+successful push CI, validates the package inventory, compiles the packaged source
+with `cargo publish --locked --dry-run`, and audits locked dependencies before
+authentication. It then uses the official crates.io action to obtain a short-lived
+OIDC credential and runs one locked publish. Branch pushes and manual dispatches
+do not trigger this workflow.
 
-```sh
-cargo publish --locked --dry-run
-cargo publish --locked
-```
+The publishing job has only `contents: read`, `actions: read`, and `id-token: write`.
+It uses no GitHub environment or long-lived Cargo secret. The separate crates.io
+trusted-publisher binding must match owner `kahwee`, repository `thermark`,
+workflow `publish-crate.yml`, and a blank environment. GitHub access alone does
+not establish that registry trust; confirm the binding before a future release.
 
-Confirm the new version is visible on crates.io and that docs.rs builds its
-API documentation. Check a clean `cargo install thermark --locked --version
-"$release_version"` when practical. If registry access is unavailable, report
-crates.io as pending even if binaries and Homebrew are published.
+Wait for that tag's Publish crate run, then confirm the version is visible on
+crates.io and that docs.rs builds its API documentation. Check a clean
+`cargo install thermark --locked --version "$release_version"` when practical.
+If registry authentication or publication fails, report crates.io as pending
+even when GitHub binaries and Homebrew are available. Reconcile registry state
+before retrying: a successful upload can precede a later verification failure.
 
 ## Publishing automation and recovery
 
@@ -101,14 +122,12 @@ crates.io as pending even if binaries and Homebrew are published.
 missing files; differing published bytes stop recovery. Retain original archives
 and tags. Rebuild timestamps can change bytes without a source change.
 
-The [crates.io publisher proposal](../.github/release-proposals/publish-crate.yml)
-is inactive outside `.github/workflows`. Activation needs approval for
-`contents: read`, `actions: read`, `id-token: write` and a trusted publisher:
-owner `kahwee`, repository `thermark`, workflow `publish-crate.yml`, blank
-environment. It checks human-pushed stable tags, exact source CI and packaging
-before temporary authentication. Existing versions require source/checksum
-reconciliation; historical tags without guards need separate recovery review.
+The tag-only crates.io workflow is active, but activation itself does not publish
+anything or prove the external trust binding. Existing published versions need
+source/checksum reconciliation. Historical tags without this workflow and its
+guards need a separately reviewed recovery procedure; never move or repush them
+to trigger publication.
 
 The source workflow token cannot write the Homebrew tap. Automatic tap updates
-need separately approved credentials scoped to that repository. No registry trust
-or cross-repository publishing access is configured by the proposal.
+need separately approved credentials scoped to that repository. This workflow does not configure registry trust or grant cross-repository
+publishing access.

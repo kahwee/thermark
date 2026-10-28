@@ -1,4 +1,3 @@
-# PROPOSAL ONLY. Access approval is required before activation.
 name: Publish crate
 on:
   push:
@@ -10,6 +9,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    # Registry publication is limited to tags pushed by a user account.
+    if: github.event.sender.type == 'User'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -49,7 +50,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
       - name: Verify package
         run: |
-          cargo package --locked --list
+          python3 scripts/test_check_package.py -v
+          python3 scripts/check-package.py
           cargo publish --locked --dry-run
       - name: Audit locked dependencies before authentication
         run: |
