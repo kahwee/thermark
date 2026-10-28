@@ -19,16 +19,31 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [0.36.1] - 2026-10-28
 
-### Changed
-
-- Add Cargo source-package inventory checks and publish dry runs to Linux CI.
-- Make README installation and batch examples work from a fresh binary install;
-  add quick-start and support guidance to CLI help.
-
 ### Fixed
 
-- Quote preview-directory paths in the suggested batch print command so spaces
-  and shell metacharacters are preserved.
+- Make the command printed after batch preparation safe to copy into a POSIX
+  shell when the preview directory contains spaces, apostrophes or shell
+  metacharacters. Prepared pages and printer behavior are unchanged.
+
+### Changed
+
+- Make the README's CSV batch example self-contained, so it works with a
+  downloaded binary without cloning the example files. Include job verification,
+  outcome inspection and recovery guidance.
+- Add setup, offline rendering, diagnostics and verified-support guidance to
+  top-level CLI help. Document installation from an exact release tag.
+- Validate the actual Cargo source-package inventory and compile the packaged
+  source in Linux CI before release. Reject missing required files and accidental
+  inclusion of local output or repository infrastructure.
+
+### Distribution
+
+- Available on crates.io and docs.rs, with BLE-only and full binaries for Linux
+  and macOS on ARM64/X64. Each archive has a SHA-256 sidecar; the Homebrew tap
+  installs the macOS BLE build.
+- Source builds require Rust 1.99 or newer. No public API migration or new
+  hardware support is introduced by this patch. B1 with the b1 task over BLE
+  remains the only hardware-verified path.
 
 ## [0.36.0] - 2026-10-28
 
@@ -39,7 +54,6 @@ such change is listed under **Changed** with the old and new spelling.
 ### Changed
 
 - Upgrade HarfRust to 0.15 and refresh compatible locked dependencies.
-
 - Refresh documentation images from the locked offline CLI with isolated config,
   embedded fonts, a hash manifest and CI freshness checks. Share generated demos
   across README, recipes and landing page; consolidate maintainer reference docs.
