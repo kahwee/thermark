@@ -15,7 +15,7 @@ This guide describes the checked-in workflows. Follow each linked YAML file for 
 
 Independent checks use GitHub Actions [native parallel steps](https://github.blog/changelog/2026-06-25-actions-steps-can-now-be-run-in-parallel/). The following groups run concurrently within a job:
 
-- [rust.yml](workflows/rust.yml), job `build`: `dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec`; `Install system dependencies`.
+- [rust.yml](workflows/rust.yml), job `build`: `dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8`; `Install system dependencies`.
 
 Steps after a group wait for it to finish. Keep prerequisites before the group and dependent build, package, or deployment work afterward. Do not run commands that overwrite the same build directory or coverage output together. Parallel steps share the job workspace; they do not provide separate machines.
 
@@ -23,8 +23,9 @@ Steps after a group wait for it to finish. Keep prerequisites before the group a
 
 Verified against upstream stable releases on 2026-10-28. Every external action is
 pinned to the resolved commit SHA; comments name the release. The Rust toolchain
-action has no numbered releases, so its pin follows the upstream `stable` branch
-as of that date. Its explicit `toolchain` input still selects Rust 1.99.0.
+action is pinned to a commit in upstream `master` history, as required by its
+[pinning guidance](https://github.com/dtolnay/rust-toolchain#choice-of-full-length-commit-sha). The explicit
+`toolchain` input selects Rust 1.99.1.
 
 ### Active workflows and composite actions
 
@@ -35,7 +36,7 @@ as of that date. Its explicit `toolchain` input still selects Rust 1.99.0.
 | [actions/download-artifact](https://github.com/actions/download-artifact) | [v8.0.2](https://github.com/actions/download-artifact/releases/tag/v8.0.2) | `9000827ccba6bdab643e8b6fd33ac0654aef8333` |
 | [actions/setup-python](https://github.com/actions/setup-python) | [v7.1.0](https://github.com/actions/setup-python/releases/tag/v7.1.0) | `6d4fd22b20465ccc0f7354476588e8df7c9ca0e0` |
 | [actions/upload-artifact](https://github.com/actions/upload-artifact) | [v7.0.2](https://github.com/actions/upload-artifact/releases/tag/v7.0.2) | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
-| [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | [stable](https://github.com/dtolnay/rust-toolchain/commit/b725eda525362e7cf34af9a7243cac1e3f01a7ec) | `b725eda525362e7cf34af9a7243cac1e3f01a7ec` |
+| [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) | [master](https://github.com/dtolnay/rust-toolchain/commit/683b588c487a69d01f6c6ddf40f036ff682cc2c8) | `683b588c487a69d01f6c6ddf40f036ff682cc2c8` |
 | [rust-lang/crates-io-auth-action](https://github.com/rust-lang/crates-io-auth-action) | [v1.0.6](https://github.com/rust-lang/crates-io-auth-action/releases/tag/v1.0.6) | `3268eb413133e2960fa4ae0e963ca76380c54cd9` |
 
 ### Registry authentication

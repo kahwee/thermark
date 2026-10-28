@@ -54,8 +54,16 @@ CLI tests should use temporary `THERMARK_CONFIG` and unset inherited
 `THERMARK_ADDR` in child commands. Avoid process-wide environment or cwd
 mutation in parallel tests. Keep `Cargo.toml`'s `rust-version`,
 `rust-toolchain.toml`, CI, and `Cargo.lock` compatible; verify with `--locked`.
-For release behavior, read `.github/workflows/release.yml` and the hardware
-notes. A routine push or dependency update does not authorize a release.
+
+## CI and releases
+
+Keep external action pins and version comments aligned with [.github/ACTIONS.md](.github/ACTIONS.md).
+Linux CI validates `scripts/check-package.py` and a locked publish dry run.
+Follow [docs/releasing.md](docs/releasing.md): manifest, root lockfile and tag
+must agree, and exact-source Rust CI and the dependency audit must pass first.
+New user-pushed `v*` tags start separate binary and crates.io workflows; registry
+OIDC trust is external, and Homebrew is updated separately. Never move old tags
+or infer publication from activation. Routine maintenance does not authorize a release.
 
 ## Completion report
 

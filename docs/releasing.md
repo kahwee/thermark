@@ -129,5 +129,5 @@ guards need a separately reviewed recovery procedure; never move or repush them
 to trigger publication.
 
 The source workflow token cannot write the Homebrew tap. Automatic tap updates
-need separately approved credentials scoped to that repository. This workflow does not configure registry trust or grant cross-repository
-publishing access.
+need separately approved credentials scoped to that repository. This workflow
+does not configure registry trust or grant cross-repository publishing access.

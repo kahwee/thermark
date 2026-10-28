@@ -12,6 +12,8 @@ scripts/check.sh all      # also BLE-only, serial-only and no transports
 scripts/check.sh render   # focused image checks
 cargo run --locked --no-default-features --example prepared_job
 python3 scripts/test_hardware_trial.py -v
+python3 scripts/check-package.py
+cargo publish --locked --dry-run
 ```
 
 Use `all` for dependencies, transports and shared APIs. The check script rejects
@@ -19,6 +21,10 @@ inherited `UPDATE_GOLDEN`; inspect `target/golden-actual/` before accepting a
 baseline. [CONTRIBUTING.md](../CONTRIBUTING.md) covers test isolation;
 [architecture](architecture.md) maps module ownership. Follow the
 [release checklist](releasing.md) before tagging.
+
+The package check inspects Cargo's source inventory; the publish dry run compiles
+that package without uploading it. Linux CI runs both with the feature checks.
+Keep [workflow/action versions](../.github/ACTIONS.md) and the release guide aligned.
 
 ## Documentation images and screenshots
 

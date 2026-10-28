@@ -38,6 +38,11 @@ Run `scripts/check.sh all` for dependency, transport, or shared API changes;
 must be visually reviewed before acceptance. Tests and mock transports do not
 establish hardware verification.
 
+Release and CI changes must keep [.github/ACTIONS.md](.github/ACTIONS.md) and the
+[release checklist](docs/releasing.md) current. Verify packages with
+`python3 scripts/check-package.py` and `cargo publish --locked --dry-run`; these
+checks do not publish or establish registry authentication.
+
 For documentation images and website screenshots, use the
 [refresh workflow](docs/development.md#documentation-images-and-screenshots).
 

@@ -42,9 +42,9 @@ jobs:
           git merge-base --is-ancestor "$source_sha" "origin/main"
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rust.yml/runs?head_sha=$source_sha&per_page=100" > "$RUNNER_TEMP/ci.json"
           jq -e --arg sha "$source_sha" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length > 0' "$RUNNER_TEMP/ci.json"
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - name: Linux Bluetooth build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config

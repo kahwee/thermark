@@ -46,9 +46,9 @@ jobs:
       run: python3 scripts/test_release_assets.py -v
 
     - parallel:
-        - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
           with:
-            toolchain: 1.99.0
+            toolchain: 1.99.1
             components: rustfmt, clippy
         - name: Install system dependencies
           if: runner.os == 'Linux'
