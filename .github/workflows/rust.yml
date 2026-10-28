@@ -68,6 +68,13 @@ jobs:
     - name: Validate Rust and feature matrix
       run: scripts/check-ci.sh
 
+    - name: Cargo registry preflight (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        python3 scripts/test_check_package.py -v
+        python3 scripts/check-package.py
+        cargo publish --locked --dry-run
+
     - name: Verify documentation images
       run: python3 scripts/render-docs.py --check
 

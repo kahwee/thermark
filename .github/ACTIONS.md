@@ -48,3 +48,8 @@ storage is unavailable.
 5. Refresh this guide when workflows, action references, or parallel groups change.
 
 Use workflow concurrency to cancel superseded check runs where appropriate. Deployment and release cancellation have different consequences: preserve the workflow’s existing policy rather than copying check-run settings blindly. Repository permissions and job-level overrides are defined in the linked YAML files.
+
+Linux CI also checks the Cargo package inventory and runs a locked publish dry run.
+This catches missing bundled files and packaged-source compilation failures before
+release tagging. It uses the existing read-only permissions, without registry
+credentials. The crate publisher remains an inactive proposal outside workflows.

@@ -31,6 +31,11 @@ python3 .agents/skills/release/scripts/verify_release.py \
    goldens just to pass. Run `cargo package --locked` and check that the
    package includes licenses, tests, and `local/README.md`, with no personal
    artwork, printer identifiers, or real Wi-Fi labels.
+   Run `python3 scripts/check-package.py` to validate Cargo's actual inventory,
+   then `cargo publish --locked --dry-run` to compile the packaged source.
+   Linux CI runs these checks on each main push and pull request without registry
+   authentication or upload. The metadata guard also requires tag, manifest and
+   root lockfile versions to agree.
 5. Commit and push the source. Wait for the Rust workflow on that exact commit
    to pass on Linux and macOS, and for the dependency audit to pass. Resolve
    failures before tagging.

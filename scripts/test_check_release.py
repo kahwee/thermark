@@ -29,6 +29,21 @@ class MetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check.validate(manifest, {"package": []}, "v1.2.3")
 
+    def test_disabled_publication_and_unstable_versions_are_rejected(self):
+        for version, publish in (("1.2.3", False), ("1.2.3-rc.1", True), ("1.2.3+build", True)):
+            with self.subTest(version=version, publish=publish), self.assertRaises(ValueError):
+                check.validate({"package": {"name": "example", "version": version, "publish": publish}},
+                               {"package": [{"name": "example", "version": version}]}, "v" + version)
+
+    def test_registry_dependency_cannot_substitute_for_root_lock_entry(self):
+        manifest = {"package": {"name": "example", "version": "1.2.3"}}
+        root = {"name": "example", "version": "1.2.3"}
+        registry = dict(root, source="registry+https://github.com/rust-lang/crates.io-index")
+        self.assertEqual(check.validate(manifest, {"package": [root, registry]}, "v1.2.3"), ("example", "1.2.3"))
+        for entries in ([registry], [root, root]):
+            with self.subTest(entries=entries), self.assertRaises(ValueError):
+                check.validate(manifest, {"package": entries}, "v1.2.3")
+
 
 if __name__ == "__main__":
     unittest.main()
