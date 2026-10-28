@@ -68,7 +68,7 @@ sha2 = "0.11.1"
 unicode-bidi = "0.3.18"
 unicode-segmentation = "1.13.3"
 unicode-script = "0.5.8"
-harfrust = "0.14.0"
+harfrust = "0.15.0"
 
 # Optional transports (enable via features)
 btleplug = { version = "0.13.5", optional = true }
