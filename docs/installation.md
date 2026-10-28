@@ -26,13 +26,19 @@ a `full` archive or the default Cargo installation.
 
 ### Cargo
 
-Cargo installs the latest crates.io version, which may lag GitHub/Homebrew.
-Use a release archive for the latest prepared-job commands if needed.
+Cargo builds the published crates.io source. Version 0.36.1 is available;
+GitHub binaries, Homebrew and crates.io are verified separately.
 
 ```sh
-cargo install thermark --locked
+cargo install thermark --locked --version 0.36.1
 # Or choose BLE only:
 cargo install thermark --locked --no-default-features --features ble
+```
+
+For an exact GitHub source tag instead:
+
+```sh
+cargo install --git https://github.com/kahwee/thermark --tag v0.36.1 --locked
 ```
 
 Cargo normally installs into `~/.cargo/bin`; ensure that directory is on `PATH`.

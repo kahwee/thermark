@@ -25,7 +25,8 @@ Verified against upstream stable releases on 2026-10-28. Every external action i
 pinned to the resolved commit SHA; comments name the release. The Rust toolchain
 action is pinned to a commit in upstream `master` history, as required by its
 [pinning guidance](https://github.com/dtolnay/rust-toolchain#choice-of-full-length-commit-sha). The explicit
-`toolchain` input selects Rust 1.99.1.
+`toolchain` input selects Rust 1.99.1. Python setup selects 3.15.2; the script
+guards, rendering/docs fixtures and browser checks were verified before migration.
 
 ### Active workflows and composite actions
 

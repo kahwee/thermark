@@ -10,6 +10,13 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Changed
+
+- Enable tag-only crates.io publishing with exact-source CI, package and audit
+  gates before short-lived OIDC authentication; existing tags remain immutable.
+- Refresh pinned GitHub Actions, Rust 1.99.1 and Python 3.15.2; consolidate
+  installation and maintainer guidance.
+
 ## [0.36.1] - 2026-10-28
 
 ### Changed

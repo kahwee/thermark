@@ -1,7 +1,8 @@
 # Development
 
 Requires Rust 1.99+ and the [native prerequisites](installation.md). Rustup uses
-`rust-toolchain.toml`. Offline tests need no printer.
+`rust-toolchain.toml`; CI runs the Python scripts with 3.15.2. Offline tests need
+no printer.
 
 ## Build and check
 

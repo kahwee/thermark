@@ -16,6 +16,12 @@ python3 .agents/skills/release/scripts/verify_release.py \
   --font tests/fonts/DejaVuSans.ttf
 ```
 
+Version 0.36.1 is available on GitHub, Homebrew and crates.io from immutable
+`v0.36.1` at `cb4eb488e89b98afa63b4fd1b7cb8cda0bd83331`.
+[docs.rs build 5044423](https://docs.rs/crate/thermark/0.36.1/builds/5044423) succeeded.
+Later main-branch maintenance remains Unreleased. Its registry upload used existing
+Cargo authentication; no tag-triggered OIDC upload has been exercised.
+
 ## Prepare the source
 
 1. Review changes since the latest release and choose the version. While the
@@ -108,6 +114,9 @@ It uses no GitHub environment or long-lived Cargo secret. The separate crates.io
 trusted-publisher binding must match owner `kahwee`, repository `thermark`,
 workflow `publish-crate.yml`, and a blank environment. GitHub access alone does
 not establish that registry trust; confirm the binding before a future release.
+
+The matching binding was configured and read back on 2026-10-28. This confirms
+configuration, not a completed OIDC upload.
 
 Wait for that tag's Publish crate run, then confirm the version is visible on
 crates.io and that docs.rs builds its API documentation. Check a clean
