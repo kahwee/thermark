@@ -32,12 +32,16 @@ pub async fn run(cfg: &Config, args: BatchCommand) -> Result<()> {
             &options,
             thermark::profile_for_model(cfg.resolve_model(args.model)),
         )?;
+        let quoted_directory = format!(
+            "'{}'",
+            job.directory().display().to_string().replace('\'', "'\\''")
+        );
         println!(
             "Validated {} labels; previews saved in {}\nJob {}\nNothing printed. Inspect the PNGs, then use `thermark job print --job {}` to print these exact pages.",
             job.manifest().total,
             job.directory().display(),
             job.manifest().job_id,
-            job.directory().display()
+            quoted_directory
         );
         return Ok(());
     }

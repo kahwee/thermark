@@ -25,15 +25,16 @@ For Linux, or macOS without Homebrew, use the
 Choose `ble` for Bluetooth or `full` for experimental USB serial support.
 No Rust compiler is needed for a prebuilt download.
 
-With Rust 1.99 or newer, install from crates.io:
+For the current release from source, use Rust 1.99 or newer:
 
 ```sh
-cargo install thermark --locked
+cargo install --git https://github.com/kahwee/thermark --tag v0.36.1 --locked
 ```
 
-Cargo installs the latest registry version, which may lag GitHub releases.
-See the [installation guide](docs/installation.md) for Linux prerequisites,
-archive installation, upgrades, and troubleshooting.
+`cargo install thermark --locked` uses crates.io, whose version can lag GitHub.
+The [installation guide](docs/installation.md) covers Linux prerequisites,
+archive checksums, upgrades, and troubleshooting. Run `thermark --version` to
+check the executable your shell found.
 
 Turn on your B1, load 50×30 mm labels, and quit the vendor app. Then:
 
@@ -48,23 +49,32 @@ if discovery fails.
 
 ### Print a CSV batch
 
-Render inventory labels with a reusable layout before printing:
+Create a CSV in your working directory; a source checkout is not required:
 
 ```sh
-thermark batch --csv examples/batch/inventory.csv \
-  --template examples/batch/inventory.json \
-  --preview-dir local/prints/inventory-preview
+cat > labels.csv <<'CSV'
+text,url
+Cables,https://example.com/bins/A1
+Adapters,https://example.com/bins/A2
+CSV
+thermark batch --csv labels.csv --model b1 --label 50x30 \
+  --preview-dir inventory-preview
 ```
 
-Inspect the PNGs, then print the exact prepared pages:
+This prepares monochrome PNGs and a manifest without connecting to a printer.
+Use a fresh preview directory for each batch. Inspect the PNGs, then print the
+exact prepared pages with your configured printer:
 
 ```sh
-thermark job print --job local/prints/inventory-preview --label 50x30
+thermark job verify --job inventory-preview
+thermark job print --job inventory-preview --label 50x30
+thermark job status --job inventory-preview
 ```
 
-Use `thermark job status` to inspect outcomes and `job resume` after a stopped
-run. [CSV batches and templates](docs/batch.md) explains the
-format, print journals, and recovery.
+After a stopped run, inspect the printed labels and journal before using
+`thermark job resume --job inventory-preview --label 50x30`. Confirmed rows
+are skipped; uncertain output requires physical review. See
+[CSV layouts and recovery](docs/batch.md) for templates and resume controls.
 
 ### Try it without a printer
 
@@ -98,6 +108,20 @@ Render the whole gallery with `sh examples/render-recipes.sh` from a source chec
 Printing with any profile/task/connection combination other than B1+B1 over
 BLE requires `--allow-experimental`; offline previews and saved renders do not.
 Multi-colour printheads and colour raster protocols are out of scope.
+
+## Common tasks
+
+| Goal | Command |
+| --- | --- |
+| Configure a B1 without printing | `thermark setup --label 50x30` |
+| Check the saved printer | `thermark doctor --use-config --json` |
+| List profiles and verification status | `thermark tasks` |
+| Find a command's options | `thermark <command> --help` |
+| Upgrade the Homebrew installation | `brew update` then `brew upgrade kahwee/thermark/thermark` |
+
+Previews use the embedded DejaVu Sans font. Pass `--font /path/to/font.ttf` for
+a different font. Use public demo credentials in shared Wi-Fi previews; real
+labels belong outside the repository or under ignored `local/prints/`.
 
 ## Documentation
 

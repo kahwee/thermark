@@ -15,7 +15,8 @@ use thermark::wifi::WifiSecurity;
 #[command(
     name = "thermark",
     version,
-    about = "Local sticker printing over BLE/USB — guest Wi‑Fi, QR, inventory (no vendor app)"
+    about = "Local sticker printing over BLE/USB — guest Wi‑Fi, QR, inventory (no vendor app)",
+    after_help = "Start here:\n  thermark setup --label 50x30\n  thermark doctor --use-config --json\n\nTry an offline label without a printer:\n  thermark qr --url https://example.com --model b1 --label 50x30 --save hello-label.png --no-print\n\nBatches: batch prepares previews; job print prints those exact pages.\nOnly B1 with the b1 task over BLE is hardware-verified.\nOther print paths require --allow-experimental.\nGuide: https://kahwee.github.io/thermark/"
 )]
 pub struct Cli {
     /// Verbose logging (`RUST_LOG` still overrides when set)

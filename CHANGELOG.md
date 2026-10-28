@@ -10,6 +10,19 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-10-28
+
+### Changed
+
+- Add Cargo source-package inventory checks and publish dry runs to Linux CI.
+- Make README installation and batch examples work from a fresh binary install;
+  add quick-start and support guidance to CLI help.
+
+### Fixed
+
+- Quote preview-directory paths in the suggested batch print command so spaces
+  and shell metacharacters are preserved.
+
 ## [0.36.0] - 2026-10-28
 
 ### Fixed
@@ -1302,7 +1315,8 @@ Library API. The CLI is unaffected except where noted.
 Initial release: BLE and USB serial transports, B1 print task, QR and guest
 Wi-Fi stickers, calibration patterns, `doctor`, and a JSON config file.
 
-[Unreleased]: https://github.com/kahwee/thermark/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/kahwee/thermark/compare/v0.36.1...HEAD
+[0.36.1]: https://github.com/kahwee/thermark/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/kahwee/thermark/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/kahwee/thermark/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/kahwee/thermark/compare/v0.33.0...v0.34.0

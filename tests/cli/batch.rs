@@ -9,7 +9,7 @@ fn font() -> PathBuf {
 fn csv_preview_handles_quoted_multiline_text_and_scannable_qrs_without_config() {
     let fixture = CliFixture::new();
     let csv = fixture.dir.path().join("labels.csv");
-    let out = fixture.dir.path().join("preview");
+    let out = fixture.dir.path().join("preview space's $literal");
     fs::write(&csv, "url,text\r\nhttps://example.com/a,\"BIN A3\nCables, adapters\"\r\nhttps://example.com/b,\"ALEX \"\"AJ\"\"\"\r\n").unwrap();
     fixture
         .command()
@@ -21,7 +21,11 @@ fn csv_preview_handles_quoted_multiline_text_and_scannable_qrs_without_config() 
         .arg(font())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Nothing printed"));
+        .stdout(predicate::str::contains("Nothing printed"))
+        .stdout(predicate::str::contains(format!(
+            "--job '{}'",
+            out.display().to_string().replace('\'', "'\\''")
+        )));
     for (number, expected) in [(1, "https://example.com/a"), (2, "https://example.com/b")] {
         let image = image::open(out.join(format!("label-{number:05}.png")))
             .unwrap()
