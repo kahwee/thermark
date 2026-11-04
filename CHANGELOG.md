@@ -12,6 +12,8 @@ such change is listed under **Changed** with the old and new spelling.
 
 ### Changed
 
+- Refresh compatible locked dependencies, including Unicode script data 0.5.9
+  and CRC32 1.5.4; preserve transport features and the Rust minimum.
 - Enable tag-only crates.io publishing with exact-source CI, package and audit
   gates before short-lived OIDC authentication; existing tags remain immutable.
 - Refresh pinned GitHub Actions, Rust 1.99.1 and Python 3.15.2; consolidate
