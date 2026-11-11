@@ -17,7 +17,8 @@ such change is listed under **Changed** with the old and new spelling.
   required characteristic properties. Platform IDs are not authentication.
 - Bound BLE notification bytes and queues, disconnect on overflow, and escape
   terminal controls and bidi formatting in peer-controlled human output.
-- Bound font/image reads, check image dimensions and decoding memory before
+- Bound font/image/config reads and reject blocking special files throughout
+  media, batch and prepared-job inputs. Check image dimensions and decoding memory before
   allocation, and cap label text at 4,096 UTF-8 bytes with linear Latin/Common
   wrapping and a cumulative complex-shaping work budget.
 - Save images through private atomic replacements without following destination

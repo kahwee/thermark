@@ -65,3 +65,65 @@ fn malicious_filename_cannot_emit_terminal_commands_in_error() {
     assert!(!stderr.contains('\x07'));
     assert!(!stderr.contains('\u{202e}'));
 }
+
+#[test]
+fn oversized_config_is_rejected_before_json_parsing() {
+    let fixture = CliFixture::new();
+    let file = std::fs::File::create(fixture.config()).unwrap();
+    file.set_len(1024 * 1024 + 1).unwrap();
+    fixture
+        .command()
+        .args(["config", "show"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("byte limit"));
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_inputs_fail_without_waiting_for_a_writer() {
+    use std::time::Duration;
+    let fixture = CliFixture::new();
+    let fifo = fixture.dir.path().join("input.pipe");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fixture
+        .command_with_config(&fifo)
+        .args(["config", "show"])
+        .timeout(Duration::from_secs(5))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("regular file"));
+    fixture
+        .command()
+        .args(["batch", "--csv"])
+        .arg(&fifo)
+        .arg("--preview-dir")
+        .arg(fixture.dir.path().join("output"))
+        .timeout(Duration::from_secs(5))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("regular file"));
+    let job = fixture.dir.path().join("job");
+    std::fs::create_dir(&job).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(job.join("manifest.json"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    fixture
+        .command()
+        .args(["job", "verify", "--job"])
+        .arg(job)
+        .timeout(Duration::from_secs(5))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("regular file"));
+}

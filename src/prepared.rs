@@ -4,8 +4,7 @@ use anyhow::{Context, Result, ensure};
 use image::GrayImage;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const MAX_PAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -16,17 +15,7 @@ pub fn digest(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 pub(crate) fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .with_context(|| format!("open {}", path.display()))?
-        .take(max + 1)
-        .read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() as u64 <= max,
-        "{} exceeds size limit",
-        path.display()
-    );
-    Ok(bytes)
+    crate::input::read_file(path, max).with_context(|| format!("read {}", path.display()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
