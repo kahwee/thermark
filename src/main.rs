@@ -27,7 +27,10 @@ fn result_code(result: anyhow::Result<i32>) -> i32 {
         Ok(code) => code,
         Err(error) => {
             emit_error_tips(&error);
-            eprintln!("error: {error:#}");
+            eprintln!(
+                "error: {}",
+                thermark::terminal::escape(&format!("{error:#}"))
+            );
             1
         }
     }

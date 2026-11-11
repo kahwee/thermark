@@ -18,7 +18,7 @@ pub fn compose_for_label(
     max_width_px: u32,
     pixels_per_mm: f64,
 ) -> Result<image::DynamicImage> {
-    let mut img = image_encode::rotate(image::open(path)?, opts.rotate);
+    let mut img = image_encode::rotate(crate::input::open_image(path)?, opts.rotate);
     if opts.trim {
         img = image_encode::trim_for_print(img, opts.threshold.get(), opts.dither);
     }

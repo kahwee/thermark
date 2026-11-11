@@ -146,7 +146,7 @@ impl BleCandidate {
     /// True if the advertised name looks like a pocket label printer.
     ///
     /// Single source of truth for this heuristic: scan filtering, fuzzy-match
-    /// scoring, and `scan --save` ranking all consult it.
+    /// scoring and discovery filtering consult it; enrollment never trusts signal strength.
     pub fn looks_like_label_printer(&self) -> bool {
         self.name
             .as_deref()
@@ -158,8 +158,13 @@ impl BleCandidate {
 impl fmt::Display for BleCandidate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.name {
-            Some(n) => write!(f, "{n} ({})", self.id),
-            None => write!(f, "{}", self.id),
+            Some(n) => write!(
+                f,
+                "{} ({})",
+                crate::terminal::escape(n),
+                crate::terminal::escape(&self.id)
+            ),
+            None => write!(f, "{}", crate::terminal::escape(&self.id)),
         }
     }
 }
@@ -202,6 +207,11 @@ pub fn score_ble_candidate(
     mode: BleMatchMode,
 ) -> Option<i32> {
     let sel = selector.trim().to_ascii_lowercase();
+    // Reserved explicit-ID selectors never fall back to an advertising name,
+    // including when --fuzzy is supplied or an impostor advertises the ID.
+    if let Some(id) = sel.strip_prefix("id:") {
+        return (!id.is_empty() && candidate.id.eq_ignore_ascii_case(id)).then_some(1000);
+    }
     if sel.is_empty() {
         return None;
     }
@@ -259,6 +269,7 @@ pub fn select_ble_candidate(
         .filter_map(|c| score_ble_candidate(selector, c, mode).map(|s| (s, c)))
         .collect();
 
+    let selector = crate::terminal::escape(selector);
     if ranked.is_empty() {
         let hint = match mode {
             BleMatchMode::Exact => "Substring match: add --fuzzy (can pick the wrong device).",
@@ -406,3 +417,22 @@ mod serial;
 
 #[cfg(feature = "serial")]
 pub use serial::SerialTransport;
+
+#[cfg(test)]
+mod pinned_selection_tests {
+    use super::*;
+    #[test]
+    fn pinned_id_never_falls_back_to_name_or_substring() {
+        let impostor = BleCandidate::new("other", Some("saved-id".into()));
+        for mode in [BleMatchMode::Exact, BleMatchMode::Fuzzy] {
+            assert!(score_ble_candidate("id:saved-id", &impostor, mode).is_none());
+            let actual = BleCandidate::new("saved-id", Some("renamed".into()));
+            assert_eq!(
+                score_ble_candidate("id:saved-id", &actual, mode),
+                Some(1000)
+            );
+            assert!(score_ble_candidate("id:saved", &actual, mode).is_none());
+            assert!(score_ble_candidate("id:", &actual, mode).is_none());
+        }
+    }
+}

@@ -35,7 +35,11 @@ cache. Denki retains its pinned audit binary but refreshes the advisory database
 every audit. No remote artifact cache upload/download is needed on the NAS.
 
 Inspect with `docker compose ps` and `docker compose logs --tail=100`. Rebuild the
-image for OS/library updates. Workflow toolchain setup updates stable Rust. Clear
+image for OS/library updates. The Dockerfile pins Rust 1.99.1 and verifies the rustup 1.28.2 installer against
+repository-pinned SHA-256 digests before execution. When updating these, verify
+the release-specific installer bytes for both architectures and keep the
+manifest/toolchain/CI versions compatible. A repository change does not rebuild
+or redeploy existing runners. Clear
 only the affected `.cache/*-target` directory while that runner is idle if reclaiming
 disk space or investigating a cache issue; do not remove registration volumes.
 

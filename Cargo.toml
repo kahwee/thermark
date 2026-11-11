@@ -77,6 +77,10 @@ serialport = { version = "4", optional = true, default-features = false }
 tokio-serial = { version = "5", optional = true }
 uuid = { version = "1", optional = true }
 
+[target.'cfg(unix)'.dependencies]
+# Nonblocking opened-handle validation rejects FIFO/device inputs before reads.
+libc = "0.2"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2"

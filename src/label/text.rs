@@ -27,12 +27,13 @@ pub fn draw_text_block(
         return Err(Error::msg("text box must fit inside the label canvas"));
     }
     font.validate_text(text)?;
+    let mut shaping_budget = crate::font::MAX_SHAPING_WORK;
     let mut px = match font_size {
         Some(s) => crate::font::validate_font_size(s)?.clamp(6.0, 96.0),
-        None => font.fit_size(text, bx.w, bx.h),
+        None => font.fit_size_budgeted(text, bx.w, bx.h, &mut shaping_budget)?,
     };
     let (lines, positions) = loop {
-        let lines = font.wrap(text, bx.w, px);
+        let lines = font.wrap_budgeted(text, bx.w, px, &mut shaping_budget)?;
         let line_h = font.text_height(px) as f32 + 2.0;
         let top_align = font_size.is_some() && px <= 16.0;
 

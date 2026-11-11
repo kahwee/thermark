@@ -39,8 +39,8 @@ async fn select_printer(seconds: u64) -> Result<String> {
         println!(
             "  {}. {} ({})",
             index + 1,
-            device.display_name(),
-            device.id()
+            thermark::terminal::escape(device.display_name()),
+            thermark::terminal::escape(device.id())
         );
     }
     let index = if devices.len() == 1 {
@@ -55,7 +55,7 @@ async fn select_printer(seconds: u64) -> Result<String> {
         number - 1
     };
     // IDs select the actual device even when multiple printers have the same name.
-    Ok(devices[index].id().to_owned())
+    Ok(format!("id:{}", devices[index].id()))
 }
 
 #[cfg(not(feature = "ble"))]
@@ -64,6 +64,18 @@ async fn select_printer(_seconds: u64) -> Result<String> {
     bail!(
         "this thermark binary was built without Bluetooth support; use --conn usb --addr <serial path> with a serial-enabled build"
     )
+}
+
+fn same_saved_selector(previous: Option<&str>, current: &str) -> bool {
+    previous.is_some_and(|previous| {
+        previous == current
+            || current.strip_prefix("id:").is_some_and(|id| {
+                previous
+                    .strip_prefix("id:")
+                    .unwrap_or(previous)
+                    .eq_ignore_ascii_case(id)
+            })
+    })
 }
 
 pub async fn run(mut args: SetupCommand) -> Result<i32> {
@@ -89,7 +101,22 @@ pub async fn run(mut args: SetupCommand) -> Result<i32> {
             ConnPref::Usb => prompt("Serial device path (see thermark ports): ".into()).await?,
         });
     }
-    let conn = args.conn.resolve(&cfg)?;
+    // Setup explicitly reenrolls old defaults after an unambiguous fresh scan.
+    if args.conn.addr.is_none() {
+        args.conn.addr = Some(cfg.resolve_addr(None)?);
+    }
+    #[allow(unused_mut)]
+    let mut conn = args.conn.resolve(&cfg)?;
+    #[cfg(feature = "ble")]
+    if connection == ConnPref::Ble && !conn.addr.starts_with("id:") {
+        let devices =
+            thermark::transport::BleTransport::scan(std::time::Duration::from_secs(conn.scan_secs))
+                .await?;
+        let pick = super::device::pick_scan_device(&devices, Some(&conn.addr))
+            .context("setup requires one exact printer match; select its ID from thermark scan")?;
+        conn.addr = format!("id:{}", pick.id());
+        args.conn.addr = Some(conn.addr.clone());
+    }
     let session = Session::connect(
         &conn,
         PrintTarget {
@@ -126,7 +153,7 @@ pub async fn run(mut args: SetupCommand) -> Result<i32> {
     }
     // Registration measurements belong to a specific printer. Keep them only
     // when setup is updating media on that same saved connection and model.
-    if cfg.addr.as_deref() != Some(&conn.addr)
+    if !same_saved_selector(cfg.addr.as_deref(), &conn.addr)
         || cfg.resolve_connection(None) != connection
         || cfg.resolve_model(None) != profile.model
     {
@@ -181,4 +208,17 @@ pub async fn run(mut args: SetupCommand) -> Result<i32> {
     }
     println!("Support report: thermark doctor --use-config --json");
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn legacy_raw_id_reenrollment_preserves_same_device_registration() {
+        assert!(same_saved_selector(Some("ABC-123"), "id:abc-123"));
+        assert!(same_saved_selector(Some("id:ABC-123"), "id:abc-123"));
+        assert!(!same_saved_selector(Some("B1-Kitchen"), "id:abc-123"));
+        assert!(!same_saved_selector(None, "id:abc-123"));
+        assert!(same_saved_selector(Some("/dev/ttyUSB0"), "/dev/ttyUSB0"));
+    }
 }

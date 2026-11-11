@@ -106,13 +106,13 @@ impl std::fmt::Display for RfidInfo {
         write!(
             f,
             "barcode={} serial={} paper={}/{} type={} ({}) uuid={}",
-            self.barcode,
-            self.serial,
+            crate::terminal::escape(&self.barcode),
+            crate::terminal::escape(&self.serial),
             self.used_paper,
             self.all_paper,
             self.consumables_type,
             self.consumable_type_name(),
-            self.uuid_hex
+            crate::terminal::escape(&self.uuid_hex)
         )?;
         if let Some(left) = self.labels_remaining() {
             write!(f, " remaining={left}")?;
@@ -159,7 +159,7 @@ impl std::fmt::Display for InfoValue {
         match self {
             Self::Int(v) => write!(f, "{v}"),
             Self::Float(v) => write!(f, "{v:.2}"),
-            Self::Text(s) | Self::Hex(s) => write!(f, "{s}"),
+            Self::Text(s) | Self::Hex(s) => write!(f, "{}", crate::terminal::escape(s)),
             Self::Raw(b) => write!(f, "{}", hex::encode(b)),
         }
     }

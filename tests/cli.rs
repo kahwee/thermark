@@ -42,3 +42,5 @@ mod commands;
 mod config;
 #[path = "cli/rendering.rs"]
 mod rendering;
+#[path = "cli/security.rs"]
+mod security;

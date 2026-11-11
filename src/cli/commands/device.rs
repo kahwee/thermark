@@ -8,6 +8,7 @@ use thermark::config::Config;
 #[cfg(feature = "ble")]
 use thermark::config::ConnPref;
 use thermark::font;
+use thermark::terminal::escape;
 #[cfg(feature = "serial")]
 use thermark::transport::SerialTransport;
 #[cfg(feature = "ble")]
@@ -76,8 +77,16 @@ impl std::fmt::Display for PrinterReport<'_> {
             self.protocol_version
                 .map_or_else(|| "unknown".into(), |value| value.to_string())
         )?;
-        writeln!(f, "firmware: {}", self.firmware.unwrap_or("unknown"))?;
-        writeln!(f, "hardware: {}", self.hardware.unwrap_or("unknown"))?;
+        writeln!(
+            f,
+            "firmware: {}",
+            escape(self.firmware.unwrap_or("unknown"))
+        )?;
+        writeln!(
+            f,
+            "hardware: {}",
+            escape(self.hardware.unwrap_or("unknown"))
+        )?;
         writeln!(f, "dpi: {}", self.dpi)?;
         writeln!(f, "max width: {} px", self.max_width_px)?;
         writeln!(f, "direction: {}", self.print_direction)?;
@@ -103,28 +112,31 @@ pub async fn scan(seconds: u64, save: bool, prefer_name: Option<&str>) -> Result
     println!("{:<40} {:<24} RSSI", "ID", "NAME");
     for d in &devices {
         let rssi = d.rssi.map(|r| r.to_string()).unwrap_or_else(|| "-".into());
-        println!("{:<40} {:<24} {}", d.id(), d.display_name(), rssi);
+        println!(
+            "{:<40} {:<24} {}",
+            escape(d.id()),
+            escape(d.display_name()),
+            rssi
+        );
     }
 
     if !save {
         println!("\nSave default:  thermark scan --save");
-        println!("  or:           thermark config set -a \"<full advertising name>\"");
-        println!("Then:          thermark info   (exact name; add --fuzzy only if needed)");
+        println!("  or:           thermark config set -a \"id:<platform ID>\"");
+        println!(
+            "Then:          thermark info   (saved platform ID; names are not authentication)"
+        );
         return Ok(());
     }
 
     let pick = pick_scan_device(&devices, prefer_name)
-        .ok_or_else(|| anyhow::anyhow!("no device matched for --save"))?;
-    // Prefer the advertising name; fall back to the peripheral id (macOS UUID).
-    let addr = pick
-        .candidate
-        .name
-        .clone()
-        .unwrap_or_else(|| pick.candidate.id.clone());
+        .ok_or_else(|| anyhow::anyhow!("--save needs one unique device; use --name with an exact name or ID from the scan (signal strength is not identity)"))?;
+    // Persist the platform ID, never the unauthenticated advertising name.
+    let addr = format!("id:{}", pick.id());
     let mut cfg = Config::load()?;
     cfg.apply_update(Some(&addr), Some(ConnPref::Ble), None, None, None)?;
     let path = cfg.save()?;
-    println!("\nsaved default printer → {addr}");
+    println!("\nsaved default printer → {}", escape(&addr));
     println!("  file: {}", path.display());
     println!("Next: thermark doctor --use-config");
     println!("      thermark info");
@@ -141,32 +153,23 @@ pub async fn scan(_seconds: u64, _save: bool, _prefer_name: Option<&str>) -> Res
     anyhow::bail!("this thermark binary was built without Bluetooth support")
 }
 
-/// Choose a device for `--save`: name substring, else printer-like name, else strongest signal.
+/// Save only an unambiguous selection; signal strength is not identity.
 #[cfg(feature = "ble")]
 pub fn pick_scan_device<'a>(
     devices: &'a [BleDeviceInfo],
     prefer_name: Option<&str>,
 ) -> Option<&'a BleDeviceInfo> {
-    if let Some(want) = prefer_name.map(|s| s.to_ascii_lowercase()) {
-        let hit = devices.iter().find(|d| {
-            d.display_name().to_ascii_lowercase().contains(&want)
-                || d.id().to_ascii_lowercase().contains(&want)
-        });
-        if hit.is_some() {
-            return hit;
-        }
-    }
-    devices.iter().max_by_key(|d| {
-        // Printer-like names outrank raw signal; unnamed devices rank last.
-        let name_bonus = if d.candidate.looks_like_label_printer() {
-            1000
-        } else if d.candidate.name.is_none() {
-            -200
-        } else {
-            0
-        };
-        name_bonus + i32::from(d.rssi.unwrap_or(-100))
-    })
+    let mut matches = devices.iter().filter(|device| match prefer_name {
+        Some(selector) => thermark::transport::score_ble_candidate(
+            selector,
+            &device.candidate,
+            thermark::transport::BleMatchMode::Exact,
+        )
+        .is_some(),
+        None => true,
+    });
+    let pick = matches.next()?;
+    matches.next().is_none().then_some(pick)
 }
 
 #[cfg(feature = "serial")]
@@ -298,6 +301,22 @@ mod report_tests {
     use super::*;
 
     #[test]
+    fn human_identity_escapes_controls_without_changing_json_data() {
+        let raw = "5.18\x1b]52;c;value\x07\u{202e}";
+        let identity = thermark::PrinterIdentity {
+            model_id: 4096,
+            protocol_version: Some(5),
+            firmware: Some(raw.into()),
+            hardware: Some(raw.into()),
+        };
+        let report =
+            PrinterReport::new(&identity, thermark::profile_for_model(thermark::Model::B1));
+        assert!(!report.to_string().contains('\x1b'));
+        assert!(!report.to_string().contains('\u{202e}'));
+        assert_eq!(serde_json::to_value(&report).unwrap()["firmware"], raw);
+    }
+
+    #[test]
     fn b1_report_is_monochrome_and_machine_readable() {
         let identity = thermark::PrinterIdentity {
             model_id: 4096,
@@ -333,36 +352,27 @@ mod tests {
     }
 
     #[test]
-    fn prefers_printer_name_over_stronger_rssi() {
-        let devices = vec![dev(Some("random-watch"), -40), dev(Some("B1-ABC"), -80)];
-        assert_eq!(
-            pick_scan_device(&devices, None).unwrap().display_name(),
-            "B1-ABC"
-        );
-    }
-
-    #[test]
-    fn name_filter_wins() {
+    fn multiple_devices_need_an_exact_unique_selection() {
         let devices = vec![dev(Some("B1-One"), -50), dev(Some("B1-Two"), -40)];
+        assert!(pick_scan_device(&devices, None).is_none());
+        assert!(pick_scan_device(&devices, Some("two")).is_none());
+        assert!(pick_scan_device(&devices, Some("missing")).is_none());
         assert_eq!(
-            pick_scan_device(&devices, Some("two"))
+            pick_scan_device(&devices, Some("B1-Two"))
                 .unwrap()
                 .display_name(),
             "B1-Two"
         );
     }
-
     #[test]
-    fn unnamed_device_ranks_last() {
-        let devices = vec![dev(None, -30), dev(Some("B1-Far"), -90)];
-        assert_eq!(
-            pick_scan_device(&devices, None).unwrap().display_name(),
-            "B1-Far"
-        );
+    fn duplicate_names_are_not_silently_ranked_by_signal() {
+        let devices = vec![dev(Some("B1-One"), -50), dev(Some("B1-One"), -40)];
+        assert!(pick_scan_device(&devices, Some("B1-One")).is_none());
     }
-
     #[test]
-    fn empty_scan_has_no_pick() {
+    fn singleton_and_empty_scans() {
+        let devices = vec![dev(Some("B1-One"), -50)];
+        assert!(pick_scan_device(&devices, None).is_some());
         assert!(pick_scan_device(&[], None).is_none());
     }
 }

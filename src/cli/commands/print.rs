@@ -77,8 +77,7 @@ pub async fn print(cfg: &Config, args: PrintCommand) -> Result<()> {
             opts.threshold.get(),
             opts.dither,
         )?;
-        visible
-            .save(&out)
+        thermark::output::save_gray(&visible, &out)
             .with_context(|| format!("save {}", out.display()))?;
         println!("preview written to {} (nothing printed)", out.display());
         return Ok(());

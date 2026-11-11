@@ -148,7 +148,7 @@ fn prepare_rows(
         .with_context(|| format!("render CSV data row {}", index + 1))?;
         let row = index as u32 + 1;
         let path = staging.path().join(format!("label-{row:05}.png"));
-        gray.save(&path)?;
+        crate::output::save_gray(&gray, &path)?;
         File::open(&path)?.sync_all()?;
         pages.push(Page {
             row,
