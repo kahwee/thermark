@@ -1699,6 +1699,7 @@ dependencies = [
  "harfrust",
  "hex",
  "image",
+ "libc",
  "predicates",
  "proptest",
  "qrcode",

@@ -5,6 +5,10 @@ use btleplug::api::{
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::stream::StreamExt;
 use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::runtime::RuntimeFlavor;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep, sleep_until, timeout, timeout_at};
@@ -22,7 +26,8 @@ pub struct BleTransport {
     /// Acknowledged when the characteristic allows it — see
     /// [`choose_write_type`].
     write_type: WriteType,
-    rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    rx: mpsc::Receiver<Vec<u8>>,
+    notification_failed: Arc<AtomicBool>,
     notify_task: Option<tokio::task::JoinHandle<()>>,
     /// True after explicit or Drop-time teardown (avoids double disconnect).
     closed: bool,
@@ -71,7 +76,13 @@ impl BleDeviceInfo {
 /// arrives. Names (even exact ones) need the complete scan window so a second
 /// printer with the same advertising name still produces an ambiguity error.
 fn can_finish_connect_scan(selector: &str, candidate: &BleCandidate, mode: BleMatchMode) -> bool {
-    mode == BleMatchMode::Exact && candidate.id.eq_ignore_ascii_case(selector.trim())
+    (mode == BleMatchMode::Exact || selector.trim().starts_with("id:"))
+        && candidate.id.eq_ignore_ascii_case(
+            selector
+                .trim()
+                .strip_prefix("id:")
+                .unwrap_or(selector.trim()),
+        )
 }
 
 async fn wait_for_exact_match(
@@ -172,6 +183,11 @@ impl BleTransport {
         scan_for: Duration,
         mode: BleMatchMode,
     ) -> Result<Self> {
+        if !selector.trim().starts_with("id:") {
+            tracing::warn!(
+                "BLE name/raw-ID selection is not authenticated; use scan --save to pin a platform ID before printing sensitive labels"
+            );
+        }
         let adapter = default_adapter().await?;
         let mut events = if mode == BleMatchMode::Exact {
             match adapter.events().await {
@@ -247,7 +263,7 @@ impl BleTransport {
         };
 
         info!(
-            name = %winner.display_name(),
+            name = %crate::terminal::escape(winner.display_name()),
             id = %peripheral.id(),
             ?mode,
             "connecting"
@@ -285,7 +301,8 @@ impl BleTransport {
             Err(error) => return Err(error),
         };
 
-        let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(MAX_QUEUED_NOTIFICATIONS);
+        let notification_failed = Arc::new(AtomicBool::new(false));
         if let Err(e) = with_timeout("BLE subscribe", IO_TIMEOUT, async {
             peripheral
                 .subscribe(&characteristic)
@@ -308,9 +325,21 @@ impl BleTransport {
             Ok(notifications) => notifications,
             Err(e) => return Err(Error::transport(format!("notifications stream: {e}"))),
         };
+        let failed = Arc::clone(&notification_failed);
+        let notify_peripheral = peripheral.clone();
         let notify_task = tokio::spawn(async move {
             while let Some(n) = notif.next().await {
-                let _ = tx.send(n.value);
+                if !is_printer_notification(&n) {
+                    continue;
+                }
+                if !queue_notification(&tx, n.value) {
+                    // Do not await capacity: btleplug has its own upstream queue.
+                    // Drop that stream and fail closed instead of moving the backlog.
+                    failed.store(true, Ordering::Release);
+                    drop(notif);
+                    let _ = timeout(IO_TIMEOUT, notify_peripheral.disconnect()).await;
+                    break;
+                }
             }
         });
 
@@ -319,6 +348,7 @@ impl BleTransport {
             write_type: choose_write_type(&characteristic),
             characteristic,
             rx,
+            notification_failed,
             notify_task: Some(notify_task),
             closed: false,
         };
@@ -371,9 +401,19 @@ impl Drop for BleTransport {
 
 impl Transport for BleTransport {
     async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
+        if self.notification_failed.load(Ordering::Acquire) {
+            return Err(Error::transport(
+                "BLE notification limit exceeded; refusing further writes",
+            ));
+        }
         const CHUNK: usize = 180;
         with_timeout("BLE write", IO_TIMEOUT, async {
             for chunk in data.chunks(CHUNK) {
+                if self.notification_failed.load(Ordering::Acquire) {
+                    return Err(Error::transport(
+                        "BLE notification limit exceeded; refusing further writes",
+                    ));
+                }
                 self.peripheral
                     .write(&self.characteristic, chunk, self.write_type)
                     .await
@@ -386,26 +426,24 @@ impl Transport for BleTransport {
     }
 
     async fn recv_raw(&mut self, wait: Duration) -> Result<Vec<u8>> {
-        if let Ok(first) = self.rx.try_recv() {
-            let mut bytes = first;
-            while let Ok(chunk) = self.rx.try_recv() {
-                bytes.extend_from_slice(&chunk);
-            }
-            debug!(bytes = %hex::encode(&bytes), "RX bytes");
-            return Ok(bytes);
+        if self.notification_failed.load(Ordering::Acquire) {
+            return Err(Error::transport(
+                "BLE notification size or queue limit exceeded; connection closed",
+            ));
         }
-        match timeout(wait, self.rx.recv()).await {
-            Ok(Some(chunk)) => {
-                let mut bytes = chunk;
-                while let Ok(chunk) = self.rx.try_recv() {
-                    bytes.extend_from_slice(&chunk);
-                }
-                debug!(bytes = %hex::encode(&bytes), "RX bytes");
-                Ok(bytes)
-            }
+        // Return a single bounded fragment. The packet decoder already handles
+        // fragmentation; draining a concurrently replenished queue is unbounded.
+        let result = match timeout(wait, self.rx.recv()).await {
+            Ok(Some(bytes)) => Ok(bytes),
             Ok(None) => Err(Error::transport("BLE notification channel closed")),
             Err(_) => Ok(Vec::new()),
+        };
+        if self.notification_failed.load(Ordering::Acquire) {
+            return Err(Error::transport(
+                "BLE notification size or queue limit exceeded; connection closed",
+            ));
         }
+        result
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -484,10 +522,30 @@ pub async fn bluetooth_available() -> Result<String> {
     Ok(name)
 }
 
+// ATT attribute values are at most 512 bytes. Bound both elements and bytes.
+const MAX_NOTIFICATION_BYTES: usize = 512;
+const MAX_QUEUED_NOTIFICATIONS: usize = 64;
+
+fn is_printer_notification(n: &btleplug::api::ValueNotification) -> bool {
+    n.uuid == PRINTER_CHAR && n.service_uuid == PRINTER_SERVICE && !n.value.is_empty()
+}
+
+fn queue_notification(tx: &mpsc::Sender<Vec<u8>>, bytes: Vec<u8>) -> bool {
+    bytes.len() <= MAX_NOTIFICATION_BYTES && tx.try_send(bytes).is_ok()
+}
+
+fn is_printer_char(c: &Characteristic) -> bool {
+    use btleplug::api::CharPropFlags;
+    c.uuid == PRINTER_CHAR
+        && c.service_uuid == PRINTER_SERVICE
+        && c.properties
+            .contains(CharPropFlags::NOTIFY | CharPropFlags::WRITE_WITHOUT_RESPONSE)
+}
+
 fn find_printer_char(peripheral: &Peripheral) -> Result<Characteristic> {
     let chars = peripheral.characteristics();
 
-    if let Some(c) = chars.iter().find(|c| c.uuid == PRINTER_CHAR) {
+    if let Some(c) = chars.iter().find(|c| is_printer_char(c)) {
         return Ok(c.clone());
     }
 
@@ -539,5 +597,59 @@ mod discovery_tests {
             &candidate,
             BleMatchMode::Fuzzy
         ));
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+    #[test]
+    fn notification_requires_the_exact_service_and_characteristic() {
+        let mut n = btleplug::api::ValueNotification {
+            uuid: PRINTER_CHAR,
+            service_uuid: PRINTER_SERVICE,
+            value: vec![1],
+        };
+        assert!(is_printer_notification(&n));
+        n.service_uuid = Uuid::nil();
+        assert!(!is_printer_notification(&n));
+        n.service_uuid = PRINTER_SERVICE;
+        n.uuid = Uuid::nil();
+        assert!(!is_printer_notification(&n));
+        n.uuid = PRINTER_CHAR;
+        n.value.clear();
+        assert!(!is_printer_notification(&n));
+    }
+    #[test]
+    fn queue_caps_bytes_and_count_without_waiting() {
+        let (tx, mut rx) = mpsc::channel(MAX_QUEUED_NOTIFICATIONS);
+        assert!(!queue_notification(
+            &tx,
+            vec![0; MAX_NOTIFICATION_BYTES + 1]
+        ));
+        for _ in 0..MAX_QUEUED_NOTIFICATIONS {
+            assert!(queue_notification(&tx, vec![0; MAX_NOTIFICATION_BYTES]));
+        }
+        assert!(!queue_notification(&tx, vec![0]));
+        assert_eq!(rx.try_recv().unwrap().len(), MAX_NOTIFICATION_BYTES);
+        assert!(queue_notification(&tx, vec![1]));
+        drop(rx);
+        assert!(!queue_notification(&tx, vec![1]));
+    }
+    #[test]
+    fn characteristic_requires_service_and_supported_properties() {
+        use btleplug::api::CharPropFlags;
+        let mut c = Characteristic {
+            uuid: PRINTER_CHAR,
+            service_uuid: PRINTER_SERVICE,
+            properties: CharPropFlags::NOTIFY | CharPropFlags::WRITE_WITHOUT_RESPONSE,
+            descriptors: Default::default(),
+        };
+        assert!(is_printer_char(&c));
+        c.service_uuid = Uuid::nil();
+        assert!(!is_printer_char(&c));
+        c.service_uuid = PRINTER_SERVICE;
+        c.properties = CharPropFlags::READ;
+        assert!(!is_printer_char(&c));
     }
 }

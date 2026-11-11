@@ -10,6 +10,22 @@ use tracing::{debug, info};
 pub const MIN_FONT_PX: f32 = 10.0;
 pub const MAX_FONT_PX: f32 = 72.0;
 
+/// Maximum UTF-8 bytes in a label text block, checked before shaping/layout.
+/// This bounds work even for combining marks and zero-advance glyphs.
+pub const MAX_TEXT_BYTES: usize = 4096;
+
+// Charge text measurements across the entire auto-fit search, not
+// per size or line. This bounds repeated shaping of growing zero-width runs.
+pub(crate) const MAX_SHAPING_WORK: usize = 128 * 1024;
+
+fn simple_latin(text: &str) -> bool {
+    use unicode_script::UnicodeScript;
+    text.chars().all(|ch| {
+        matches!(ch.script(), unicode_script::Script::Latin | unicode_script::Script::Common)
+            && !matches!(ch, '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    })
+}
+
 /// Validate an explicit font size before layout. Rendering retains its
 /// historical 6..=96 px clamp for finite, positive requests.
 pub fn validate_font_size(size: f32) -> Result<f32> {
@@ -109,7 +125,7 @@ impl LabelFont {
 
     /// Load a face from a `.ttf`/`.otf` or a face `index` inside a `.ttc` collection.
     pub fn load_index(path: &Path, index: u32) -> Result<Self> {
-        let data = std::fs::read(path)
+        let data = crate::input::read_file(path, crate::input::MAX_FONT_BYTES)
             .map_err(|e| Error::font(format!("read font {}: {e}", path.display())))?;
         FontRef::try_from_slice_and_index(&data, index).map_err(|e| {
             Error::font(format!(
@@ -223,6 +239,11 @@ impl LabelFont {
 
     /// Reject missing characters before any pixels are drawn.
     pub fn validate_text(&self, text: &str) -> Result<()> {
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(Error::font(format!(
+                "label text exceeds {MAX_TEXT_BYTES} UTF-8 bytes"
+            )));
+        }
         let font = self.font();
         for ch in text.chars().filter(|c| !c.is_whitespace() && !matches!(*c,'\u{200c}'|'\u{200d}'|'\u{200e}'|'\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}')) {
             if font.glyph_id(ch).0==0 { return Err(Error::font(format!("font has no glyph for U+{:04X}; choose --font with coverage for this text",ch as u32))); }
@@ -241,8 +262,7 @@ impl LabelFont {
         let mut glyphs = Vec::new();
         let mut caret = 0.0f32;
         use unicode_script::UnicodeScript;
-        let simple_latin=text.chars().all(|ch|matches!(ch.script(),unicode_script::Script::Latin|unicode_script::Script::Common) && !matches!(ch,'\u{200c}'..='\u{200f}'|'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}'));
-        if simple_latin {
+        if simple_latin(text) {
             let sf = font.as_scaled(scale);
             for ch in text.chars() {
                 let id = font.glyph_id(ch);
@@ -466,7 +486,45 @@ impl LabelFont {
     }
 
     /// Wrap text to fit max_width_px.
+    ///
+    /// Inputs beyond [`MAX_TEXT_BYTES`] are returned unchanged as one unwrapped
+    /// string, as are inputs exceeding the cumulative shaping work budget.
+    /// Use [`Self::try_wrap`] for an explicit error. Label renderers use the
+    /// fallible helpers. This infallible helper never truncates text.
     pub fn wrap(&self, text: &str, max_width_px: u32, px_height: f32) -> Vec<String> {
+        self.try_wrap(text, max_width_px, px_height)
+            .unwrap_or_else(|_| vec![text.to_owned()])
+    }
+
+    /// Fallible wrapping with a finite cumulative text-measurement budget.
+    pub fn try_wrap(&self, text: &str, max_width_px: u32, px_height: f32) -> Result<Vec<String>> {
+        let mut budget = MAX_SHAPING_WORK;
+        self.wrap_budgeted(text, max_width_px, px_height, &mut budget)
+    }
+
+    fn measure_budgeted(&self, text: &str, px_height: f32, budget: &mut usize) -> Result<u32> {
+        // Charge every measured prefix, including Latin/Common prefixes of a
+        // complex word. Otherwise zero-width prefixes evade the shaping budget.
+        *budget = budget.checked_sub(text.len()).ok_or_else(|| {
+            Error::font(
+                "text layout exceeds shaping work limit; shorten the text or split long tokens",
+            )
+        })?;
+        Ok(self.text_width(text, px_height))
+    }
+
+    pub(crate) fn wrap_budgeted(
+        &self,
+        text: &str,
+        max_width_px: u32,
+        px_height: f32,
+        budget: &mut usize,
+    ) -> Result<Vec<String>> {
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(Error::font(format!(
+                "label text exceeds {MAX_TEXT_BYTES} UTF-8 bytes"
+            )));
+        }
         let mut lines = Vec::new();
         for paragraph in text.split('\n') {
             if paragraph.is_empty() {
@@ -480,20 +538,49 @@ impl LabelFont {
                 } else {
                     format!("{current} {word}")
                 };
-                if self.text_width(&trial, px_height) <= max_width_px {
+                if self.measure_budgeted(&trial, px_height, budget)? <= max_width_px {
                     current = trial;
                 } else {
                     if !current.is_empty() {
                         lines.push(std::mem::take(&mut current));
                     }
-                    if self.text_width(word, px_height) <= max_width_px {
+                    if self.measure_budgeted(word, px_height, budget)? <= max_width_px {
                         current = word.to_string();
+                    } else if simple_latin(word) {
+                        // Simple Latin/Common layout is additive (no kerning/shaping). Keep
+                        // exactly the same f32 addition order as layout, but
+                        // avoid copying and measuring every growing prefix.
+                        let font = self.font();
+                        let scaled = font.as_scaled(PxScale::from(px_height));
+                        let mut buf = String::new();
+                        let mut advance = 0.0f32;
+                        for grapheme in
+                            unicode_segmentation::UnicodeSegmentation::graphemes(word, true)
+                        {
+                            let extend = |start| {
+                                grapheme.chars().fold(start, |width, ch| {
+                                    width + scaled.h_advance(font.glyph_id(ch))
+                                })
+                            };
+                            let next = extend(advance);
+                            if next.ceil().max(0.0) as u32 <= max_width_px {
+                                buf.push_str(grapheme);
+                                advance = next;
+                            } else {
+                                if !buf.is_empty() {
+                                    lines.push(std::mem::take(&mut buf));
+                                }
+                                buf.push_str(grapheme);
+                                advance = extend(0.0);
+                            }
+                        }
+                        current = buf;
                     } else {
                         // hard-break very long tokens
                         let mut buf = String::new();
                         for ch in unicode_segmentation::UnicodeSegmentation::graphemes(word, true) {
                             let t = format!("{buf}{ch}");
-                            if self.text_width(&t, px_height) <= max_width_px {
+                            if self.measure_budgeted(&t, px_height, budget)? <= max_width_px {
                                 buf = t;
                             } else {
                                 if !buf.is_empty() {
@@ -510,7 +597,7 @@ impl LabelFont {
                 lines.push(current);
             }
         }
-        lines
+        Ok(lines)
     }
 
     /// Pick the largest px height that fits all lines in the box.
@@ -521,32 +608,64 @@ impl LabelFont {
     /// smaller one. Only when even [`MIN_FONT_PX`] cannot hold the longest
     /// word does splitting become acceptable.
     pub fn fit_size(&self, text: &str, max_w: u32, max_h: u32) -> f32 {
-        let lo = MIN_FONT_PX as u32;
-        let hi = MAX_FONT_PX as u32;
-        for require_whole_words in [true, false] {
-            for size in (lo..=hi).rev() {
-                let ph = size as f32;
-                if !self.fits(text, max_w, max_h, ph) {
-                    continue;
-                }
-                if !require_whole_words || self.longest_word_width(text, ph) <= max_w {
-                    return ph;
-                }
-            }
-        }
-        MIN_FONT_PX
+        self.try_fit_size(text, max_w, max_h).unwrap_or(MIN_FONT_PX)
     }
 
-    /// Whether `text` wraps into `max_w` x `max_h` at this size.
+    /// Auto-fit with one cumulative text-measurement budget across sizes.
+    pub fn try_fit_size(&self, text: &str, max_w: u32, max_h: u32) -> Result<f32> {
+        let mut budget = MAX_SHAPING_WORK;
+        self.fit_size_budgeted(text, max_w, max_h, &mut budget)
+    }
+
+    pub(crate) fn fit_size_budgeted(
+        &self,
+        text: &str,
+        max_w: u32,
+        max_h: u32,
+        budget: &mut usize,
+    ) -> Result<f32> {
+        let lo = MIN_FONT_PX as u32;
+        let hi = MAX_FONT_PX as u32;
+        let mut largest_split_fit = None;
+        for size in (lo..=hi).rev() {
+            let ph = size as f32;
+            if !self.fits_budgeted(text, max_w, max_h, ph, budget)? {
+                continue;
+            }
+            largest_split_fit.get_or_insert(ph);
+            let mut widest_word = 0;
+            for word in text.split_whitespace() {
+                widest_word = widest_word.max(self.measure_budgeted(word, ph, budget)?);
+            }
+            if widest_word <= max_w {
+                return Ok(ph);
+            }
+        }
+        Ok(largest_split_fit.unwrap_or(MIN_FONT_PX))
+    }
+
+    /// Whether text fits, returning false if the shaping work limit is exceeded.
     pub fn fits(&self, text: &str, max_w: u32, max_h: u32, px_height: f32) -> bool {
-        let lines = self.wrap(text, max_w, px_height);
-        let need = lines.len() as u32 * (self.text_height(px_height) + 2);
-        let widest = lines
-            .iter()
-            .map(|l| self.text_width(l, px_height))
-            .max()
-            .unwrap_or(0);
-        need <= max_h && widest <= max_w
+        let mut budget = MAX_SHAPING_WORK;
+        self.fits_budgeted(text, max_w, max_h, px_height, &mut budget)
+            .unwrap_or(false)
+    }
+
+    fn fits_budgeted(
+        &self,
+        text: &str,
+        max_w: u32,
+        max_h: u32,
+        px_height: f32,
+        budget: &mut usize,
+    ) -> Result<bool> {
+        let lines = self.wrap_budgeted(text, max_w, px_height, budget)?;
+        let need = (lines.len() as u64) * (u64::from(self.text_height(px_height)) + 2);
+        let mut widest = 0;
+        for line in &lines {
+            widest = widest.max(self.measure_budgeted(line, px_height, budget)?);
+        }
+        Ok(need <= u64::from(max_h) && widest <= max_w)
     }
 
     /// Width of the widest whitespace-delimited word at this size.

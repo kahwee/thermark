@@ -50,7 +50,7 @@ fn show(json: bool) -> Result<()> {
     if cfg.is_empty() && !path.exists() {
         println!("(no config file yet)");
         println!("Save a printer: thermark scan --save");
-        println!("  or:            thermark config set -a \"B1-YourPrinter\" -m b1");
+        println!("  or:            thermark config set -a \"id:<platform ID>\" -m b1");
         return Ok(());
     }
     // field, value, what applies when unset

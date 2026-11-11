@@ -42,7 +42,7 @@ struct RenderedOutput<'a> {
 
 fn save_rendered(gray: &GrayImage, path: Option<&PathBuf>) -> Result<()> {
     if let Some(png_path) = path {
-        gray.save(png_path)
+        thermark::output::save_gray(gray, png_path)
             .with_context(|| format!("save {}", png_path.display()))?;
         println!("saved {}", png_path.display());
     }

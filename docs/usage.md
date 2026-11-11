@@ -16,6 +16,11 @@ It resets registration measurements when changing printers. Pass `--addr` for
 an exact name/id; setup rejects `--fuzzy`. Without `--label`, setup prompts for
 media size. Noninteractive setup needs both `--addr` and `--label`.
 
+Setup and `scan --save` pin the platform ID. Old saved name/ID selectors need
+reenrollment; explicit name selection is still unauthenticated. With multiple
+scan results use `scan --save --name '<exact unique name or ID>'`. See
+[security boundaries](security.md) for BLE trust, input limits and private saves.
+
 Use your actual media size. Once configured:
 
 ```sh

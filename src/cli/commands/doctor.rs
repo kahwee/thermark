@@ -21,7 +21,9 @@ pub async fn run(cfg: &Config, args: DoctorCommand) -> Result<i32> {
     // Host-only by default; -a or --use-config enables connect + sensors.
     let addr = match addr {
         Some(a) => Some(a),
-        None if use_config => Some(cfg.resolve_addr(None)?),
+        None if use_config => {
+            Some(cfg.resolve_connection_addr(None, cfg.resolve_connection(conn))?)
+        }
         None => None,
     };
 

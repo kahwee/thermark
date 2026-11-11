@@ -10,6 +10,26 @@ such change is listed under **Changed** with the old and new spelling.
 
 ## [Unreleased]
 
+### Security
+
+- Pin saved BLE printers to platform IDs and require unambiguous enrollment;
+  old saved selectors require reenrollment. Validate the printer service and
+  required characteristic properties. Platform IDs are not authentication.
+- Bound BLE notification bytes and queues, disconnect on overflow, and escape
+  terminal controls and bidi formatting in peer-controlled human output.
+- Bound font/image reads, check image dimensions and decoding memory before
+  allocation, and cap label text at 4,096 UTF-8 bytes with linear Latin/Common
+  wrapping and a cumulative complex-shaping work budget.
+- Save images through private atomic replacements without following destination
+  symlinks; Unix output files are mode 0600.
+- Verify release-specific rustup installer checksums and pin the runner toolchain.
+  See [security boundaries and migration](docs/security.md).
+
+### Fixed
+
+- Report unavailable Linux serial enumeration instead of panicking on hosts
+  without `/sys/class/tty`, including restricted containers.
+
 ### Changed
 
 - Refresh compatible locked dependencies, including Unicode script data 0.5.9

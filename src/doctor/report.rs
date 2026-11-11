@@ -80,8 +80,8 @@ impl fmt::Display for Check {
             f,
             "[{:<4}] {:<22} {}",
             self.status.icon(),
-            self.name,
-            self.detail
+            crate::terminal::escape(&self.name),
+            crate::terminal::escape(&self.detail)
         )
     }
 }

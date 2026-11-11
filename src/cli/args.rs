@@ -36,7 +36,7 @@ pub struct ConnArgs {
     #[arg(short = 'c', long, value_enum)]
     pub conn: Option<ConnPref>,
     /// BLE advertising name or peripheral id (exact match), or serial path
-    /// (default: config / THERMARK_ADDR). Use the full name from `thermark scan`.
+    /// (default: config / THERMARK_ADDR). Prefer id:<platform ID> from `thermark scan`; names are not authenticated.
     #[arg(short, long)]
     pub addr: Option<String>,
     /// BLE scan time before connect (seconds; default: config or 4)
@@ -78,7 +78,8 @@ impl ConnArgs {
     pub fn resolve(&self, cfg: &Config) -> Result<ResolvedConn> {
         Ok(ResolvedConn {
             conn: cfg.resolve_connection(self.conn),
-            addr: cfg.resolve_addr(self.addr.as_deref())?,
+            addr: cfg
+                .resolve_connection_addr(self.addr.as_deref(), cfg.resolve_connection(self.conn))?,
             scan_secs: cfg.resolve_scan_secs(self.scan_secs),
             match_mode: BleMatchMode::from_fuzzy(self.fuzzy),
             pacing: match std::env::var("THERMARK_SLOW") {
@@ -359,10 +360,10 @@ pub enum Commands {
         /// How long to scan (seconds)
         #[arg(short, long, default_value_t = 5, value_parser = parse_scan_seconds)]
         seconds: u64,
-        /// Save the best match into config.json as the default printer
+        /// Save one unambiguous device by platform ID as the default printer
         #[arg(long, default_value_t = false)]
         save: bool,
-        /// When saving, prefer a device whose name contains this (case-insensitive)
+        /// When saving, select an exact unique device name or platform ID
         #[arg(long)]
         name: Option<String>,
     },

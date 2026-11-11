@@ -141,7 +141,7 @@ pub fn encode_path(
     threshold: u8,
     dither: bool,
 ) -> Result<Raster> {
-    let img = image::open(path).map_err(Error::from)?;
+    let img = crate::input::open_image(path)?;
     encode(img, max_width, threshold, dither)
 }
 

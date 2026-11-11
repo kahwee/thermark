@@ -33,10 +33,24 @@ impl SerialTransport {
     }
 
     pub fn list_ports() -> Result<Vec<String>> {
+        // serialport's Linux sysfs fallback panics rather than returning an
+        // error when this directory is absent (common in containers). Surface
+        // a diagnostic failure while preserving explicit serial-path access.
+        #[cfg(target_os = "linux")]
+        check_serial_sysfs(std::path::Path::new("/sys/class/tty"))?;
         let ports = serialport::available_ports()
             .map_err(|error| Error::transport(format!("list serial ports: {error}")))?;
         Ok(ports.into_iter().map(|port| port.port_name).collect())
     }
+}
+
+#[cfg(target_os = "linux")]
+fn check_serial_sysfs(path: &std::path::Path) -> Result<()> {
+    std::fs::read_dir(path).map(|_| ()).map_err(|error| {
+        Error::transport(format!(
+            "serial enumeration requires readable Linux sysfs: {error}"
+        ))
+    })
 }
 
 impl Transport for SerialTransport {
@@ -186,5 +200,19 @@ mod tests {
         let mut bytes = [0; 3];
         peer.read_exact(&mut bytes).await.unwrap();
         assert_eq!(bytes, [1, 2, 3]);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod enumeration_tests {
+    use super::*;
+    #[test]
+    fn absent_or_non_directory_sysfs_is_an_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(check_serial_sysfs(dir.path()).is_ok());
+        assert!(check_serial_sysfs(&dir.path().join("missing")).is_err());
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"").unwrap();
+        assert!(check_serial_sysfs(&file).is_err());
     }
 }

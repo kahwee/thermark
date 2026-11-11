@@ -339,7 +339,7 @@ impl Config {
         }
         Err(Error::msg(
             "no printer address: pass -a \"B1-YourPrinter\" (full name), set THERMARK_ADDR, \
-             or: thermark scan --save / thermark config set -a \"B1-YourPrinter\"",
+             or: thermark scan --save / thermark config set -a \"id:<platform ID>\"",
         ))
     }
 
@@ -350,6 +350,40 @@ impl Config {
     pub fn resolve_addr(&self, cli_addr: Option<&str>) -> Result<String> {
         let env = std::env::var("THERMARK_ADDR").ok();
         self.resolve_addr_with(cli_addr, env.as_deref())
+    }
+
+    /// Resolve a connection target without silently trusting legacy saved BLE names.
+    /// Explicit CLI/environment selectors remain available for discovery; saved
+    /// defaults must use the `id:` selector produced by scan/setup.
+    pub fn resolve_connection_addr_with(
+        &self,
+        cli: Option<&str>,
+        env: Option<&str>,
+        connection: ConnPref,
+    ) -> Result<String> {
+        let addr = self.resolve_addr_with(cli, env)?;
+        if connection == ConnPref::Ble
+            && Self::nonempty(cli).is_none()
+            && Self::nonempty(env).is_none()
+            && !addr.starts_with("id:")
+        {
+            return Err(Error::msg(
+                "saved BLE printer is not pinned to a platform ID; run `thermark scan --save` (use --name with an exact ID if several devices appear), or rerun `thermark setup`. Names and signal strength do not authenticate a printer",
+            ));
+        }
+        Ok(addr)
+    }
+
+    pub fn resolve_connection_addr(
+        &self,
+        cli: Option<&str>,
+        connection: ConnPref,
+    ) -> Result<String> {
+        self.resolve_connection_addr_with(
+            cli,
+            std::env::var("THERMARK_ADDR").ok().as_deref(),
+            connection,
+        )
     }
 
     /// Prefer CLI connection when provided; else config; else BLE.
@@ -678,5 +712,41 @@ mod tests {
         let s = cfg.to_json_pretty().unwrap();
         let back = Config::parse_json(&s).unwrap();
         assert_eq!(back, cfg);
+    }
+}
+
+#[cfg(test)]
+mod saved_ble_identity_tests {
+    use super::*;
+    #[test]
+    fn legacy_saved_names_require_reenrollment_but_usb_is_unchanged() {
+        let mut cfg = Config {
+            addr: Some("B1-Saved".into()),
+            ..Default::default()
+        };
+        assert!(
+            cfg.resolve_connection_addr_with(None, None, ConnPref::Ble)
+                .is_err()
+        );
+        assert_eq!(
+            cfg.resolve_connection_addr_with(Some("B1-Explicit"), None, ConnPref::Ble)
+                .unwrap(),
+            "B1-Explicit"
+        );
+        assert!(
+            cfg.resolve_connection_addr_with(None, Some("B1-Explicit"), ConnPref::Ble)
+                .is_ok()
+        );
+        assert_eq!(
+            cfg.resolve_connection_addr_with(None, None, ConnPref::Usb)
+                .unwrap(),
+            "B1-Saved"
+        );
+        cfg.addr = Some("id:platform-id".into());
+        assert_eq!(
+            cfg.resolve_connection_addr_with(None, None, ConnPref::Ble)
+                .unwrap(),
+            "id:platform-id"
+        );
     }
 }
