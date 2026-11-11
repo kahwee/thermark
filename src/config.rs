@@ -148,8 +148,8 @@ impl Config {
 
     /// Load from an explicit path. Missing file → empty config.
     pub fn load_from(path: &Path) -> Result<Self> {
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
+        let bytes = match crate::input::read_file(path, 1024 * 1024) {
+            Ok(bytes) => bytes,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::default()),
             Err(error) => {
                 return Err(Error::msg(format!(
@@ -158,7 +158,9 @@ impl Config {
                 )));
             }
         };
-        Self::parse_json(&text)
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|e| Error::msg(format!("read config {}: {e}", path.display())))?;
+        Self::parse_json(text)
             .map_err(|e| Error::msg(format!("parse config {}: {e}", path.display())))
     }
 

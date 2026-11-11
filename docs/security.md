@@ -36,7 +36,9 @@ These are application-level bounds, not guarantees about the OS Bluetooth stack.
 
 Source fonts and compressed images must be regular files of at most 64 MiB.
 Reads are bounded on the opened handle, including files that grow after their
-metadata is checked. Images are checked before pixel decoding: at most 16,384
+metadata is checked. The same nonblocking regular-file checks protect batch
+CSV/templates and prepared-job reads, with their existing byte limits; config
+files are limited to 1 MiB. Images are checked before pixel decoding: at most 16,384
 pixels per side and 256 MiB of decoded pixel storage, with decoder allocation
 limits as well. Photos may still exceed the printhead and be scaled normally.
 These are per-input budgets, not a cap on total process memory.

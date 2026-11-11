@@ -1,7 +1,6 @@
 use super::*;
 use clap::ValueEnum;
 use serde::Deserialize;
-use std::io::Read;
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -45,13 +44,8 @@ impl Layout {
 }
 
 fn read_limited(path: &Path) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .with_context(|| format!("open {}", path.display()))?
-        .take(MAX_INPUT_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    ensure!(bytes.len() as u64 <= MAX_INPUT_BYTES, "input exceeds 8 MiB");
-    Ok(bytes)
+    crate::input::read_file(path, MAX_INPUT_BYTES)
+        .with_context(|| format!("read {} (input limit 8 MiB)", path.display()))
 }
 
 pub fn load_rows(path: &Path, kind: Option<Kind>) -> Result<Vec<Row>> {
